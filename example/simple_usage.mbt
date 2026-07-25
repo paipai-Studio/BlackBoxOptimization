@@ -92,7 +92,35 @@ fn main {
   println("   评估次数: \{alo_result.evaluations}")
   println("")
 
-  println("13. 比较不同评估预算下的性能:")
+  println("13. 运行麻雀搜索算法 (SSA):")
+  let ssa_config = @lib.make_ssa_config(1000, dim, bounds, 25)
+  let ssa_result = @lib.sparrow_search_algorithm(ssa_config, @lib.sphere_function, rng)
+  println("   最优值: \{ssa_result.best_value}")
+  println("   评估次数: \{ssa_result.evaluations}")
+  println("")
+
+  println("14. 运行哈里斯鹰优化 (HHO):")
+  let hho_config = @lib.make_hho_config(1000, dim, bounds, 25)
+  let hho_result = @lib.harris_hawks_optimization(hho_config, @lib.sphere_function, rng)
+  println("   最优值: \{hho_result.best_value}")
+  println("   评估次数: \{hho_result.evaluations}")
+  println("")
+
+  println("15. 运行花粉传播算法 (FPA):")
+  let fpa_config = @lib.make_fpa_config(1000, dim, bounds, 25)
+  let fpa_result = @lib.flower_pollination_algorithm(fpa_config, @lib.sphere_function, rng)
+  println("   最优值: \{fpa_result.best_value}")
+  println("   评估次数: \{fpa_result.evaluations}")
+  println("")
+
+  println("16. 运行蜻蜓算法 (DA):")
+  let da_config = @lib.make_da_config(1000, dim, bounds, 25)
+  let da_result = @lib.dragonfly_algorithm(da_config, @lib.sphere_function, rng)
+  println("   最优值: \{da_result.best_value}")
+  println("   评估次数: \{da_result.evaluations}")
+  println("")
+
+  println("17. 比较不同评估预算下的性能:")
   let results = @lib.run_benchmark_at_evals(
     @lib.sphere_function,
     "Sphere Function",

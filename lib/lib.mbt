@@ -2569,46 +2569,61 @@ pub fn moth_flame_optimization(config: MFOConfig, f: (Array[Double]) -> Double, 
   }
 
   while evaluations < config.max_evaluations {
-    let num_flames = max_int(1, (n_moths.to_double() - evaluations.to_double() * (n_moths.to_double() / config.max_evaluations.to_double())).to_int())
+    let iter = (evaluations.to_double() / config.max_evaluations.to_double())
+    let num_flames = max_int(1, (n_moths.to_double() * (1.0 - iter)).to_int())
 
-    let sorted_flames: Array[Array[Double]] = []
-    let sorted_values: Array[Double] = []
-    let sorted_indices: Array[Int] = []
+    // Sort flames by fitness (ascending)
+    let sorted_flame_indices: Array[Int] = []
     for i in 0..<flame_values.length() {
-      sorted_indices.push(i)
+      sorted_flame_indices.push(i)
     }
-    for i in 0..<sorted_indices.length() {
-      for j in (i + 1)..<sorted_indices.length() {
-        if flame_values[sorted_indices[j]] < flame_values[sorted_indices[i]] {
-          let temp = sorted_indices[i]
-          sorted_indices[i] = sorted_indices[j]
-          sorted_indices[j] = temp
+    for i in 0..<sorted_flame_indices.length() {
+      for j in (i + 1)..<sorted_flame_indices.length() {
+        if flame_values[sorted_flame_indices[j]] < flame_values[sorted_flame_indices[i]] {
+          let temp = sorted_flame_indices[i]
+          sorted_flame_indices[i] = sorted_flame_indices[j]
+          sorted_flame_indices[j] = temp
         }
       }
     }
-    for i in 0..<sorted_indices.length() {
-      sorted_flames.push(flames[sorted_indices[i]])
-      sorted_values.push(flame_values[sorted_indices[i]])
+
+    // Sort moths by fitness
+    let sorted_moth_indices: Array[Int] = []
+    for i in 0..<moth_values.length() {
+      sorted_moth_indices.push(i)
+    }
+    for i in 0..<sorted_moth_indices.length() {
+      for j in (i + 1)..<sorted_moth_indices.length() {
+        if moth_values[sorted_moth_indices[j]] < moth_values[sorted_moth_indices[i]] {
+          let temp = sorted_moth_indices[i]
+          sorted_moth_indices[i] = sorted_moth_indices[j]
+          sorted_moth_indices[j] = temp
+        }
+      }
     }
 
-    for i in 0..<n_moths {
+    // Update each moth using spiral path toward its assigned flame
+    for rank in 0..<n_moths {
       if evaluations >= config.max_evaluations { break }
 
-      let flame_idx = min_int(i, num_flames - 1)
+      let moth_idx = sorted_moth_indices[rank]
+      let flame_idx = min_int(rank, num_flames - 1)
+      let flame_idx_sorted = sorted_flame_indices[flame_idx]
 
       let new_pos: Array[Double] = []
       for d in 0..<dim {
         let (rng2, r_t) = RNG::next(current_rng)
         current_rng = rng2
-        let t = r_t
-        let dist = abs_val(sorted_flames[flame_idx][d] - moths[i][d])
-        let pos = dist * exp_approx(b * t) * cos_approx(2.0 * PI * t) + sorted_flames[flame_idx][d]
+        let t = r_t * 2.0 - 1.0
+        let flame_pos = flames[flame_idx_sorted][d]
+        let dist = abs_val(flame_pos - moths[moth_idx][d])
+        let pos = dist * exp_approx(b * t) * cos_approx(2.0 * PI * t) + flame_pos
         new_pos.push(max(bounds.min, min(bounds.max, pos)))
       }
 
-      moths[i] = new_pos
+      moths[moth_idx] = new_pos
       let new_val = evaluate(f, new_pos)
-      moth_values[i] = new_val
+      moth_values[moth_idx] = new_val
       evaluations = evaluations + 1
 
       if new_val < best_val {
@@ -2617,9 +2632,12 @@ pub fn moth_flame_optimization(config: MFOConfig, f: (Array[Double]) -> Double, 
       }
     }
 
+    // Update flames: move flames to best moths
     for i in 0..<n_moths {
-      flames[i] = moths[i]
-      flame_values[i] = moth_values[i]
+      if moth_values[i] < flame_values[i] {
+        flames[i] = moths[i]
+        flame_values[i] = moth_values[i]
+      }
     }
   }
 
@@ -2676,9 +2694,6 @@ pub fn antlion_optimizer(config: ALOConfig, f: (Array[Double]) -> Double, rng: R
     }
   }
 
-  let elite_antlions: Array[Array[Double]] = []
-  let elite_values: Array[Double] = []
-
   let ants: Array[Array[Double]] = []
   let ant_values: Array[Double] = []
   for i in 0..<n_ants {
@@ -2686,36 +2701,28 @@ pub fn antlion_optimizer(config: ALOConfig, f: (Array[Double]) -> Double, rng: R
     ant_values.push(antlion_values[i])
   }
 
+  let base_range = bounds.max - bounds.min
   let mut iter = 0
-  let max_iter = (config.max_evaluations.to_double() / (n_ants.to_double() + n_antlions.to_double())).to_int() + 1
 
   while evaluations < config.max_evaluations {
     iter = iter + 1
 
-    let sorted_antlions: Array[Int] = []
+    // Sort antlions by fitness
+    let sorted_indices: Array[Int] = []
     for i in 0..<n_antlions {
-      sorted_antlions.push(i)
+      sorted_indices.push(i)
     }
     for i in 0..<n_antlions {
       for j in (i + 1)..<n_antlions {
-        if antlion_values[sorted_antlions[j]] < antlion_values[sorted_antlions[i]] {
-          let temp = sorted_antlions[i]
-          sorted_antlions[i] = sorted_antlions[j]
-          sorted_antlions[j] = temp
+        if antlion_values[sorted_indices[j]] < antlion_values[sorted_indices[i]] {
+          let temp = sorted_indices[i]
+          sorted_indices[i] = sorted_indices[j]
+          sorted_indices[j] = temp
         }
       }
     }
 
-    elite_antlions.clear()
-    elite_values.clear()
-    let elite_count = min_int(3, n_antlions)
-    for i in 0..<elite_count {
-      elite_antlions.push(antlions[sorted_antlions[i]])
-      elite_values.push(antlion_values[sorted_antlions[i]])
-    }
-
-    let boundary_range = bounds.max - bounds.min
-    let alpha = boundary_range / (iter.to_double() * iter.to_double() + 1.0)
+    let elite_count = max_int(2, n_antlions / 2)
 
     for i in 0..<n_ants {
       if evaluations >= config.max_evaluations { break }
@@ -2723,24 +2730,33 @@ pub fn antlion_optimizer(config: ALOConfig, f: (Array[Double]) -> Double, rng: R
       let (rng2, r_select) = RNG::next(current_rng)
       current_rng = rng2
 
-      let selected_idx = if r_select < 0.5 {
-        (r_select * elite_count.to_double()).floor().to_int()
-      } else {
+      // Tournament selection: pick from elite pool with probability, else from entire pool
+      let sel_idx = if r_select < 0.7 {
         let (rng3, rw) = RNG::next(current_rng)
         current_rng = rng3
         (rw * elite_count.to_double()).floor().to_int()
+      } else {
+        let (rng3, rw) = RNG::next(current_rng)
+        current_rng = rng3
+        (rw * n_antlions.to_double()).floor().to_int()
       }
-      let sel_idx = max_int(0, min_int(elite_count - 1, selected_idx))
+      let sel = max_int(0, min_int(n_antlions - 1, sel_idx))
+      let selected_antlion = antlions[sorted_indices[sel]]
 
+      // Boundary shrinking
+      let alpha_frac = 1.0 / (iter.to_double() + 1.0)
+      let lower_bound = bounds.min + alpha_frac * abs_val(selected_antlion[0] - bounds.min)
+      let upper_bound = bounds.max - alpha_frac * abs_val(bounds.max - selected_antlion[0])
+
+      // Random walk toward the selected antlion
       let new_pos: Array[Double] = []
       for d in 0..<dim {
         let (rng4, r_walk) = RNG::next(current_rng)
         current_rng = rng4
         let walk_val = r_walk * 2.0 - 1.0
-        let elite_val = elite_antlions[sel_idx][d]
-        let lower = max(bounds.min, elite_val - alpha)
-        let upper = min(bounds.max, elite_val + alpha)
-        let pos = lower + walk_val * (upper - lower)
+        let antlion_d = selected_antlion[d]
+        let dist = abs_val(antlion_d - ants[i][d])
+        let pos = ants[i][d] + walk_val * dist
         new_pos.push(max(bounds.min, min(bounds.max, pos)))
       }
 
@@ -2755,15 +2771,619 @@ pub fn antlion_optimizer(config: ALOConfig, f: (Array[Double]) -> Double, rng: R
       }
     }
 
-    for i in 0..<n_ants {
-      if ant_values[i] < antlion_values[i] {
-        antlions[i] = ants[i]
-        antlion_values[i] = ant_values[i]
-
-        if antlion_values[i] < best_val {
-          best_val = antlion_values[i]
-          best_pos = antlions[i]
+    // Elitism: replace worst antlions with best ants
+    let sorted_antlion_idx: Array[Int] = []
+    for i in 0..<n_antlions {
+      sorted_antlion_idx.push(i)
+    }
+    for i in 0..<n_antlions {
+      for j in (i + 1)..<n_antlions {
+        if antlion_values[sorted_antlion_idx[j]] > antlion_values[sorted_antlion_idx[i]] {
+          let temp = sorted_antlion_idx[i]
+          sorted_antlion_idx[i] = sorted_antlion_idx[j]
+          sorted_antlion_idx[j] = temp
         }
+      }
+    }
+
+    let sorted_ant_idx: Array[Int] = []
+    for i in 0..<n_ants {
+      sorted_ant_idx.push(i)
+    }
+    for i in 0..<n_ants {
+      for j in (i + 1)..<n_ants {
+        if ant_values[sorted_ant_idx[j]] < ant_values[sorted_ant_idx[i]] {
+          let temp = sorted_ant_idx[i]
+          sorted_ant_idx[i] = sorted_ant_idx[j]
+          sorted_ant_idx[j] = temp
+        }
+      }
+    }
+
+    // Replace worst antlions with best ants
+    let replace_count = min_int(n_ants / 2, n_antlions / 3)
+    for k in 0..<replace_count {
+      let worst_idx = sorted_antlion_idx[n_antlions - 1 - k]
+      let best_ant_idx = sorted_ant_idx[k]
+      if ant_values[best_ant_idx] < antlion_values[worst_idx] {
+        antlions[worst_idx] = ants[best_ant_idx]
+        antlion_values[worst_idx] = ant_values[best_ant_idx]
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
+// ===== Sparrow Search Algorithm (SSA) =====
+
+pub struct SSAConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+  discoverer_ratio: Double
+  warning_threshold: Double
+}
+
+pub fn make_ssa_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> SSAConfig {
+  SSAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+    discoverer_ratio: 0.2,
+    warning_threshold: 0.8
+  }
+}
+
+pub fn sparrow_search_algorithm(config: SSAConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+
+  let mut current_rng = rng
+  let population: Array[Array[Double]] = []
+  let values: Array[Double] = []
+
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    population.push(sol)
+    values.push(evaluate(f, sol))
+  }
+
+  let mut evaluations = n
+  let mut best_pos: Array[Double] = []
+  let mut best_val = 1.0e308
+
+  for i in 0..<n {
+    if values[i] < best_val {
+      best_val = values[i]
+      best_pos = population[i]
+    }
+  }
+
+  let mut worst_pos: Array[Double] = []
+  let mut worst_val = -1.0e308
+  for i in 0..<n {
+    if values[i] > worst_val {
+      worst_val = values[i]
+      worst_pos = population[i]
+    }
+  }
+
+  let discoverer_count = max_int(1, (n.to_double() * config.discoverer_ratio).to_int())
+  let follower_count = n - discoverer_count
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+    let alpha_warning = config.warning_threshold * (1.0 - iter)
+
+    let sorted_indices: Array[Int] = []
+    for i in 0..<n {
+      sorted_indices.push(i)
+    }
+    for i in 0..<n {
+      for j in (i + 1)..<n {
+        if values[sorted_indices[j]] < values[sorted_indices[i]] {
+          let temp = sorted_indices[i]
+          sorted_indices[i] = sorted_indices[j]
+          sorted_indices[j] = temp
+        }
+      }
+    }
+
+    // Discoverer phase
+    for k in 0..<discoverer_count {
+      if evaluations >= config.max_evaluations { break }
+
+      let idx = sorted_indices[k]
+      let (rng2, r_warn) = RNG::next(current_rng)
+      current_rng = rng2
+
+      let new_pos: Array[Double] = []
+      if r_warn < alpha_warning {
+        for d in 0..<dim {
+          let (rng3, r_step) = RNG::next(current_rng)
+          current_rng = rng3
+          let step = r_step * (bounds.max - bounds.min) + bounds.min
+          new_pos.push(max(bounds.min, min(bounds.max, step)))
+        }
+      } else {
+        for d in 0..<dim {
+          let (rng3, r_foll) = RNG::next(current_rng)
+          current_rng = rng3
+          let step = best_pos[d] + r_foll * (population[idx][d] - best_pos[d])
+          new_pos.push(max(bounds.min, min(bounds.max, step)))
+        }
+      }
+
+      population[idx] = new_pos
+      let new_val = evaluate(f, new_pos)
+      values[idx] = new_val
+      evaluations = evaluations + 1
+
+      if new_val < best_val {
+        best_val = new_val
+        best_pos = new_pos
+      }
+    }
+
+    // Follower phase
+    for k in 0..<follower_count {
+      if evaluations >= config.max_evaluations { break }
+
+      let idx = sorted_indices[discoverer_count + k]
+
+      if values[idx] > best_val {
+        let (rng4, r_fly) = RNG::next(current_rng)
+        current_rng = rng4
+
+        let new_pos: Array[Double] = []
+        for d in 0..<dim {
+          let pos = best_pos[d] + r_fly * (population[idx][d] - best_pos[d])
+          new_pos.push(max(bounds.min, min(bounds.max, pos)))
+        }
+
+        population[idx] = new_pos
+        let new_val = evaluate(f, new_pos)
+        values[idx] = new_val
+        evaluations = evaluations + 1
+
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      } else {
+        let (rng4, r_rand) = RNG::next(current_rng)
+        current_rng = rng4
+
+        let new_pos: Array[Double] = []
+        for d in 0..<dim {
+          let pos = r_rand * (worst_pos[d] - population[idx][d]) + worst_pos[d]
+          new_pos.push(max(bounds.min, min(bounds.max, pos)))
+        }
+
+        population[idx] = new_pos
+        let new_val = evaluate(f, new_pos)
+        values[idx] = new_val
+        evaluations = evaluations + 1
+
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+    }
+
+    // Update worst
+    worst_val = -1.0e308
+    for i in 0..<n {
+      if values[i] > worst_val {
+        worst_val = values[i]
+        worst_pos = population[i]
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
+// ===== Harris Hawks Optimization (HHO) =====
+
+pub struct HHOConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+}
+
+pub fn make_hho_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> HHOConfig {
+  HHOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz
+  }
+}
+
+pub fn harris_hawks_optimization(config: HHOConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+
+  let mut current_rng = rng
+  let hawks: Array[Array[Double]] = []
+  let hawk_values: Array[Double] = []
+
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    hawks.push(sol)
+    hawk_values.push(evaluate(f, sol))
+  }
+
+  let mut evaluations = n
+  let mut best_pos: Array[Double] = []
+  let mut best_val = 1.0e308
+
+  for i in 0..<n {
+    if hawk_values[i] < best_val {
+      best_val = hawk_values[i]
+      best_pos = hawks[i]
+    }
+  }
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+    let e0 = 2.0 * (1.0 - iter)
+
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+
+      let (rng2, r_escape) = RNG::next(current_rng)
+      current_rng = rng2
+
+      if abs_val(e0) >= 1.0 {
+        // Exploration phase
+        let (rng3, r_q) = RNG::next(current_rng)
+        current_rng = rng3
+        let (rng4, r_rand) = RNG::next(current_rng)
+        current_rng = rng4
+
+        if r_q >= 0.5 {
+          let (rng5, r_leader) = RNG::next(current_rng)
+          current_rng = rng5
+          let new_pos: Array[Double] = []
+          for d in 0..<dim {
+            let pos = bounds.min + r_rand * (bounds.max - bounds.min)
+            new_pos.push(max(bounds.min, min(bounds.max, pos)))
+          }
+          let (rng6, r_sub) = RNG::next(current_rng)
+          current_rng = rng6
+          let final_pos: Array[Double] = []
+          for d in 0..<dim {
+            let pos = new_pos[d] + r_leader * abs_val(new_pos[d] - hawks[i][d])
+            final_pos.push(max(bounds.min, min(bounds.max, pos)))
+          }
+          hawks[i] = final_pos
+        } else {
+          let avg_pos: Array[Double] = []
+          for d in 0..<dim {
+            let mut sum = 0.0
+            for j in 0..<n {
+              sum = sum + hawks[j][d]
+            }
+            avg_pos.push(sum / n.to_double())
+          }
+
+          let (rng5, r_ld1) = RNG::next(current_rng)
+          current_rng = rng5
+          let (rng6, r_ld2) = RNG::next(current_rng)
+          current_rng = rng6
+
+          let final_pos: Array[Double] = []
+          for d in 0..<dim {
+            let pos = (r_ld1 * best_pos[d] - r_ld2 * avg_pos[d])
+            final_pos.push(max(bounds.min, min(bounds.max, pos)))
+          }
+          hawks[i] = final_pos
+        }
+      } else {
+        // Exploitation phase
+        let (rng3, r_escape2) = RNG::next(current_rng)
+        current_rng = rng3
+
+        if r_escape2 >= 0.5 {
+          let (rng4, r_cf) = RNG::next(current_rng)
+          current_rng = rng4
+
+          let final_pos: Array[Double] = []
+          for d in 0..<dim {
+            let pos = best_pos[d] + abs_val(best_pos[d] - hawks[i][d]) * e0 * r_cf
+            final_pos.push(max(bounds.min, min(bounds.max, pos)))
+          }
+          hawks[i] = final_pos
+        } else {
+          let (rng4, r_cf1) = RNG::next(current_rng)
+          current_rng = rng4
+          let (rng5, r_cf2) = RNG::next(current_rng)
+          current_rng = rng5
+
+          let final_pos: Array[Double] = []
+          for d in 0..<dim {
+            let pos = best_pos[d] * (r_cf1 * e0 - r_cf2)
+            final_pos.push(max(bounds.min, min(bounds.max, pos)))
+          }
+          hawks[i] = final_pos
+        }
+      }
+
+      let new_val = evaluate(f, hawks[i])
+      hawk_values[i] = new_val
+      evaluations = evaluations + 1
+
+      if new_val < best_val {
+        best_val = new_val
+        best_pos = hawks[i]
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
+// ===== Flower Pollination Algorithm (FPA) =====
+
+pub struct FPAConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+  switch_probability: Double
+}
+
+pub fn make_fpa_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> FPAConfig {
+  FPAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+    switch_probability: 0.8
+  }
+}
+
+pub fn flower_pollination_algorithm(config: FPAConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+
+  let mut current_rng = rng
+  let flowers: Array[Array[Double]] = []
+  let flower_values: Array[Double] = []
+
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    flowers.push(sol)
+    flower_values.push(evaluate(f, sol))
+  }
+
+  let mut evaluations = n
+  let mut best_pos: Array[Double] = []
+  let mut best_val = 1.0e308
+
+  for i in 0..<n {
+    if flower_values[i] < best_val {
+      best_val = flower_values[i]
+      best_pos = flowers[i]
+    }
+  }
+
+  while evaluations < config.max_evaluations {
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+
+      let (rng2, r_switch) = RNG::next(current_rng)
+      current_rng = rng2
+
+      let new_pos: Array[Double] = []
+      if r_switch < config.switch_probability {
+        // Global pollination
+        let (rng3, r_levy1) = RNG::next(current_rng)
+        current_rng = rng3
+        let (rng4, r_levy2) = RNG::next(current_rng)
+        current_rng = rng4
+
+        for d in 0..<dim {
+          let levy_step = abs_val(r_levy1 * (best_pos[d] - flowers[i][d]))
+          let pos = flowers[i][d] + levy_step * (r_levy2 - 0.5) * 2.0
+          new_pos.push(max(bounds.min, min(bounds.max, pos)))
+        }
+      } else {
+        // Local pollination
+        let (rng3, r_local) = RNG::next(current_rng)
+        current_rng = rng3
+        let (rng4, r_idx1) = RNG::next(current_rng)
+        current_rng = rng4
+        let (rng5, r_idx2) = RNG::next(current_rng)
+        current_rng = rng5
+
+        let j = (r_idx1 * n.to_double()).floor().to_int()
+        let k = (r_idx2 * n.to_double()).floor().to_int()
+        let j_idx = max_int(0, min_int(n - 1, j))
+        let k_idx = max_int(0, min_int(n - 1, k))
+
+        for d in 0..<dim {
+          let pos = flowers[i][d] + r_local * (flowers[j_idx][d] - flowers[k_idx][d])
+          new_pos.push(max(bounds.min, min(bounds.max, pos)))
+        }
+      }
+
+      flowers[i] = new_pos
+      let new_val = evaluate(f, new_pos)
+      flower_values[i] = new_val
+      evaluations = evaluations + 1
+
+      if new_val < best_val {
+        best_val = new_val
+        best_pos = new_pos
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
+// ===== Dragonfly Algorithm (DA) =====
+
+pub struct DAConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+  separation_weight: Double
+  alignment_weight: Double
+  cohesion_weight: Double
+}
+
+pub fn make_da_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> DAConfig {
+  DAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+    separation_weight: 1.0,
+    alignment_weight: 1.0,
+    cohesion_weight: 1.0
+  }
+}
+
+pub fn dragonfly_algorithm(config: DAConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+
+  let mut current_rng = rng
+  let dragonflies: Array[Array[Double]] = []
+  let velocities: Array[Array[Double]] = []
+  let df_values: Array[Double] = []
+
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    let (rng2, vel) = RNG::next(current_rng)
+    current_rng = rng2
+    dragonflies.push(sol)
+    df_values.push(evaluate(f, sol))
+
+    let init_vel: Array[Double] = []
+    for d in 0..<dim {
+      init_vel.push((vel * 2.0 - 1.0) * (bounds.max - bounds.min) * 0.1)
+    }
+    velocities.push(init_vel)
+  }
+
+  let mut evaluations = n
+  let mut best_pos: Array[Double] = []
+  let mut best_val = 1.0e308
+
+  for i in 0..<n {
+    if df_values[i] < best_val {
+      best_val = df_values[i]
+      best_pos = dragonflies[i]
+    }
+  }
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+
+    let s_weight = config.separation_weight * (1.0 - iter)
+    let a_weight = config.alignment_weight * (1.0 - iter)
+    let c_weight = config.cohesion_weight * iter
+    let f_weight = 2.0 * iter
+    let e_weight = 1.0 - iter
+
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+
+      let (rng3, r_sep) = RNG::next(current_rng)
+      current_rng = rng3
+      let (rng4, r_ali) = RNG::next(current_rng)
+      current_rng = rng4
+      let (rng5, r_coh) = RNG::next(current_rng)
+      current_rng = rng5
+      let (rng6, r_food) = RNG::next(current_rng)
+      current_rng = rng6
+      let (rng7, r_enemy) = RNG::next(current_rng)
+      current_rng = rng7
+
+      // Calculate separation, alignment, cohesion
+      let sep: Array[Double] = []
+      let ali: Array[Double] = []
+      let coh: Array[Double] = []
+      for d in 0..<dim {
+        let mut sep_sum = 0.0
+        let mut ali_sum = 0.0
+        let mut coh_sum = 0.0
+        let neighbor_count = 6 // assume 6 nearest neighbors
+
+        for j in 0..<n {
+          if j == i { continue }
+          let dist = abs_val(dragonflies[i][d] - dragonflies[j][d])
+          if dist > 0.001 {
+            sep_sum = sep_sum + (dragonflies[i][d] - dragonflies[j][d]) / dist
+          }
+          ali_sum = ali_sum + velocities[j][d]
+          coh_sum = coh_sum + dragonflies[j][d]
+        }
+
+        sep.push(sep_sum / neighbor_count.to_double())
+        ali.push(ali_sum / (neighbor_count.to_double() + 1.0))
+        coh.push(coh_sum / (neighbor_count.to_double() + 1.0) - dragonflies[i][d])
+      }
+
+      // Update velocity
+      let new_vel: Array[Double] = []
+      let new_pos: Array[Double] = []
+      for d in 0..<dim {
+        let vel = s_weight * r_sep * sep[d] +
+                 a_weight * r_ali * ali[d] +
+                 c_weight * r_coh * coh[d] +
+                 f_weight * r_food * (best_pos[d] - dragonflies[i][d]) +
+                 velocities[i][d] * e_weight
+
+        new_vel.push(vel)
+        let pos = dragonflies[i][d] + vel
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+
+      velocities[i] = new_vel
+      dragonflies[i] = new_pos
+      let new_val = evaluate(f, new_pos)
+      df_values[i] = new_val
+      evaluations = evaluations + 1
+
+      if new_val < best_val {
+        best_val = new_val
+        best_pos = new_pos
       }
     }
   }
@@ -3180,6 +3800,46 @@ pub fn run_benchmark_at_evals(
     relative_error: alo_error
   })
 
+  let ssa_config = make_ssa_config(max_evals, dim, bounds, 25)
+  let ssa_result = sparrow_search_algorithm(ssa_config, f, rng)
+  let ssa_error = calc_relative_error(ssa_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "SSA",
+    best_value: ssa_result.best_value,
+    evaluations: ssa_result.evaluations,
+    relative_error: ssa_error
+  })
+
+  let hho_config = make_hho_config(max_evals, dim, bounds, 25)
+  let hho_result = harris_hawks_optimization(hho_config, f, rng)
+  let hho_error = calc_relative_error(hho_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "HHO",
+    best_value: hho_result.best_value,
+    evaluations: hho_result.evaluations,
+    relative_error: hho_error
+  })
+
+  let fpa_config = make_fpa_config(max_evals, dim, bounds, 25)
+  let fpa_result = flower_pollination_algorithm(fpa_config, f, rng)
+  let fpa_error = calc_relative_error(fpa_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "FPA",
+    best_value: fpa_result.best_value,
+    evaluations: fpa_result.evaluations,
+    relative_error: fpa_error
+  })
+
+  let da_config = make_da_config(max_evals, dim, bounds, 25)
+  let da_result = dragonfly_algorithm(da_config, f, rng)
+  let da_error = calc_relative_error(da_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "DA",
+    best_value: da_result.best_value,
+    evaluations: da_result.evaluations,
+    relative_error: da_error
+  })
+
   results
 }
 
@@ -3233,6 +3893,10 @@ pub fn run_multiple_trials(
   let sca_values: Array[Double] = []
   let mfo_values: Array[Double] = []
   let alo_values: Array[Double] = []
+  let ssa_values: Array[Double] = []
+  let hho_values: Array[Double] = []
+  let fpa_values: Array[Double] = []
+  let da_values: Array[Double] = []
 
   for trial in 0..<num_trials {
     let seed = base_seed + trial.to_double() * 1000.0
@@ -3329,6 +3993,22 @@ pub fn run_multiple_trials(
     let alo_config = make_alo_config(max_evals, dim, bounds, 25)
     let alo_result = antlion_optimizer(alo_config, f, rng)
     alo_values.push(alo_result.best_value)
+
+    let ssa_config = make_ssa_config(max_evals, dim, bounds, 25)
+    let ssa_result = sparrow_search_algorithm(ssa_config, f, rng)
+    ssa_values.push(ssa_result.best_value)
+
+    let hho_config = make_hho_config(max_evals, dim, bounds, 25)
+    let hho_result = harris_hawks_optimization(hho_config, f, rng)
+    hho_values.push(hho_result.best_value)
+
+    let fpa_config = make_fpa_config(max_evals, dim, bounds, 25)
+    let fpa_result = flower_pollination_algorithm(fpa_config, f, rng)
+    fpa_values.push(fpa_result.best_value)
+
+    let da_config = make_da_config(max_evals, dim, bounds, 25)
+    let da_result = dragonfly_algorithm(da_config, f, rng)
+    da_values.push(da_result.best_value)
   }
 
   println("  Algorithm          | Min Value           | Max Value           | Avg Value           | Avg Error")
@@ -3471,6 +4151,30 @@ pub fn run_multiple_trials(
   let alo_avg = array_avg(alo_values)
   let alo_err = calc_relative_error(alo_avg, known_optimal)
   println("  | ALO               | \{alo_min} | \{alo_max} | \{alo_avg} | \{alo_err} |")
+
+  let ssa_min = array_min(ssa_values)
+  let ssa_max = array_max(ssa_values)
+  let ssa_avg = array_avg(ssa_values)
+  let ssa_err = calc_relative_error(ssa_avg, known_optimal)
+  println("  | SSA               | \{ssa_min} | \{ssa_max} | \{ssa_avg} | \{ssa_err} |")
+
+  let hho_min = array_min(hho_values)
+  let hho_max = array_max(hho_values)
+  let hho_avg = array_avg(hho_values)
+  let hho_err = calc_relative_error(hho_avg, known_optimal)
+  println("  | HHO               | \{hho_min} | \{hho_max} | \{hho_avg} | \{hho_err} |")
+
+  let fpa_min = array_min(fpa_values)
+  let fpa_max = array_max(fpa_values)
+  let fpa_avg = array_avg(fpa_values)
+  let fpa_err = calc_relative_error(fpa_avg, known_optimal)
+  println("  | FPA               | \{fpa_min} | \{fpa_max} | \{fpa_avg} | \{fpa_err} |")
+
+  let da_min = array_min(da_values)
+  let da_max = array_max(da_values)
+  let da_avg = array_avg(da_values)
+  let da_err = calc_relative_error(da_avg, known_optimal)
+  println("  | DA                | \{da_min} | \{da_max} | \{da_avg} | \{da_err} |")
 
   println("")
 }
