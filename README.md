@@ -1,7 +1,5 @@
 # BlackBoxOptimization
 
-[![CI](https://github.com/your-username/BlackBoxOptimization/actions/workflows/ci.yml/badge.svg)](https://github.com/your-username/BlackBoxOptimization/actions/workflows/ci.yml)
-
 基于 MoonBit 实现的黑盒优化算法框架，支持多种经典优化算法，提供统一的接口和基准测试框架。
 
 ## 支持的算法
