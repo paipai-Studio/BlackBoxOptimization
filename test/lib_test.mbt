@@ -533,3 +533,66 @@ test "GSO improves with more evaluations" {
 
   assert_true(result2.best_value <= result1.best_value)
 }
+
+test "GSA produces valid result" {
+  let config = @lib.make_gsa_config(500, 3, @lib.make_bounds(-5.0, 5.0), 20, 100.0, 0.99)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.gravitational_search_algorithm(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "GSA improves with more evaluations" {
+  let config1 = @lib.make_gsa_config(100, 3, @lib.make_bounds(-5.0, 5.0), 20, 100.0, 0.99)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.gravitational_search_algorithm(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_gsa_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 20, 100.0, 0.99)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.gravitational_search_algorithm(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "TLBO produces valid result" {
+  let config = @lib.make_tlbo_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.teaching_learning_based_optimization(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "TLBO improves with more evaluations" {
+  let config1 = @lib.make_tlbo_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.teaching_learning_based_optimization(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_tlbo_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.teaching_learning_based_optimization(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "AMO produces valid result" {
+  let config = @lib.make_amo_config(500, 3, @lib.make_bounds(-5.0, 5.0), 20, 5)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.animal_migration_optimization(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "AMO improves with more evaluations" {
+  let config1 = @lib.make_amo_config(100, 3, @lib.make_bounds(-5.0, 5.0), 20, 5)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.animal_migration_optimization(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_amo_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 20, 5)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.animal_migration_optimization(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}

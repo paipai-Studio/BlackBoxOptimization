@@ -33,23 +33,34 @@
 | 群体智能 | 哈里斯鹰优化 (HHO) | 模拟哈里斯鹰协同捕食行为 |
 | 群体智能 | 花粉传播算法 (FPA) | 模拟花粉全局和局部传播过程 |
 | 群体智能 | 蜻蜓算法 (DA) | 模拟蜻蜓分离、对齐、聚集行为 |
+| 群体智能 | 乌鸦搜索算法 (CSA) | 模拟乌鸦记忆和追逐行为 |
+| 群体智能 | 樽海鞘群算法 (SalpSA) | 模拟樽海鞘链状群体结构 |
+| 群体智能 | Monarch蝴蝶优化 (MBO) | 模拟蝴蝶迁徙和调整行为 |
+| 群体智能 | 人工生态系统优化 (AEO) | 模拟生态系统生产者-消费者-分解者 |
+| 群体智能 | 入侵杂草优化 (IWO) | 模拟杂草生长扩散与竞争 |
+| 群体智能 | 细菌觅食优化 (BFO) | 模拟大肠杆菌觅食行为 |
+| 群体智能 | 混合蛙跳算法 (SFLA) | 模拟青蛙群体觅食与信息共享 |
+| 群体智能 | 萤火虫群优化 (GSO) | 模拟萤火虫发光吸引行为 |
+| 物理启发 | 引力搜索算法 (GSA) | 基于牛顿万有引力定律的搜索 |
+| 教学模型 | 教与学优化 (TLBO) | 模拟班级教学和学习过程 |
+| 群体智能 | 动物迁徙优化 (AMO) | 模拟动物群体迁徙跟随行为 |
 
 ## 项目结构
 
 ```
 BlackBoxOptimization/
 ├── lib/                          # 核心库包
-│   ├── moon.pkg                  # 包配置
+│   ├── moon.pkg.json             # 包配置
 │   └── lib.mbt                   # 所有优化算法实现
 ├── main/                         # 主程序入口
-│   ├── moon.pkg                  # 包配置
+│   ├── moon.pkg.json             # 包配置
 │   └── main.mbt                  # 基准测试入口
 ├── test/                         # 测试包
-│   ├── moon.pkg                  # 包配置
-│   └── lib_test.mbt              # 单元测试
+│   ├── moon.pkg.json             # 包配置
+│   └── lib_test.mbt              # 单元测试（66 个测试用例）
 ├── example/                      # 示例包
-│   ├── moon.pkg                  # 包配置
-│   └── simple_usage.mbt          # 使用示例
+│   ├── moon.pkg.json             # 包配置
+│   └── simple_usage.mbt          # 使用示例（23 个示例）
 ├── .github/workflows/            # CI 配置
 │   └── ci.yml                    # GitHub Actions
 ├── moon.mod.json                 # 模块配置
@@ -83,7 +94,7 @@ moon run main
 ### 运行测试
 
 ```bash
-# 运行所有测试
+# 运行所有测试（66 个测试用例）
 moon test
 
 # 代码检查
@@ -218,6 +229,66 @@ let mfo_result = @lib.moth_flame_optimization(mfo_config, f, rng)
 // 蚁狮优化 (ALO)
 let alo_config = @lib.make_alo_config(1000, dim, bounds, 25)
 let alo_result = @lib.antlion_optimizer(alo_config, f, rng)
+
+// 麻雀搜索算法 (SSA)
+let ssa_config = @lib.make_ssa_config(1000, dim, bounds, 25)
+let ssa_result = @lib.sparrow_search_algorithm(ssa_config, f, rng)
+
+// 哈里斯鹰优化 (HHO)
+let hho_config = @lib.make_hho_config(1000, dim, bounds, 25)
+let hho_result = @lib.harris_hawks_optimization(hho_config, f, rng)
+
+// 花粉传播算法 (FPA)
+let fpa_config = @lib.make_fpa_config(1000, dim, bounds, 25)
+let fpa_result = @lib.flower_pollination_algorithm(fpa_config, f, rng)
+
+// 蜻蜓算法 (DA)
+let da_config = @lib.make_da_config(1000, dim, bounds, 25)
+let da_result = @lib.dragonfly_algorithm(da_config, f, rng)
+
+// 乌鸦搜索算法 (CSA)
+let csa_config = @lib.make_csa_config(1000, dim, bounds, 25)
+let csa_result = @lib.crow_search_algorithm(csa_config, f, rng)
+
+// 樽海鞘群算法 (SalpSA)
+let salp_config = @lib.make_salp_sa_config(1000, dim, bounds, 25)
+let salp_result = @lib.salp_swarm_algorithm(salp_config, f, rng)
+
+// Monarch蝴蝶优化 (MBO)
+let mbo_config = @lib.make_mbo_config(1000, dim, bounds, 25)
+let mbo_result = @lib.monarch_butterfly_optimization(mbo_config, f, rng)
+
+// 人工生态系统优化 (AEO)
+let aeo_config = @lib.make_aeo_config(1000, dim, bounds, 25)
+let aeo_result = @lib.artificial_ecosystem_optimization(aeo_config, f, rng)
+
+// 入侵杂草优化 (IWO)
+let iwo_config = @lib.make_iwo_config(1000, dim, bounds, 10, 40, 1, 5, 2.0, 0.1, 3.0)
+let iwo_result = @lib.invasive_weed_optimization(iwo_config, f, rng)
+
+// 细菌觅食优化 (BFO)
+let bfo_config = @lib.make_bfo_config(1000, dim, bounds, 25, 5, 3, 0.2)
+let bfo_result = @lib.bacteria_foraging_optimization(bfo_config, f, rng)
+
+// 混合蛙跳算法 (SFLA)
+let sfla_config = @lib.make_sfla_config(1000, dim, bounds, 30, 5, 10)
+let sfla_result = @lib.shuffled_frog_leaping_algorithm(sfla_config, f, rng)
+
+// 萤火虫群优化 (GSO)
+let gso_config = @lib.make_gso_config(1000, dim, bounds, 25, 0.4, 0.6, 5, 5.0, 1.0)
+let gso_result = @lib.glowworm_swarm_optimization(gso_config, f, rng)
+
+// 引力搜索算法 (GSA)
+let gsa_config = @lib.make_gsa_config(1000, dim, bounds, 25, 100.0, 0.99)
+let gsa_result = @lib.gravitational_search_algorithm(gsa_config, f, rng)
+
+// 教与学优化 (TLBO)
+let tlbo_config = @lib.make_tlbo_config(1000, dim, bounds, 30)
+let tlbo_result = @lib.teaching_learning_based_optimization(tlbo_config, f, rng)
+
+// 动物迁徙优化 (AMO)
+let amo_config = @lib.make_amo_config(1000, dim, bounds, 25, 5)
+let amo_result = @lib.animal_migration_optimization(amo_config, f, rng)
 ```
 
 ### 内置测试函数
@@ -345,6 +416,45 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | step_reduction | 步长缩减因子 | 0.5 |
 | min_step | 最小步长 | 1e-6 |
 
+### WOA (鲸群优化)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 鲸鱼数量 | 25 |
+| spiral_constant | 螺旋常数 b | 1.0 |
+
+### Bat Algorithm (蝙蝠算法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 蝙蝠数量 | 25 |
+| freq_min | 最小频率 | 0.0 |
+| freq_max | 最大频率 | 1.0 |
+| loudness | 响度 | 0.5 |
+| pulse_rate | 脉冲率 | 1.0 |
+
+### Harmony Search (和声搜索)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| memory_size | 和声记忆库大小 | 20 |
+| hmcr | 和声记忆考虑率 | 0.9 |
+| par | 音调调整率 | 0.3 |
+| fretwidth | 频宽 | 0.05 |
+
+### SCA (正弦余弦算法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 种群大小 | 25 |
+
+### MFO (飞蛾火焰优化)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 飞蛾数量 | 25 |
+| spiral_constant | 螺旋常数 b | 1.0 |
+
+### ALO (蚁狮优化)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 蚁狮数量 | 25 |
+
 ### SSA (麻雀搜索算法)
 | 参数 | 说明 | 推荐值 |
 |------|------|--------|
@@ -371,6 +481,84 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | alignment_weight | 对齐权重 | 1.0 |
 | cohesion_weight | 聚集权重 | 1.0 |
 
+### CSA (乌鸦搜索算法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 乌鸦数量 | 25 |
+| flight_length | 飞行长度 | 2.0 |
+| awareness_prob | 感知概率 | 0.1 |
+
+### SalpSA (樽海鞘群算法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 樽海鞘数量 | 25 |
+
+### MBO (Monarch蝴蝶优化)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 蝴蝶数量 | 25 |
+| migration_period | 迁徙周期 | 5 |
+| adjustment_rate | 调整率 | 1.0 |
+
+### AEO (人工生态系统优化)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 生态系统大小 | 25 |
+
+### IWO (入侵杂草优化)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| initial_pop | 初始种群 | 10 |
+| max_pop | 最大种群 | 40 |
+| min_seeds | 最小种子数 | 1 |
+| max_seeds | 最大种子数 | 5 |
+| initial_sigma | 初始标准差 | 2.0 |
+| final_sigma | 最终标准差 | 0.1 |
+| power_exponent | 调制指数 | 3.0 |
+
+### BFO (细菌觅食优化)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 细菌数量 | 25 |
+| chemotactic_steps | 趋化步数 | 5 |
+| reproduction_steps | 繁殖代数 | 3 |
+| step_size | 步长 | 0.2 |
+
+### SFLA (混合蛙跳算法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 青蛙总数 | 30 |
+| memeplex_count | 模因复合体数 | 5 |
+| iterations_per_group | 组内迭代次数 | 10 |
+
+### GSO (萤火虫群优化)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 萤火虫数量 | 25 |
+| luciferin_decay | 荧光素衰减率 | 0.4 |
+| luciferin_enhancement | 荧光素增强率 | 0.6 |
+| neighbor_count | 邻居数 | 5 |
+| sensing_radius | 感知半径 | 5.0 |
+| step_size | 步长 | 1.0 |
+
+### GSA (引力搜索算法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 智能体数量 | 25 |
+| gravity_constant | 初始引力常数 G₀ | 100.0 |
+| decay_alpha | 衰减系数 α | 0.99 |
+
+### TLBO (教与学优化)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 学生数量 | 30 |
+
+### AMO (动物迁徙优化)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 动物群大小 | 25 |
+| migration_interval | 迁徙间隔 | 5 |
+
 ## 性能对比
 
 ### Sphere 函数（5维）
@@ -380,106 +568,141 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | 随机搜索 | 3.17 | 0.92 | 0.92 |
 | 爬山法 | 0.0094 | 0.0094 | 0.0094 |
 | 模拟退火 | 0.57 | 0.0059 | 0.0059 |
-| **PSO** | **8.56e-4** | **2.3e-15** | **3.4e-29** |
-| **DE** | 0.16 | **1.0e-8** | **8.7e-18** |
-| GA | 0.70 | 0.056 | 0.011 |
+| **PSO** | **8.56e-4** | **2.28e-15** | **3.38e-29** |
+| **DE** | 0.156 | **1.02e-8** | **8.65e-18** |
+| GA | 0.698 | 0.0559 | 0.0111 |
 | Nelder-Mead | 49.38 | 49.38 | 49.38 |
 | 萤火虫 | 4.25 | 0.92 | 0.92 |
 | 蚁群算法 | 2.43 | 2.43 | 2.12 |
-| 蜂群算法 | 0.27 | **3.3e-4** | **6.2e-10** |
-| 禁忌搜索 | 0.017 | 0.015 | 0.015 |
-| 引导局部搜索 | 0.017 | 0.017 | 0.017 |
-| CMA-ES | 0.024 | 3.6e-4 | 9.2e-7 |
-| CEM | 0.31 | 3.5e-7 | 1.0e-7 |
-| 布谷鸟搜索 | 0.74 | 0.064 | 0.064 |
-| GWO | 0.0016 | 1.0e-9 | 6.6e-16 |
-| **Hooke-Jeeves** | **1.7e-12** | **1.7e-12** | **1.7e-12** |
-| WOA | 0.0020 | 9.7e-10 | 9.0e-16 |
-| 蝙蝠算法 | 0.0062 | 6.5e-5 | 6.5e-5 |
-| 和声搜索 | 0.0028 | 3.4e-5 | 2.3e-5 |
-| **SCA** | **1.1e-14** | **9.1e-47** | **1.6e-99** |
-| MFO | 13.47 | 2.0e-17 | 2.0e-17 |
-| ALO | 2.63 | 0.39 | 0.39 |
-| SSA | 0.57 | 2.0e-17 | 1.9e-17 |
-| **HHO** | **8.1e-20** | **0** | **0** |
-| FPA | 1.35 | 0.054 | 0.054 |
-| DA | 4.23 | 11.82 | 11.82 |
+| 蜂群算法 | 0.273 | **3.33e-4** | **6.23e-10** |
+| 禁忌搜索 | 0.0172 | 0.0151 | 0.0151 |
+| 引导局部搜索 | 0.0172 | 0.0172 | 0.0172 |
+| CMA-ES | 0.0236 | 3.56e-4 | 9.22e-7 |
+| CEM | 0.310 | 3.52e-7 | 1.04e-7 |
+| 布谷鸟搜索 | 0.744 | 0.0636 | 0.0636 |
+| GWO | 0.00163 | 1.00e-9 | 6.61e-16 |
+| **Hooke-Jeeves** | **1.71e-12** | **1.71e-12** | **1.71e-12** |
+| WOA | 0.0020 | 9.70e-10 | 9.03e-16 |
+| 蝙蝠算法 | 0.00625 | 6.49e-5 | 6.49e-5 |
+| 和声搜索 | 0.00284 | 3.39e-5 | 2.31e-5 |
+| **SCA** | **1.14e-14** | **9.11e-47** | **1.60e-99** |
+| MFO | 0.140 | 1.63e-8 | 2.02e-17 |
+| ALO | 1.45 | 1.41 | 0.385 |
+| SSA | 1.24e-4 | 6.28e-13 | 1.95e-17 |
+| **HHO** | **~0** | **0** | **0** |
+| FPA | 0.596 | 0.0728 | 0.0542 |
+| DA | 1.589 | 2.667 | 2.635 |
+| CSA | 0.00365 | 1.70e-7 | 1.38e-7 |
+| SalpSA | 0.731 | 0.0591 | 0.00506 |
+| MBO | 5.73e-5 | 2.53e-5 | 2.47e-5 |
+| AEO | 0.0355 | 0.00394 | 0.0105 |
+| IWO | 3.58 | 0.00242 | 0.00106 |
+| BFO | 1.68 | 0.00735 | 0.00735 |
+| SFLA | 9.86e-4 | 3.48e-5 | 7.36e-9 |
+| GSO | 7.61 | 6.39 | 6.39 |
+| GSA | 18.11 | 18.11 | 18.11 |
+| **TLBO** | **1.41e-4** | **4.26e-24** | **9.02e-47** |
+| **AMO** | **0.0171** | **5.02e-7** | **8.41e-12** |
 
-### Rastrigin 函数（5维，10000 evals）
+### Rastrigin 函数（5维）
 
-| 算法 | 最优值 | 相对误差 |
-|------|--------|----------|
-| 随机搜索 | 17.38 | 17.38 |
-| 爬山法 | 52.75 | 52.75 |
+| 算法 | 5000 evals | 10000 evals |
+|------|------------|-------------|
+| 随机搜索 | 21.84 | 17.38 |
+| 爬山法 | 53.53 | 52.75 |
 | 模拟退火 | 23.41 | 23.41 |
-| PSO | 2.98 | 2.98 |
-| DE | 1.35 | 1.35 |
-| GA | 1.66 | 1.66 |
+| PSO | 2.99 | 2.98 |
+| DE | 8.29 | 1.35 |
+| GA | 9.76 | 1.66 |
 | Nelder-Mead | 61.39 | 61.39 |
-| 萤火虫 | 17.78 | 17.78 |
+| 萤火虫 | 22.99 | 17.78 |
 | 蚁群算法 | 9.49 | 9.49 |
-| 蜂群算法 | 1.11 | 1.11 |
+| 蜂群算法 | 3.92 | 1.11 |
 | 禁忌搜索 | 6.91 | 6.91 |
-| 引导局部搜索 | 15.64 | 15.64 |
-| CMA-ES | 22.88 | 22.88 |
-| **CEM** | **2.3e-5** | **2.3e-5** |
+| 引导局部搜索 | 23.31 | 15.64 |
+| CMA-ES | 22.99 | 22.88 |
+| CEM | 0.593 | 2.30e-5 |
 | 布谷鸟搜索 | 11.74 | 11.74 |
-| GWO | 0.0025 | 0.0025 |
+| GWO | 5.02 | 0.0025 |
 | Hooke-Jeeves | 45.77 | 45.77 |
-| **WOA** | **1.3e-11** | **1.3e-11** |
-| 蝙蝠算法 | 13.20 | 13.20 |
-| 和声搜索 | 0.61 | 0.61 |
+| **WOA** | **0.995** | **1.27e-11** |
+| 蝙蝠算法 | 13.37 | 13.20 |
+| 和声搜索 | 2.03 | 0.607 |
 | **SCA** | **0** | **0** |
-| MFO | 1.99 | 1.99 |
+| MFO | 3.99 | 1.99 |
 | ALO | 11.45 | 11.45 |
 | SSA | 8.95 | 8.95 |
 | **HHO** | **0** | **0** |
-| FPA | 5.09 | 5.09 |
-| DA | 41.41 | 41.41 |
+| FPA | 9.43 | 5.09 |
+| DA | 49.12 | 49.75 |
+| CSA | 9.06e-5 | 8.92e-5 |
+| SalpSA | 25.56 | 25.58 |
+| MBO | 0.00525 | 0.00515 |
+| AEO | 2.82 | 5.38 |
+| IWO | 2.69 | 1.23 |
+| BFO | 3.02 | 3.02 |
+| SFLA | 1.99 | 1.99 |
+| GSO | 22.23 | 22.23 |
+| GSA | 65.32 | 65.32 |
+| **TLBO** | **0.0333** | **0** |
+| AMO | 6.97 | 6.96 |
 
-### Rosenbrock 函数（5维，10000 evals）
+### Rosenbrock 函数（5维）
 
-| 算法 | 最优值 | 相对误差 |
-|------|--------|----------|
-| 随机搜索 | 22.78 | 22.78 |
-| 爬山法 | 5.63 | 5.63 |
-| 模拟退火 | 2.74 | 2.74 |
-| PSO | 4.09 | 4.09 |
-| **DE** | **4.0e-8** | **0** |
-| GA | 17.26 | 17.26 |
+| 算法 | 5000 evals | 10000 evals |
+|------|------------|-------------|
+| 随机搜索 | 108.84 | 22.78 |
+| 爬山法 | 7.06 | 5.63 |
+| 模拟退火 | 4.98 | 2.74 |
+| PSO | 4.35 | 4.09 |
+| **DE** | **0.0676** | **3.98e-8** |
+| GA | 28.92 | 17.26 |
 | Nelder-Mead | 43504.88 | 43504.88 |
 | 萤火虫 | 91.21 | 91.21 |
-| 蚁群算法 | 7.47 | 7.47 |
-| 蜂群算法 | 0.26 | 0.26 |
+| 蚁群算法 | 14.26 | 7.47 |
+| 蜂群算法 | 1.36 | 0.265 |
 | 禁忌搜索 | 1.95 | 1.95 |
 | 引导局部搜索 | 3.67 | 3.67 |
-| CMA-ES | 1.25 | 1.25 |
-| CEM | 2.35 | 2.35 |
-| 布谷鸟搜索 | 15.13 | 15.13 |
-| GWO | 0.039 | 0.039 |
-| **Hooke-Jeeves** | **0.29** | **0.29** |
-| **WOA** | **0.0022** | **0.0022** |
+| CMA-ES | 3.22 | 1.25 |
+| CEM | 2.38 | 2.35 |
+| 布谷鸟搜索 | 17.80 | 15.13 |
+| GWO | 5.90 | 0.0392 |
+| **Hooke-Jeeves** | **0.440** | **0.288** |
+| **WOA** | **2.10** | **0.00221** |
 | 蝙蝠算法 | 130.18 | 130.18 |
-| 和声搜索 | 0.68 | 0.68 |
-| SCA | 0.0046 | 0.0046 |
-| MFO | 2.49 | 2.49 |
+| 和声搜索 | 0.699 | 0.679 |
+| SCA | 0.0193 | 0.00461 |
+| MFO | 4.34 | 2.49 |
 | ALO | 34.06 | 34.06 |
-| SSA | 1.31 | 1.31 |
-| **HHO** | **0.0023** | **0.0023** |
-| FPA | 0.346 | 0.346 |
-| DA | 6940.35 | 6940.35 |
+| SSA | 2.09 | 1.31 |
+| **HHO** | **0.00227** | **0.00227** |
+| FPA | 3.06 | 0.346 |
+| DA | 1025.52 | 976.07 |
+| **CSA** | **1.06e-4** | **5.25e-5** |
+| SalpSA | 9.62 | 2.27 |
+| MBO | 0.0239 | 0.00623 |
+| AEO | 5.62 | 2.95 |
+| IWO | 1.42 | 1.48 |
+| BFO | 2.41 | 1.87 |
+| SFLA | 17.78 | 4.69 |
+| GSO | 1856.04 | 451.42 |
+| GSA | 4343.62 | 4343.62 |
+| TLBO | 1.72 | 1.57 |
+| AMO | 3.91 | 3.60 |
 
 ## 算法分类特点
 
 | 类别 | 代表算法 | 特点 |
 |------|----------|------|
 | **单点搜索** | 随机搜索、爬山法、模拟退火 | 简单、易于实现，适合低维问题 |
-| **群体智能** | PSO、萤火虫、蚁群、蜂群、布谷鸟、灰狼、鲸群、蝙蝠、和声、正弦余弦、飞蛾火焰、蚁狮、麻雀搜索、哈里斯鹰、花粉传播、蜻蜓 | 基于群体行为，全局搜索能力强 |
+| **群体智能** | PSO、萤火虫、蚁群、蜂群、布谷鸟、灰狼、鲸群、蝙蝠、和声、正弦余弦、飞蛾火焰、蚁狮、麻雀搜索、哈里斯鹰、花粉传播、蜻蜓、乌鸦、樽海鞘、Monarch蝴蝶、人工生态系统、入侵杂草、细菌觅食、混合蛙跳、萤火虫群、动物迁徙 | 基于群体行为，全局搜索能力强 |
 | **进化算法** | DE、GA | 基于种群进化，鲁棒性好 |
 | **估计分布** | CEM | 基于概率分布估计，适合连续优化 |
 | **确定性直接搜索** | Nelder-Mead、Hooke-Jeeves | 无需梯度，适合不可导函数 |
 | **局部搜索** | 禁忌搜索、引导局部搜索 | 强化局部开发，避免陷入局部最优 |
 | **进化策略** | CMA-ES | 协方差自适应，适合病态问题 |
+| **物理启发** | GSA | 基于万有引力定律，自适应引力常数 |
+| **教学模型** | TLBO | 无需算法特定参数，收敛速度快 |
 
 ## 许可证
 

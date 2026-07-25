@@ -4438,6 +4438,394 @@ fn euclidean_dist(a: Array[Double], b: Array[Double]) -> Double {
   sum.sqrt()
 }
 
+// ===== Gravitational Search Algorithm (GSA) =====
+
+pub struct GSAConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+  gravity_constant: Double
+  decay_alpha: Double
+}
+
+pub fn make_gsa_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int, g0: Double, alpha: Double) -> GSAConfig {
+  GSAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+    gravity_constant: g0,
+    decay_alpha: alpha
+  }
+}
+
+pub fn gravitational_search_algorithm(config: GSAConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+
+  let mut current_rng = rng
+  let agents: Array[Array[Double]] = []
+  let velocities: Array[Array[Double]] = []
+  let values: Array[Double] = []
+
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    agents.push(sol)
+    values.push(evaluate(f, sol))
+
+    let vel: Array[Double] = []
+    for d in 0..<dim {
+      let (rng2, r) = RNG::next(current_rng)
+      current_rng = rng2
+      vel.push(0.0)
+    }
+    velocities.push(vel)
+  }
+
+  let mut evaluations = n
+  let mut best_pos: Array[Double] = []
+  let mut best_val = 1.0e308
+  let mut worst_val = -1.0e308
+
+  for i in 0..<n {
+    if values[i] < best_val {
+      best_val = values[i]
+      best_pos = agents[i]
+    }
+    if values[i] > worst_val {
+      worst_val = values[i]
+    }
+  }
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+    let g = config.gravity_constant * pow_approx(config.decay_alpha, iter)
+
+    // Calculate masses (fitness normalized)
+    let masses: Array[Double] = []
+    for i in 0..<n {
+      let m = (values[i] - worst_val) / (best_val - worst_val + 1.0e-30)
+      masses.push(m + 1.0)
+    }
+    let mut total_mass = 0.0
+    for i in 0..<n { total_mass = total_mass + masses[i] }
+
+    // Update positions
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+
+      // Calculate gravitational force on agent i from all other agents
+      let force: Array[Double] = []
+      for d in 0..<dim {
+        let mut f_d = 0.0
+        for j in 0..<n {
+          if j == i { continue }
+          let dist = euclidean_dist(agents[i], agents[j])
+          if dist < 1.0e-10 { continue }
+          let (rng3, r_force) = RNG::next(current_rng)
+          current_rng = rng3
+          f_d = f_d + r_force * g * masses[j] * (agents[j][d] - agents[i][d]) / (dist + 1.0e-10)
+        }
+        force.push(f_d)
+      }
+
+      // Update velocity and position
+      let new_pos: Array[Double] = []
+      for d in 0..<dim {
+        let (rng4, r_vel) = RNG::next(current_rng)
+        current_rng = rng4
+        let vel = r_vel * velocities[i][d] + force[d] / (masses[i] + 1.0e-30)
+        velocities[i][d] = vel
+        let (rng5, r_pos) = RNG::next(current_rng)
+        current_rng = rng5
+        let pos = agents[i][d] + r_pos * velocities[i][d]
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+
+      agents[i] = new_pos
+      let new_val = evaluate(f, new_pos)
+      values[i] = new_val
+      evaluations = evaluations + 1
+
+      if new_val < best_val {
+        best_val = new_val
+        best_pos = new_pos
+      }
+      if new_val > worst_val {
+        worst_val = new_val
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
+// ===== Teaching-Learning-Based Optimization (TLBO) =====
+
+pub struct TLBOConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+}
+
+pub fn make_tlbo_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> TLBOConfig {
+  TLBOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz
+  }
+}
+
+pub fn teaching_learning_based_optimization(config: TLBOConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+
+  let mut current_rng = rng
+  let students: Array[Array[Double]] = []
+  let values: Array[Double] = []
+
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    students.push(sol)
+    values.push(evaluate(f, sol))
+  }
+
+  let mut evaluations = n
+  let mut best_pos: Array[Double] = []
+  let mut best_val = 1.0e308
+
+  for i in 0..<n {
+    if values[i] < best_val {
+      best_val = values[i]
+      best_pos = students[i]
+    }
+  }
+
+  while evaluations < config.max_evaluations {
+    // Find best (teacher) and worst student
+    let mut teacher_idx = 0
+    let mut worst_idx = 0
+    for i in 1..<n {
+      if values[i] < values[teacher_idx] { teacher_idx = i }
+      if values[i] > values[worst_idx] { worst_idx = i }
+    }
+    let teacher = students[teacher_idx]
+
+    // Calculate mean of all students
+    let mean: Array[Double] = []
+    for d in 0..<dim {
+      let mut sum = 0.0
+      for i in 0..<n { sum = sum + students[i][d] }
+      mean.push(sum / n.to_double())
+    }
+
+    // Teacher phase
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+      if i == teacher_idx { continue }
+
+      let (rng2, tf_val) = RNG::next(current_rng)
+      current_rng = rng2
+      let tf = 1.0 + (if tf_val < 0.5 { 0.0 } else { 1.0 })
+      let (rng3, r1) = RNG::next(current_rng)
+      current_rng = rng3
+
+      let new_pos: Array[Double] = []
+      for d in 0..<dim {
+        let pos = students[i][d] + r1 * (teacher[d] - tf * mean[d])
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      if new_val < values[i] {
+        students[i] = new_pos
+        values[i] = new_val
+      }
+
+      if new_val < best_val {
+        best_val = new_val
+        best_pos = new_pos
+      }
+    }
+
+    // Learner phase
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+
+      let (rng4, partner_r) = RNG::next(current_rng)
+      current_rng = rng4
+      let partner = (partner_r * n.to_double()).floor().to_int() % n
+      let partner_idx = if partner < 0 { n + partner } else { partner }
+
+      let (rng5, r1) = RNG::next(current_rng)
+      current_rng = rng5
+      let new_pos: Array[Double] = []
+
+      if values[i] < values[partner_idx] {
+        for d in 0..<dim {
+          let pos = students[i][d] + r1 * (students[i][d] - students[partner_idx][d])
+          new_pos.push(max(bounds.min, min(bounds.max, pos)))
+        }
+      } else {
+        for d in 0..<dim {
+          let pos = students[i][d] + r1 * (students[partner_idx][d] - students[i][d])
+          new_pos.push(max(bounds.min, min(bounds.max, pos)))
+        }
+      }
+
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      if new_val < values[i] {
+        students[i] = new_pos
+        values[i] = new_val
+      }
+
+      if new_val < best_val {
+        best_val = new_val
+        best_pos = new_pos
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
+// ===== Animal Migration Optimization (AMO) =====
+
+pub struct AMOConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+  migration_interval: Int
+}
+
+pub fn make_amo_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int, mig_interval: Int) -> AMOConfig {
+  AMOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+    migration_interval: mig_interval
+  }
+}
+
+pub fn animal_migration_optimization(config: AMOConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+
+  let mut current_rng = rng
+  let animals: Array[Array[Double]] = []
+  let values: Array[Double] = []
+
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    animals.push(sol)
+    values.push(evaluate(f, sol))
+  }
+
+  let mut evaluations = n
+  let mut best_pos: Array[Double] = []
+  let mut best_val = 1.0e308
+
+  for i in 0..<n {
+    if values[i] < best_val {
+      best_val = values[i]
+      best_pos = animals[i]
+    }
+  }
+
+  let mut migration_count = 0
+
+  while evaluations < config.max_evaluations {
+    migration_count = migration_count + 1
+
+    // Update position: follow best or move randomly
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+
+      let (rng2, r_follow) = RNG::next(current_rng)
+      current_rng = rng2
+      let new_pos: Array[Double] = []
+
+      if r_follow < 0.7 {
+        // Follow best
+        let (rng3, r1) = RNG::next(current_rng)
+        current_rng = rng3
+        for d in 0..<dim {
+          let pos = animals[i][d] + r1 * (best_pos[d] - animals[i][d])
+          new_pos.push(max(bounds.min, min(bounds.max, pos)))
+        }
+      } else {
+        // Explore randomly toward a random neighbor
+        let (rng4, r_idx) = RNG::next(current_rng)
+        current_rng = rng4
+        let j = (r_idx * n.to_double()).floor().to_int() % n
+        let j_idx = if j < 0 { n + j } else { j }
+        let (rng5, r2) = RNG::next(current_rng)
+        current_rng = rng5
+        for d in 0..<dim {
+          let pos = animals[i][d] + r2 * (animals[j_idx][d] - animals[i][d])
+          new_pos.push(max(bounds.min, min(bounds.max, pos)))
+        }
+      }
+
+      animals[i] = new_pos
+      let new_val = evaluate(f, new_pos)
+      values[i] = new_val
+      evaluations = evaluations + 1
+
+      if new_val < best_val {
+        best_val = new_val
+        best_pos = new_pos
+      }
+    }
+
+    // Migration: replace worst individuals with new random ones
+    if migration_count % config.migration_interval == 0 && evaluations < config.max_evaluations {
+      let idx = sort_indices(values)
+      let replace_count = n / 5
+      for k in 0..<replace_count {
+        if evaluations >= config.max_evaluations { break }
+        let worst_idx = idx[n - 1 - k]
+        let (rng6, sol) = random_solution(dim, bounds, current_rng)
+        current_rng = rng6
+        animals[worst_idx] = sol
+        values[worst_idx] = evaluate(f, sol)
+        evaluations = evaluations + 1
+        if values[worst_idx] < best_val {
+          best_val = values[worst_idx]
+          best_pos = animals[worst_idx]
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
 fn box_muller(u1: Double, u2: Double) -> Double {
   let pi = 3.14159265358979323846
   let sqrt_val = (-2.0 * ln_approx(u1)).sqrt()
@@ -4963,6 +5351,36 @@ pub fn run_benchmark_at_evals(
     relative_error: gso_error
   })
 
+  let gsa_config = make_gsa_config(max_evals, dim, bounds, 25, 100.0, 0.99)
+  let gsa_result = gravitational_search_algorithm(gsa_config, f, rng)
+  let gsa_error = calc_relative_error(gsa_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "GSA",
+    best_value: gsa_result.best_value,
+    evaluations: gsa_result.evaluations,
+    relative_error: gsa_error
+  })
+
+  let tlbo_config = make_tlbo_config(max_evals, dim, bounds, 30)
+  let tlbo_result = teaching_learning_based_optimization(tlbo_config, f, rng)
+  let tlbo_error = calc_relative_error(tlbo_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "TLBO",
+    best_value: tlbo_result.best_value,
+    evaluations: tlbo_result.evaluations,
+    relative_error: tlbo_error
+  })
+
+  let amo_config = make_amo_config(max_evals, dim, bounds, 25, 5)
+  let amo_result = animal_migration_optimization(amo_config, f, rng)
+  let amo_error = calc_relative_error(amo_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "AMO",
+    best_value: amo_result.best_value,
+    evaluations: amo_result.evaluations,
+    relative_error: amo_error
+  })
+
   results
 }
 
@@ -5028,6 +5446,9 @@ pub fn run_multiple_trials(
   let bfo_values: Array[Double] = []
   let sfla_values: Array[Double] = []
   let gso_values: Array[Double] = []
+  let gsa_values: Array[Double] = []
+  let tlbo_values: Array[Double] = []
+  let amo_values: Array[Double] = []
 
   for trial in 0..<num_trials {
     let seed = base_seed + trial.to_double() * 1000.0
@@ -5172,6 +5593,18 @@ pub fn run_multiple_trials(
     let gso_config = make_gso_config(max_evals, dim, bounds, 25, 0.4, 0.6, 5, 5.0, 1.0)
     let gso_result = glowworm_swarm_optimization(gso_config, f, rng)
     gso_values.push(gso_result.best_value)
+
+    let gsa_config = make_gsa_config(max_evals, dim, bounds, 25, 100.0, 0.99)
+    let gsa_result = gravitational_search_algorithm(gsa_config, f, rng)
+    gsa_values.push(gsa_result.best_value)
+
+    let tlbo_config = make_tlbo_config(max_evals, dim, bounds, 30)
+    let tlbo_result = teaching_learning_based_optimization(tlbo_config, f, rng)
+    tlbo_values.push(tlbo_result.best_value)
+
+    let amo_config = make_amo_config(max_evals, dim, bounds, 25, 5)
+    let amo_result = animal_migration_optimization(amo_config, f, rng)
+    amo_values.push(amo_result.best_value)
   }
 
   println("  Algorithm          | Min Value           | Max Value           | Avg Value           | Avg Error")
@@ -5362,6 +5795,24 @@ pub fn run_multiple_trials(
   let gso_avg = array_avg(gso_values)
   let gso_err = calc_relative_error(gso_avg, known_optimal)
   println("  | GSO               | \{gso_min} | \{gso_max} | \{gso_avg} | \{gso_err} |")
+
+  let gsa_min = array_min(gsa_values)
+  let gsa_max = array_max(gsa_values)
+  let gsa_avg = array_avg(gsa_values)
+  let gsa_err = calc_relative_error(gsa_avg, known_optimal)
+  println("  | GSA               | \{gsa_min} | \{gsa_max} | \{gsa_avg} | \{gsa_err} |")
+
+  let tlbo_min = array_min(tlbo_values)
+  let tlbo_max = array_max(tlbo_values)
+  let tlbo_avg = array_avg(tlbo_values)
+  let tlbo_err = calc_relative_error(tlbo_avg, known_optimal)
+  println("  | TLBO              | \{tlbo_min} | \{tlbo_max} | \{tlbo_avg} | \{tlbo_err} |")
+
+  let amo_min = array_min(amo_values)
+  let amo_max = array_max(amo_values)
+  let amo_avg = array_avg(amo_values)
+  let amo_err = calc_relative_error(amo_avg, known_optimal)
+  println("  | AMO               | \{amo_min} | \{amo_max} | \{amo_avg} | \{amo_err} |")
 
   println("")
 }

@@ -148,7 +148,28 @@ fn main {
   println("   评估次数: \{gso_result.evaluations}")
   println("")
 
-  println("21. 比较不同评估预算下的性能:")
+  println("21. 运行引力搜索算法 (GSA):")
+  let gsa_config = @lib.make_gsa_config(1000, dim, bounds, 25, 100.0, 0.99)
+  let gsa_result = @lib.gravitational_search_algorithm(gsa_config, @lib.sphere_function, rng)
+  println("   最优值: \{gsa_result.best_value}")
+  println("   评估次数: \{gsa_result.evaluations}")
+  println("")
+
+  println("22. 运行教与学优化 (TLBO):")
+  let tlbo_config = @lib.make_tlbo_config(1000, dim, bounds, 30)
+  let tlbo_result = @lib.teaching_learning_based_optimization(tlbo_config, @lib.sphere_function, rng)
+  println("   最优值: \{tlbo_result.best_value}")
+  println("   评估次数: \{tlbo_result.evaluations}")
+  println("")
+
+  println("23. 运行动物迁徙优化 (AMO):")
+  let amo_config = @lib.make_amo_config(1000, dim, bounds, 25, 5)
+  let amo_result = @lib.animal_migration_optimization(amo_config, @lib.sphere_function, rng)
+  println("   最优值: \{amo_result.best_value}")
+  println("   评估次数: \{amo_result.evaluations}")
+  println("")
+
+  println("24. 比较不同评估预算下的性能:")
   let results = @lib.run_benchmark_at_evals(
     @lib.sphere_function,
     "Sphere Function",
