@@ -50,7 +50,28 @@ fn main {
   println("   评估次数: \{hj_result.evaluations}")
   println("")
 
-  println("7. 比较不同评估预算下的性能:")
+  println("7. 运行鲸群优化 (WOA):")
+  let woa_config = @lib.make_woa_config(1000, dim, bounds, 25, 1.0)
+  let woa_result = @lib.whale_optimization(woa_config, @lib.sphere_function, rng)
+  println("   最优值: \{woa_result.best_value}")
+  println("   评估次数: \{woa_result.evaluations}")
+  println("")
+
+  println("8. 运行蝙蝠算法 (Bat Algorithm):")
+  let bat_config = @lib.make_bat_config(1000, dim, bounds, 25, 0.0, 1.0, 0.5, 1.0)
+  let bat_result = @lib.bat_algorithm(bat_config, @lib.sphere_function, rng)
+  println("   最优值: \{bat_result.best_value}")
+  println("   评估次数: \{bat_result.evaluations}")
+  println("")
+
+  println("9. 运行和声搜索 (Harmony Search):")
+  let hs_config = @lib.make_hs_config(1000, dim, bounds, 20, 0.9, 0.3, 0.05)
+  let hs_result = @lib.harmony_search(hs_config, @lib.sphere_function, rng)
+  println("   最优值: \{hs_result.best_value}")
+  println("   评估次数: \{hs_result.evaluations}")
+  println("")
+
+  println("10. 比较不同评估预算下的性能:")
   let results = @lib.run_benchmark_at_evals(
     @lib.sphere_function,
     "Sphere Function",

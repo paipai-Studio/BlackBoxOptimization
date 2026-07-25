@@ -247,3 +247,50 @@ test "GWO improves with more evaluations" {
 
   assert_true(result2.best_value <= result1.best_value)
 }
+
+test "WOA produces valid result" {
+  let config = @lib.make_woa_config(500, 3, @lib.make_bounds(-5.0, 5.0), 15, 1.0)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.whale_optimization(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "Bat Algorithm produces valid result" {
+  let config = @lib.make_bat_config(500, 3, @lib.make_bounds(-5.0, 5.0), 15, 0.0, 1.0, 0.5, 1.0)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.bat_algorithm(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "Harmony Search produces valid result" {
+  let config = @lib.make_hs_config(500, 3, @lib.make_bounds(-5.0, 5.0), 15, 0.9, 0.3, 0.05)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.harmony_search(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "Harmony Search improves with more evaluations" {
+  let config1 = @lib.make_hs_config(100, 3, @lib.make_bounds(-5.0, 5.0), 15, 0.9, 0.3, 0.05)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.harmony_search(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_hs_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 15, 0.9, 0.3, 0.05)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.harmony_search(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "pow_approx works correctly" {
+  let result1 = @lib.pow_approx(2.0, 3.0)
+  assert_true(result1 > 7.0 && result1 < 9.0)
+
+  let result2 = @lib.pow_approx(4.0, 0.5)
+  assert_true(result2 > 1.5 && result2 < 2.5)
+}

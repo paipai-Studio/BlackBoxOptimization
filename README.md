@@ -23,6 +23,9 @@
 | 群体智能 | 布谷鸟搜索 (Cuckoo Search) | 基于巢寄生和Lévy飞行 |
 | 群体智能 | 灰狼优化 (GWO) | 模拟灰狼领导狩猎机制 |
 | 确定性方法 | Hooke-Jeeves 模式搜索 | 无导数的直接搜索方法 |
+| 群体智能 | 鲸群优化 (WOA) | 模拟座头鲸气泡网捕食行为 |
+| 群体智能 | 蝙蝠算法 (Bat Algorithm) | 模拟蝙蝠回声定位行为 |
+| 群体智能 | 和声搜索 (Harmony Search) | 模拟音乐即兴创作过程 |
 
 ## 项目结构
 
@@ -184,6 +187,18 @@ let gwo_result = @lib.grey_wolf_optimizer(gwo_config, f, rng)
 // Hooke-Jeeves 模式搜索
 let hj_config = @lib.make_hooke_jeeves_config(1000, dim, bounds, 0.5, 0.5, 1.0e-6)
 let hj_result = @lib.hooke_jeeves(hj_config, f, rng)
+
+// 鲸群优化 (WOA)
+let woa_config = @lib.make_woa_config(1000, dim, bounds, 25, 1.0)
+let woa_result = @lib.whale_optimization(woa_config, f, rng)
+
+// 蝙蝠算法 (Bat Algorithm)
+let bat_config = @lib.make_bat_config(1000, dim, bounds, 25, 0.0, 1.0, 0.5, 1.0)
+let bat_result = @lib.bat_algorithm(bat_config, f, rng)
+
+// 和声搜索 (Harmony Search)
+let hs_config = @lib.make_hs_config(1000, dim, bounds, 20, 0.9, 0.3, 0.05)
+let hs_result = @lib.harmony_search(hs_config, f, rng)
 ```
 
 ### 内置测试函数

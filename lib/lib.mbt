@@ -46,6 +46,13 @@ pub fn exp_approx(x: Double) -> Double {
   1.0 + x + x2 / 2.0 + x3 / 6.0 + x4 / 24.0 + x5 / 120.0 + x6 / 720.0
 }
 
+pub fn pow_approx(base: Double, exp: Double) -> Double {
+  if base <= 0.0 {
+    return 0.0001
+  }
+  exp_approx(exp * ln_approx(base))
+}
+
 pub fn max(a: Double, b: Double) -> Double {
   if a > b { a } else { b }
 }
@@ -1702,7 +1709,7 @@ pub fn cuckoo_search(config: CuckooSearchConfig, f: (Array[Double]) -> Double, r
         let gauss1 = box_muller(r1, r2)
         let (rng4, r3) = RNG::next(current_rng)
         current_rng = rng4
-        let levy = (1.0 / (abs_val(gauss1).pow(2.0 / 3.0))).sqrt() * (r3 * 2.0 - 1.0)
+        let levy = (1.0 / pow_approx(abs_val(gauss1), 2.0 / 3.0)).sqrt() * (r3 * 2.0 - 1.0)
         let step = config.step_size * bound_range * levy
         new_nest.push(max(bounds.min, min(bounds.max, nests[i][d] + step * gauss1)))
       }
@@ -2001,6 +2008,401 @@ pub fn hooke_jeeves(config: HookeJeevesConfig, f: (Array[Double]) -> Double, rng
   OptimizationResult::{
     best_solution: best_solution,
     best_value: best_value,
+    evaluations: evaluations
+  }
+}
+
+// ===== Whale Optimization Algorithm (WOA) =====
+
+pub struct WOAConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+  spiral_coeff: Double
+}
+
+pub fn make_woa_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int, spiral: Double) -> WOAConfig {
+  WOAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+    spiral_coeff: spiral
+  }
+}
+
+pub fn whale_optimization(config: WOAConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n_whales = config.population_size
+  let b = config.spiral_coeff
+
+  let mut current_rng = rng
+  let whales: Array[Array[Double]] = []
+  let whale_values: Array[Double] = []
+
+  for i in 0..<n_whales {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    whales.push(sol)
+    whale_values.push(evaluate(f, sol))
+  }
+
+  let mut evaluations = n_whales
+  let mut best_pos: Array[Double] = []
+  let mut best_val = 1.0e308
+
+  for i in 0..<n_whales {
+    if whale_values[i] < best_val {
+      best_val = whale_values[i]
+      best_pos = whales[i]
+    }
+  }
+
+  let bound_range = bounds.max - bounds.min
+
+  while evaluations < config.max_evaluations {
+    let a = 2.0 - 2.0 * (evaluations.to_double() / config.max_evaluations.to_double())
+    let a2 = a * a
+
+    for i in 0..<n_whales {
+      if evaluations >= config.max_evaluations { break }
+
+      let new_pos: Array[Double] = []
+      let (rng2, p_rand) = RNG::next(current_rng)
+      current_rng = rng2
+      let (rng3, r_05) = RNG::next(current_rng)
+      current_rng = rng3
+
+      if p_rand < 0.5 {
+        // Encircling prey or search for prey
+        if r_05 < 0.5 {
+          // Search for prey (exploration)
+          let (rng4, r1) = RNG::next(current_rng)
+          current_rng = rng4
+          let (rng5, r2) = RNG::next(current_rng)
+          current_rng = rng5
+          let (rng6, r3) = RNG::next(current_rng)
+          current_rng = rng6
+          let rand_idx = ((r1 * n_whales.to_double()).floor()).to_int()
+          let r_idx = if rand_idx >= n_whales { n_whales - 1 } else { rand_idx }
+
+          for d in 0..<dim {
+            let (rng7, rd1) = RNG::next(current_rng)
+            current_rng = rng7
+            let (rng8, rd2) = RNG::next(current_rng)
+            current_rng = rng8
+            let r_d1 = rd1 * 2.0 - 1.0
+            let r_d2 = rd2 * 2.0 - 1.0
+            let d_leader = abs_val(whales[r_idx][d] - whales[i][d])
+            let pos = whales[r_idx][d] - a2 * r_d1 * d_leader
+            new_pos.push(max(bounds.min, min(bounds.max, pos)))
+          }
+        } else {
+          // Encircling prey (exploitation)
+          for d in 0..<dim {
+            let (rng7, rd1) = RNG::next(current_rng)
+            current_rng = rng7
+            let (rng8, rd2) = RNG::next(current_rng)
+            current_rng = rng8
+            let r_d1 = rd1 * 2.0 - 1.0
+            let r_d2 = rd2 * 2.0 - 1.0
+            let d_prey = abs_val(best_pos[d] - whales[i][d])
+            let pos = best_pos[d] - a * r_d1 * d_prey
+            new_pos.push(max(bounds.min, min(bounds.max, pos)))
+          }
+        }
+      } else {
+        // Bubble-net attacking (spiral update)
+        for d in 0..<dim {
+          let (rng7, rd1) = RNG::next(current_rng)
+          current_rng = rng7
+          let (rng8, rd2) = RNG::next(current_rng)
+          current_rng = rng8
+          let r_d1 = rd1 * 2.0 - 1.0
+          let r_d2 = rd2 * 2.0 - 1.0
+          let d_prey = abs_val(best_pos[d] - whales[i][d])
+          let angle = 2.0 * 3.14159265358979323846 * r_d2
+          let spiral = exp_approx(b * angle) * cos_approx(2.0 * 3.14159265358979323846 * r_d2)
+          let pos = d_prey * spiral + best_pos[d]
+          new_pos.push(max(bounds.min, min(bounds.max, pos)))
+        }
+      }
+
+      whales[i] = new_pos
+      let new_val = evaluate(f, new_pos)
+      whale_values[i] = new_val
+      evaluations = evaluations + 1
+
+      if new_val < best_val {
+        best_val = new_val
+        best_pos = new_pos
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
+// ===== Bat Algorithm (BA) =====
+
+pub struct BatConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+  f_min: Double
+  f_max: Double
+  pulse_rate: Double
+  loudness: Double
+}
+
+pub fn make_bat_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int, fmin: Double, fmax: Double, pr: Double, loud: Double) -> BatConfig {
+  BatConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+    f_min: fmin,
+    f_max: fmax,
+    pulse_rate: pr,
+    loudness: loud
+  }
+}
+
+pub fn bat_algorithm(config: BatConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n_bats = config.population_size
+
+  let mut current_rng = rng
+  let bats: Array[Array[Double]] = []
+  let velocities: Array[Array[Double]] = []
+  let bat_values: Array[Double] = []
+  let frequencies: Array[Double] = []
+
+  for i in 0..<n_bats {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    let vel: Array[Double] = []
+    for d in 0..<dim { vel.push(0.0) }
+    bats.push(sol)
+    velocities.push(vel)
+    bat_values.push(evaluate(f, sol))
+    frequencies.push(0.0)
+  }
+
+  let mut evaluations = n_bats
+  let mut best_pos: Array[Double] = []
+  let mut best_val = 1.0e308
+
+  for i in 0..<n_bats {
+    if bat_values[i] < best_val {
+      best_val = bat_values[i]
+      best_pos = bats[i]
+    }
+  }
+
+  let mut loudness = config.loudness
+  let mut pulse_rate = config.pulse_rate
+  let bound_range = bounds.max - bounds.min
+
+  while evaluations < config.max_evaluations {
+    for i in 0..<n_bats {
+      if evaluations >= config.max_evaluations { break }
+
+      // Update frequency
+      let (rng2, r_freq) = RNG::next(current_rng)
+      current_rng = rng2
+      frequencies[i] = config.f_min + (config.f_max - config.f_min) * r_freq
+
+      // Update velocity
+      let new_vel: Array[Double] = []
+      for d in 0..<dim {
+        let (rng3, r_d) = RNG::next(current_rng)
+        current_rng = rng3
+        new_vel.push(velocities[i][d] + (bats[i][d] - best_pos[d]) * frequencies[i])
+      }
+      velocities[i] = new_vel
+
+      // Update position
+      let new_pos: Array[Double] = []
+      for d in 0..<dim {
+        new_pos.push(max(bounds.min, min(bounds.max, bats[i][d] + velocities[i][d])))
+      }
+
+      // Local search
+      let (rng4, r_pulse) = RNG::next(current_rng)
+      current_rng = rng4
+      if r_pulse > pulse_rate {
+        for d in 0..<dim {
+          let (rng5, r_step) = RNG::next(current_rng)
+          current_rng = rng5
+          let step = loudness * (r_step * 2.0 - 1.0)
+          new_pos[d] = max(bounds.min, min(bounds.max, best_pos[d] + step))
+        }
+      }
+
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+
+      // Accept if better and loudness condition met
+      let (rng6, r_loud) = RNG::next(current_rng)
+      current_rng = rng6
+      if new_val < bat_values[i] && r_loud < loudness {
+        bats[i] = new_pos
+        bat_values[i] = new_val
+      }
+
+      if new_val < best_val {
+        best_val = new_val
+        best_pos = new_pos
+
+        // Update loudness and pulse rate
+        loudness = loudness * 0.9
+        pulse_rate = pulse_rate + 0.01
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
+// ===== Harmony Search (HS) =====
+
+pub struct HSConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  harmony_memory_size: Int
+  hmcr: Double
+  par: Double
+  bw: Double
+}
+
+pub fn make_hs_config(max_evals: Int, dim: Int, b: Bounds, hms: Int, hmcr_val: Double, par_val: Double, bw_val: Double) -> HSConfig {
+  HSConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    harmony_memory_size: hms,
+    hmcr: hmcr_val,
+    par: par_val,
+    bw: bw_val
+  }
+}
+
+pub fn harmony_search(config: HSConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let hms = config.harmony_memory_size
+  let hmcr = config.hmcr
+  let par = config.par
+  let bw = config.bw
+
+  let mut current_rng = rng
+  let harmony_memory: Array[Array[Double]] = []
+  let hm_values: Array[Double] = []
+
+  for i in 0..<hms {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    harmony_memory.push(sol)
+    hm_values.push(evaluate(f, sol))
+  }
+
+  let mut evaluations = hms
+  let mut best_idx = 0
+  let mut worst_idx = 0
+  let mut best_val = hm_values[0]
+  let mut worst_val = hm_values[0]
+
+  for i in 1..<hms {
+    if hm_values[i] < best_val {
+      best_val = hm_values[i]
+      best_idx = i
+    }
+    if hm_values[i] > worst_val {
+      worst_val = hm_values[i]
+      worst_idx = i
+    }
+  }
+
+  let bound_range = bounds.max - bounds.min
+
+  while evaluations < config.max_evaluations {
+    // Create new harmony
+    let new_harmony: Array[Double] = []
+
+    for d in 0..<dim {
+      let (rng2, r1) = RNG::next(current_rng)
+      current_rng = rng2
+
+      if r1 < hmcr {
+        // Memory consideration
+        let (rng3, r2) = RNG::next(current_rng)
+        current_rng = rng3
+        let idx = ((r2 * hms.to_double()).floor()).to_int()
+        let pick_idx = if idx >= hms { hms - 1 } else { idx }
+        let val = harmony_memory[pick_idx][d]
+
+        // Pitch adjustment
+        let (rng4, r3) = RNG::next(current_rng)
+        current_rng = rng4
+        if r3 < par {
+          let (rng5, r4) = RNG::next(current_rng)
+          current_rng = rng5
+          let delta = (r4 * 2.0 - 1.0) * bw * bound_range
+          new_harmony.push(max(bounds.min, min(bounds.max, val + delta)))
+        } else {
+          new_harmony.push(val)
+        }
+      } else {
+        // Randomization
+        let (rng6, r5) = RNG::next(current_rng)
+        current_rng = rng6
+        new_harmony.push(bounds.min + r5 * bound_range)
+      }
+    }
+
+    let new_val = evaluate(f, new_harmony)
+    evaluations = evaluations + 1
+
+    if new_val < worst_val {
+      // Replace worst harmony
+      harmony_memory[worst_idx] = new_harmony
+      hm_values[worst_idx] = new_val
+
+      // Find new best and worst
+      best_val = hm_values[0]
+      worst_val = hm_values[0]
+      best_idx = 0
+      worst_idx = 0
+      for i in 1..<hms {
+        if hm_values[i] < best_val {
+          best_val = hm_values[i]
+          best_idx = i
+        }
+        if hm_values[i] > worst_val {
+          worst_val = hm_values[i]
+          worst_idx = i
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: harmony_memory[best_idx],
+    best_value: best_val,
     evaluations: evaluations
   }
 }
@@ -2350,6 +2752,36 @@ pub fn run_benchmark_at_evals(
     relative_error: hj_error
   })
 
+  let woa_config = make_woa_config(max_evals, dim, bounds, 25, 1.0)
+  let woa_result = whale_optimization(woa_config, f, rng)
+  let woa_error = calc_relative_error(woa_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "WOA",
+    best_value: woa_result.best_value,
+    evaluations: woa_result.evaluations,
+    relative_error: woa_error
+  })
+
+  let bat_config = make_bat_config(max_evals, dim, bounds, 25, 0.0, 1.0, 0.5, 1.0)
+  let bat_result = bat_algorithm(bat_config, f, rng)
+  let bat_error = calc_relative_error(bat_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "Bat Algorithm",
+    best_value: bat_result.best_value,
+    evaluations: bat_result.evaluations,
+    relative_error: bat_error
+  })
+
+  let hs_config = make_hs_config(max_evals, dim, bounds, 20, 0.9, 0.3, 0.05)
+  let hs_result = harmony_search(hs_config, f, rng)
+  let hs_error = calc_relative_error(hs_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "Harmony Search",
+    best_value: hs_result.best_value,
+    evaluations: hs_result.evaluations,
+    relative_error: hs_error
+  })
+
   results
 }
 
@@ -2397,6 +2829,9 @@ pub fn run_multiple_trials(
   let cs_values: Array[Double] = []
   let gwo_values: Array[Double] = []
   let hj_values: Array[Double] = []
+  let woa_values: Array[Double] = []
+  let bat_values: Array[Double] = []
+  let hs_values: Array[Double] = []
 
   for trial in 0..<num_trials {
     let seed = base_seed + trial.to_double() * 1000.0
@@ -2469,6 +2904,18 @@ pub fn run_multiple_trials(
     let hj_config = make_hooke_jeeves_config(max_evals, dim, bounds, 0.5, 0.5, 1.0e-6)
     let hj_result = hooke_jeeves(hj_config, f, rng)
     hj_values.push(hj_result.best_value)
+
+    let woa_config = make_woa_config(max_evals, dim, bounds, 25, 1.0)
+    let woa_result = whale_optimization(woa_config, f, rng)
+    woa_values.push(woa_result.best_value)
+
+    let bat_config = make_bat_config(max_evals, dim, bounds, 25, 0.0, 1.0, 0.5, 1.0)
+    let bat_result = bat_algorithm(bat_config, f, rng)
+    bat_values.push(bat_result.best_value)
+
+    let hs_config = make_hs_config(max_evals, dim, bounds, 20, 0.9, 0.3, 0.05)
+    let hs_result = harmony_search(hs_config, f, rng)
+    hs_values.push(hs_result.best_value)
   }
 
   println("  Algorithm          | Min Value           | Max Value           | Avg Value           | Avg Error")
@@ -2575,6 +3022,24 @@ pub fn run_multiple_trials(
   let hj_avg = array_avg(hj_values)
   let hj_err = calc_relative_error(hj_avg, known_optimal)
   println("  | Hooke-Jeeves      | \{hj_min} | \{hj_max} | \{hj_avg} | \{hj_err} |")
+
+  let woa_min = array_min(woa_values)
+  let woa_max = array_max(woa_values)
+  let woa_avg = array_avg(woa_values)
+  let woa_err = calc_relative_error(woa_avg, known_optimal)
+  println("  | WOA               | \{woa_min} | \{woa_max} | \{woa_avg} | \{woa_err} |")
+
+  let bat_min = array_min(bat_values)
+  let bat_max = array_max(bat_values)
+  let bat_avg = array_avg(bat_values)
+  let bat_err = calc_relative_error(bat_avg, known_optimal)
+  println("  | Bat Algorithm     | \{bat_min} | \{bat_max} | \{bat_avg} | \{bat_err} |")
+
+  let hs_min = array_min(hs_values)
+  let hs_max = array_max(hs_values)
+  let hs_avg = array_avg(hs_values)
+  let hs_err = calc_relative_error(hs_avg, known_optimal)
+  println("  | Harmony Search    | \{hs_min} | \{hs_max} | \{hs_avg} | \{hs_err} |")
 
   println("")
 }
