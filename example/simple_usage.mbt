@@ -71,7 +71,28 @@ fn main {
   println("   评估次数: \{hs_result.evaluations}")
   println("")
 
-  println("10. 比较不同评估预算下的性能:")
+  println("10. 运行正弦余弦算法 (SCA):")
+  let sca_config = @lib.make_sca_config(1000, dim, bounds, 25)
+  let sca_result = @lib.sine_cosine_algorithm(sca_config, @lib.sphere_function, rng)
+  println("   最优值: \{sca_result.best_value}")
+  println("   评估次数: \{sca_result.evaluations}")
+  println("")
+
+  println("11. 运行飞蛾火焰优化 (MFO):")
+  let mfo_config = @lib.make_mfo_config(1000, dim, bounds, 25, 1.0)
+  let mfo_result = @lib.moth_flame_optimization(mfo_config, @lib.sphere_function, rng)
+  println("   最优值: \{mfo_result.best_value}")
+  println("   评估次数: \{mfo_result.evaluations}")
+  println("")
+
+  println("12. 运行蚁狮优化 (ALO):")
+  let alo_config = @lib.make_alo_config(1000, dim, bounds, 25)
+  let alo_result = @lib.antlion_optimizer(alo_config, @lib.sphere_function, rng)
+  println("   最优值: \{alo_result.best_value}")
+  println("   评估次数: \{alo_result.evaluations}")
+  println("")
+
+  println("13. 比较不同评估预算下的性能:")
   let results = @lib.run_benchmark_at_evals(
     @lib.sphere_function,
     "Sphere Function",

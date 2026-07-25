@@ -294,3 +294,74 @@ test "pow_approx works correctly" {
   let result2 = @lib.pow_approx(4.0, 0.5)
   assert_true(result2 > 1.5 && result2 < 2.5)
 }
+
+test "sin_approx basic values" {
+  assert_true(@lib.abs_val(@lib.sin_approx(0.0)) < 0.001)
+  let sin_half = @lib.sin_approx(@lib.PI / 2.0)
+  assert_true(sin_half > 0.99 && sin_half < 1.01)
+  let sin_pi = @lib.sin_approx(@lib.PI)
+  assert_true(@lib.abs_val(sin_pi) < 0.01)
+}
+
+test "SCA produces valid result" {
+  let config = @lib.make_sca_config(500, 3, @lib.make_bounds(-5.0, 5.0), 15)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.sine_cosine_algorithm(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "SCA improves with more evaluations" {
+  let config1 = @lib.make_sca_config(100, 3, @lib.make_bounds(-5.0, 5.0), 15)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.sine_cosine_algorithm(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_sca_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 15)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.sine_cosine_algorithm(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "MFO produces valid result" {
+  let config = @lib.make_mfo_config(500, 3, @lib.make_bounds(-5.0, 5.0), 15, 1.0)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.moth_flame_optimization(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "MFO improves with more evaluations" {
+  let config1 = @lib.make_mfo_config(100, 3, @lib.make_bounds(-5.0, 5.0), 15, 1.0)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.moth_flame_optimization(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_mfo_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 15, 1.0)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.moth_flame_optimization(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "ALO produces valid result" {
+  let config = @lib.make_alo_config(500, 3, @lib.make_bounds(-5.0, 5.0), 15)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.antlion_optimizer(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "ALO improves with more evaluations" {
+  let config1 = @lib.make_alo_config(100, 3, @lib.make_bounds(-5.0, 5.0), 15)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.antlion_optimizer(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_alo_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 15)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.antlion_optimizer(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}

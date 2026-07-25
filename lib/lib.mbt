@@ -34,6 +34,16 @@ pub fn cos_approx(x: Double) -> Double {
   1.0 - x2 / 2.0 + x4 / 24.0 - x6 / 720.0 + x8 / 40320.0 - x6 * x2 / 3628800.0 + x8 * x2 / 479001600.0
 }
 
+pub fn sin_approx(x: Double) -> Double {
+  let rx = reduce_to_pi(x)
+  let x2 = rx * rx
+  let x3 = x2 * rx
+  let x5 = x3 * x2
+  let x7 = x5 * x2
+  let x9 = x7 * x2
+  rx - x3 / 6.0 + x5 / 120.0 - x7 / 5040.0 + x9 / 362880.0
+}
+
 pub fn exp_approx(x: Double) -> Double {
   if x < 0.0 {
     return 1.0 / exp_approx(-x)
@@ -2407,6 +2417,364 @@ pub fn harmony_search(config: HSConfig, f: (Array[Double]) -> Double, rng: RNG) 
   }
 }
 
+// ===== Sine Cosine Algorithm (SCA) =====
+
+pub struct SCAConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+}
+
+pub fn make_sca_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> SCAConfig {
+  SCAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz
+  }
+}
+
+pub fn sine_cosine_algorithm(config: SCAConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n_sca = config.population_size
+
+  let mut current_rng = rng
+  let population: Array[Array[Double]] = []
+  let values: Array[Double] = []
+
+  for i in 0..<n_sca {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    population.push(sol)
+    values.push(evaluate(f, sol))
+  }
+
+  let mut evaluations = n_sca
+  let mut best_pos: Array[Double] = []
+  let mut best_val = 1.0e308
+
+  for i in 0..<n_sca {
+    if values[i] < best_val {
+      best_val = values[i]
+      best_pos = population[i]
+    }
+  }
+
+  let mut r1 = 2.0
+
+  while evaluations < config.max_evaluations {
+    let r1_update = 2.0 - evaluations.to_double() * (2.0 / config.max_evaluations.to_double())
+
+    for i in 0..<n_sca {
+      if evaluations >= config.max_evaluations { break }
+
+      let (rng2, r2_val) = RNG::next(current_rng)
+      current_rng = rng2
+      let (rng3, r3_val) = RNG::next(current_rng)
+      current_rng = rng3
+      let (rng4, r4_val) = RNG::next(current_rng)
+      current_rng = rng4
+
+      let r2 = 2.0 * PI * r2_val
+      let r3 = 2.0 * r3_val - 1.0
+      let r4 = r4_val
+
+      let new_pos: Array[Double] = []
+      for d in 0..<dim {
+        let dist = abs_val(r3 * best_pos[d] - population[i][d])
+        let pos = if r4 < 0.5 {
+          population[i][d] + r1_update * sin_approx(r2) * dist
+        } else {
+          population[i][d] + r1_update * cos_approx(r2) * dist
+        }
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+
+      population[i] = new_pos
+      let new_val = evaluate(f, new_pos)
+      values[i] = new_val
+      evaluations = evaluations + 1
+
+      if new_val < best_val {
+        best_val = new_val
+        best_pos = new_pos
+      }
+    }
+
+    r1 = r1_update
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
+// ===== Moth Flame Optimization (MFO) =====
+
+pub struct MFOConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+  spiral_constant: Double
+}
+
+pub fn make_mfo_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int, spiral: Double) -> MFOConfig {
+  MFOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+    spiral_constant: spiral
+  }
+}
+
+pub fn moth_flame_optimization(config: MFOConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n_moths = config.population_size
+  let b = config.spiral_constant
+
+  let mut current_rng = rng
+  let moths: Array[Array[Double]] = []
+  let moth_values: Array[Double] = []
+
+  for i in 0..<n_moths {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    moths.push(sol)
+    moth_values.push(evaluate(f, sol))
+  }
+
+  let mut evaluations = n_moths
+  let mut best_pos: Array[Double] = []
+  let mut best_val = 1.0e308
+
+  for i in 0..<n_moths {
+    if moth_values[i] < best_val {
+      best_val = moth_values[i]
+      best_pos = moths[i]
+    }
+  }
+
+  let flames: Array[Array[Double]] = []
+  let flame_values: Array[Double] = []
+  for i in 0..<n_moths {
+    flames.push(moths[i])
+    flame_values.push(moth_values[i])
+  }
+
+  while evaluations < config.max_evaluations {
+    let num_flames = max_int(1, (n_moths.to_double() - evaluations.to_double() * (n_moths.to_double() / config.max_evaluations.to_double())).to_int())
+
+    let sorted_flames: Array[Array[Double]] = []
+    let sorted_values: Array[Double] = []
+    let sorted_indices: Array[Int] = []
+    for i in 0..<flame_values.length() {
+      sorted_indices.push(i)
+    }
+    for i in 0..<sorted_indices.length() {
+      for j in (i + 1)..<sorted_indices.length() {
+        if flame_values[sorted_indices[j]] < flame_values[sorted_indices[i]] {
+          let temp = sorted_indices[i]
+          sorted_indices[i] = sorted_indices[j]
+          sorted_indices[j] = temp
+        }
+      }
+    }
+    for i in 0..<sorted_indices.length() {
+      sorted_flames.push(flames[sorted_indices[i]])
+      sorted_values.push(flame_values[sorted_indices[i]])
+    }
+
+    for i in 0..<n_moths {
+      if evaluations >= config.max_evaluations { break }
+
+      let flame_idx = min_int(i, num_flames - 1)
+
+      let new_pos: Array[Double] = []
+      for d in 0..<dim {
+        let (rng2, r_t) = RNG::next(current_rng)
+        current_rng = rng2
+        let t = r_t
+        let dist = abs_val(sorted_flames[flame_idx][d] - moths[i][d])
+        let pos = dist * exp_approx(b * t) * cos_approx(2.0 * PI * t) + sorted_flames[flame_idx][d]
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+
+      moths[i] = new_pos
+      let new_val = evaluate(f, new_pos)
+      moth_values[i] = new_val
+      evaluations = evaluations + 1
+
+      if new_val < best_val {
+        best_val = new_val
+        best_pos = new_pos
+      }
+    }
+
+    for i in 0..<n_moths {
+      flames[i] = moths[i]
+      flame_values[i] = moth_values[i]
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
+// ===== Antlion Optimizer (ALO) =====
+
+pub struct ALOConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  ant_count: Int
+}
+
+pub fn make_alo_config(max_evals: Int, dim: Int, b: Bounds, ants: Int) -> ALOConfig {
+  ALOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    ant_count: ants
+  }
+}
+
+pub fn antlion_optimizer(config: ALOConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n_ants = config.ant_count
+  let n_antlions = config.ant_count
+
+  let mut current_rng = rng
+  let antlions: Array[Array[Double]] = []
+  let antlion_values: Array[Double] = []
+
+  for i in 0..<n_antlions {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    antlions.push(sol)
+    antlion_values.push(evaluate(f, sol))
+  }
+
+  let mut evaluations = n_antlions
+  let mut best_pos: Array[Double] = []
+  let mut best_val = 1.0e308
+
+  for i in 0..<n_antlions {
+    if antlion_values[i] < best_val {
+      best_val = antlion_values[i]
+      best_pos = antlions[i]
+    }
+  }
+
+  let elite_antlions: Array[Array[Double]] = []
+  let elite_values: Array[Double] = []
+
+  let ants: Array[Array[Double]] = []
+  let ant_values: Array[Double] = []
+  for i in 0..<n_ants {
+    ants.push(antlions[i])
+    ant_values.push(antlion_values[i])
+  }
+
+  let mut iter = 0
+  let max_iter = (config.max_evaluations.to_double() / (n_ants.to_double() + n_antlions.to_double())).to_int() + 1
+
+  while evaluations < config.max_evaluations {
+    iter = iter + 1
+
+    let sorted_antlions: Array[Int] = []
+    for i in 0..<n_antlions {
+      sorted_antlions.push(i)
+    }
+    for i in 0..<n_antlions {
+      for j in (i + 1)..<n_antlions {
+        if antlion_values[sorted_antlions[j]] < antlion_values[sorted_antlions[i]] {
+          let temp = sorted_antlions[i]
+          sorted_antlions[i] = sorted_antlions[j]
+          sorted_antlions[j] = temp
+        }
+      }
+    }
+
+    elite_antlions.clear()
+    elite_values.clear()
+    let elite_count = min_int(3, n_antlions)
+    for i in 0..<elite_count {
+      elite_antlions.push(antlions[sorted_antlions[i]])
+      elite_values.push(antlion_values[sorted_antlions[i]])
+    }
+
+    let boundary_range = bounds.max - bounds.min
+    let alpha = boundary_range / (iter.to_double() * iter.to_double() + 1.0)
+
+    for i in 0..<n_ants {
+      if evaluations >= config.max_evaluations { break }
+
+      let (rng2, r_select) = RNG::next(current_rng)
+      current_rng = rng2
+
+      let selected_idx = if r_select < 0.5 {
+        (r_select * elite_count.to_double()).floor().to_int()
+      } else {
+        let (rng3, rw) = RNG::next(current_rng)
+        current_rng = rng3
+        (rw * elite_count.to_double()).floor().to_int()
+      }
+      let sel_idx = max_int(0, min_int(elite_count - 1, selected_idx))
+
+      let new_pos: Array[Double] = []
+      for d in 0..<dim {
+        let (rng4, r_walk) = RNG::next(current_rng)
+        current_rng = rng4
+        let walk_val = r_walk * 2.0 - 1.0
+        let elite_val = elite_antlions[sel_idx][d]
+        let lower = max(bounds.min, elite_val - alpha)
+        let upper = min(bounds.max, elite_val + alpha)
+        let pos = lower + walk_val * (upper - lower)
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+
+      ants[i] = new_pos
+      let new_val = evaluate(f, new_pos)
+      ant_values[i] = new_val
+      evaluations = evaluations + 1
+
+      if new_val < best_val {
+        best_val = new_val
+        best_pos = new_pos
+      }
+    }
+
+    for i in 0..<n_ants {
+      if ant_values[i] < antlion_values[i] {
+        antlions[i] = ants[i]
+        antlion_values[i] = ant_values[i]
+
+        if antlion_values[i] < best_val {
+          best_val = antlion_values[i]
+          best_pos = antlions[i]
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
 fn box_muller(u1: Double, u2: Double) -> Double {
   let pi = 3.14159265358979323846
   let sqrt_val = (-2.0 * ln_approx(u1)).sqrt()
@@ -2782,6 +3150,36 @@ pub fn run_benchmark_at_evals(
     relative_error: hs_error
   })
 
+  let sca_config = make_sca_config(max_evals, dim, bounds, 25)
+  let sca_result = sine_cosine_algorithm(sca_config, f, rng)
+  let sca_error = calc_relative_error(sca_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "SCA",
+    best_value: sca_result.best_value,
+    evaluations: sca_result.evaluations,
+    relative_error: sca_error
+  })
+
+  let mfo_config = make_mfo_config(max_evals, dim, bounds, 25, 1.0)
+  let mfo_result = moth_flame_optimization(mfo_config, f, rng)
+  let mfo_error = calc_relative_error(mfo_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "MFO",
+    best_value: mfo_result.best_value,
+    evaluations: mfo_result.evaluations,
+    relative_error: mfo_error
+  })
+
+  let alo_config = make_alo_config(max_evals, dim, bounds, 25)
+  let alo_result = antlion_optimizer(alo_config, f, rng)
+  let alo_error = calc_relative_error(alo_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "ALO",
+    best_value: alo_result.best_value,
+    evaluations: alo_result.evaluations,
+    relative_error: alo_error
+  })
+
   results
 }
 
@@ -2832,6 +3230,9 @@ pub fn run_multiple_trials(
   let woa_values: Array[Double] = []
   let bat_values: Array[Double] = []
   let hs_values: Array[Double] = []
+  let sca_values: Array[Double] = []
+  let mfo_values: Array[Double] = []
+  let alo_values: Array[Double] = []
 
   for trial in 0..<num_trials {
     let seed = base_seed + trial.to_double() * 1000.0
@@ -2916,6 +3317,18 @@ pub fn run_multiple_trials(
     let hs_config = make_hs_config(max_evals, dim, bounds, 20, 0.9, 0.3, 0.05)
     let hs_result = harmony_search(hs_config, f, rng)
     hs_values.push(hs_result.best_value)
+
+    let sca_config = make_sca_config(max_evals, dim, bounds, 25)
+    let sca_result = sine_cosine_algorithm(sca_config, f, rng)
+    sca_values.push(sca_result.best_value)
+
+    let mfo_config = make_mfo_config(max_evals, dim, bounds, 25, 1.0)
+    let mfo_result = moth_flame_optimization(mfo_config, f, rng)
+    mfo_values.push(mfo_result.best_value)
+
+    let alo_config = make_alo_config(max_evals, dim, bounds, 25)
+    let alo_result = antlion_optimizer(alo_config, f, rng)
+    alo_values.push(alo_result.best_value)
   }
 
   println("  Algorithm          | Min Value           | Max Value           | Avg Value           | Avg Error")
@@ -3040,6 +3453,24 @@ pub fn run_multiple_trials(
   let hs_avg = array_avg(hs_values)
   let hs_err = calc_relative_error(hs_avg, known_optimal)
   println("  | Harmony Search    | \{hs_min} | \{hs_max} | \{hs_avg} | \{hs_err} |")
+
+  let sca_min = array_min(sca_values)
+  let sca_max = array_max(sca_values)
+  let sca_avg = array_avg(sca_values)
+  let sca_err = calc_relative_error(sca_avg, known_optimal)
+  println("  | SCA               | \{sca_min} | \{sca_max} | \{sca_avg} | \{sca_err} |")
+
+  let mfo_min = array_min(mfo_values)
+  let mfo_max = array_max(mfo_values)
+  let mfo_avg = array_avg(mfo_values)
+  let mfo_err = calc_relative_error(mfo_avg, known_optimal)
+  println("  | MFO               | \{mfo_min} | \{mfo_max} | \{mfo_avg} | \{mfo_err} |")
+
+  let alo_min = array_min(alo_values)
+  let alo_max = array_max(alo_values)
+  let alo_avg = array_avg(alo_values)
+  let alo_err = calc_relative_error(alo_avg, known_optimal)
+  println("  | ALO               | \{alo_min} | \{alo_max} | \{alo_avg} | \{alo_err} |")
 
   println("")
 }

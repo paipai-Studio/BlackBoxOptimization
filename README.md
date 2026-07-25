@@ -26,6 +26,9 @@
 | 群体智能 | 鲸群优化 (WOA) | 模拟座头鲸气泡网捕食行为 |
 | 群体智能 | 蝙蝠算法 (Bat Algorithm) | 模拟蝙蝠回声定位行为 |
 | 群体智能 | 和声搜索 (Harmony Search) | 模拟音乐即兴创作过程 |
+| 群体智能 | 正弦余弦算法 (SCA) | 利用正弦余弦函数振荡搜索 |
+| 群体智能 | 飞蛾火焰优化 (MFO) | 模拟飞蛾螺旋飞行路径 |
+| 群体智能 | 蚁狮优化 (ALO) | 模拟蚁狮陷阱捕食行为 |
 
 ## 项目结构
 
@@ -199,6 +202,18 @@ let bat_result = @lib.bat_algorithm(bat_config, f, rng)
 // 和声搜索 (Harmony Search)
 let hs_config = @lib.make_hs_config(1000, dim, bounds, 20, 0.9, 0.3, 0.05)
 let hs_result = @lib.harmony_search(hs_config, f, rng)
+
+// 正弦余弦算法 (SCA)
+let sca_config = @lib.make_sca_config(1000, dim, bounds, 25)
+let sca_result = @lib.sine_cosine_algorithm(sca_config, f, rng)
+
+// 飞蛾火焰优化 (MFO)
+let mfo_config = @lib.make_mfo_config(1000, dim, bounds, 25, 1.0)
+let mfo_result = @lib.moth_flame_optimization(mfo_config, f, rng)
+
+// 蚁狮优化 (ALO)
+let alo_config = @lib.make_alo_config(1000, dim, bounds, 25)
+let alo_result = @lib.antlion_optimizer(alo_config, f, rng)
 ```
 
 ### 内置测试函数
