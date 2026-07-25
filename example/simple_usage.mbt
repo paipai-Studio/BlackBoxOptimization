@@ -120,7 +120,35 @@ fn main {
   println("   评估次数: \{da_result.evaluations}")
   println("")
 
-  println("17. 比较不同评估预算下的性能:")
+  println("17. 运行入侵杂草优化 (IWO):")
+  let iwo_config = @lib.make_iwo_config(1000, dim, bounds, 10, 40, 1, 5, 2.0, 0.1, 3.0)
+  let iwo_result = @lib.invasive_weed_optimization(iwo_config, @lib.sphere_function, rng)
+  println("   最优值: \{iwo_result.best_value}")
+  println("   评估次数: \{iwo_result.evaluations}")
+  println("")
+
+  println("18. 运行细菌觅食优化 (BFO):")
+  let bfo_config = @lib.make_bfo_config(1000, dim, bounds, 25, 5, 3, 0.2)
+  let bfo_result = @lib.bacteria_foraging_optimization(bfo_config, @lib.sphere_function, rng)
+  println("   最优值: \{bfo_result.best_value}")
+  println("   评估次数: \{bfo_result.evaluations}")
+  println("")
+
+  println("19. 运行混合蛙跳算法 (SFLA):")
+  let sfla_config = @lib.make_sfla_config(1000, dim, bounds, 30, 5, 10)
+  let sfla_result = @lib.shuffled_frog_leaping_algorithm(sfla_config, @lib.sphere_function, rng)
+  println("   最优值: \{sfla_result.best_value}")
+  println("   评估次数: \{sfla_result.evaluations}")
+  println("")
+
+  println("20. 运行萤火虫群优化 (GSO):")
+  let gso_config = @lib.make_gso_config(1000, dim, bounds, 25, 0.4, 0.6, 5, 5.0, 1.0)
+  let gso_result = @lib.glowworm_swarm_optimization(gso_config, @lib.sphere_function, rng)
+  println("   最优值: \{gso_result.best_value}")
+  println("   评估次数: \{gso_result.evaluations}")
+  println("")
+
+  println("21. 比较不同评估预算下的性能:")
   let results = @lib.run_benchmark_at_evals(
     @lib.sphere_function,
     "Sphere Function",

@@ -449,3 +449,87 @@ test "DA improves with more evaluations" {
 
   assert_true(result2.best_value <= result1.best_value)
 }
+
+test "IWO produces valid result" {
+  let config = @lib.make_iwo_config(500, 3, @lib.make_bounds(-5.0, 5.0), 10, 40, 1, 5, 2.0, 0.1, 3.0)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.invasive_weed_optimization(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "IWO improves with more evaluations" {
+  let config1 = @lib.make_iwo_config(100, 3, @lib.make_bounds(-5.0, 5.0), 10, 40, 1, 5, 2.0, 0.1, 3.0)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.invasive_weed_optimization(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_iwo_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 10, 40, 1, 5, 2.0, 0.1, 3.0)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.invasive_weed_optimization(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "BFO produces valid result" {
+  let config = @lib.make_bfo_config(500, 3, @lib.make_bounds(-5.0, 5.0), 20, 3, 2, 0.2)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.bacteria_foraging_optimization(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "BFO improves with more evaluations" {
+  let config1 = @lib.make_bfo_config(100, 3, @lib.make_bounds(-5.0, 5.0), 20, 3, 2, 0.2)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.bacteria_foraging_optimization(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_bfo_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 20, 3, 2, 0.2)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.bacteria_foraging_optimization(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "SFLA produces valid result" {
+  let config = @lib.make_sfla_config(500, 3, @lib.make_bounds(-5.0, 5.0), 20, 4, 5)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.shuffled_frog_leaping_algorithm(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "SFLA improves with more evaluations" {
+  let config1 = @lib.make_sfla_config(100, 3, @lib.make_bounds(-5.0, 5.0), 20, 4, 5)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.shuffled_frog_leaping_algorithm(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_sfla_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 20, 4, 5)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.shuffled_frog_leaping_algorithm(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "GSO produces valid result" {
+  let config = @lib.make_gso_config(500, 3, @lib.make_bounds(-5.0, 5.0), 20, 0.4, 0.6, 5, 5.0, 1.0)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.glowworm_swarm_optimization(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "GSO improves with more evaluations" {
+  let config1 = @lib.make_gso_config(100, 3, @lib.make_bounds(-5.0, 5.0), 20, 0.4, 0.6, 5, 5.0, 1.0)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.glowworm_swarm_optimization(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_gso_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 20, 0.4, 0.6, 5, 5.0, 1.0)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.glowworm_swarm_optimization(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
