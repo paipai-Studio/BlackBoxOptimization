@@ -11,41 +11,23 @@ jobs:
     name: Check, Build & Test
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
 
-      - name: Cache MoonBit toolchain
-        id: cache-moonbit
-        uses: actions/cache@v5
-        with:
-          path: ~/.moon
-          key: ${{ runner.os }}-moonbit-toolchain
+      - name: Install MoonBit
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh -o /tmp/moon-install.sh
+          bash /tmp/moon-install.sh
+          ls -la $HOME/.moon/bin/
+          echo "$HOME/.moon/bin" >> $GITHUB_PATH
 
-      - name: Setup MoonBit
-        if: steps.cache-moonbit.outputs.cache-hit != 'true'
-        run: curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
-
-      - name: Add MoonBit to PATH
-        run: echo "$HOME/.moon/bin" >> $GITHUB_PATH
-
-      - name: Check MoonBit version
+      - name: Verify MoonBit
         run: moon version
 
-      - name: Cache MoonBit build
-        uses: actions/cache@v5
-        with:
-          path: |
-            **/.moon
-            **/_build
-          key: ${{ runner.os }}-moonbit-build-${{ hashFiles('**/moon.mod', '**/moon.pkg', '**/*.mbt') }}
-          restore-keys: |
-            ${{ runner.os }}-moonbit-build-
-
       - name: Moon check
-        run: moon check
-
-      - name: Moon build
-        run: moon build
+        run: moon check --all
 
       - name: Moon test
         run: moon test
+
+      - name: Moon build
+        run: moon build --release
