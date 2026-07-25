@@ -267,7 +267,42 @@ fn main {
   println("   评估次数: \{ffoa_result.evaluations}")
   println("")
 
-  println("38. 比较不同评估预算下的性能:")
+  println("38. 运行人工鱼群算法 (AFSA):")
+  let afsa_config = @lib.make_afsa_config(1000, dim, bounds, 25, 2.0, 0.5, 0.5)
+  let afsa_result = @lib.artificial_fish_swarm(afsa_config, @lib.sphere_function, rng)
+  println("   最优值: \{afsa_result.best_value}")
+  println("   评估次数: \{afsa_result.evaluations}")
+  println("")
+
+  println("39. 运行烟花算法 (FWA):")
+  let fwa_config = @lib.make_fwa_config(1000, dim, bounds, 25)
+  let fwa_result = @lib.fireworks_algorithm(fwa_config, @lib.sphere_function, rng)
+  println("   最优值: \{fwa_result.best_value}")
+  println("   评估次数: \{fwa_result.evaluations}")
+  println("")
+
+  println("40. 运行头脑风暴优化 (BSO):")
+  let bso_config = @lib.make_bso_config(1000, dim, bounds, 25)
+  let bso_result = @lib.brain_storm_optimization(bso_config, @lib.sphere_function, rng)
+  println("   最优值: \{bso_result.best_value}")
+  println("   评估次数: \{bso_result.evaluations}")
+  println("")
+
+  println("41. 运行回溯搜索算法 (BSA):")
+  let bsa_config = @lib.make_bsa_config(1000, dim, bounds, 25)
+  let bsa_result = @lib.backtracking_search_algorithm(bsa_config, @lib.sphere_function, rng)
+  println("   最优值: \{bsa_result.best_value}")
+  println("   评估次数: \{bsa_result.evaluations}")
+  println("")
+
+  println("42. 运行鸽群优化 (PIO):")
+  let pio_config = @lib.make_pio_config(1000, dim, bounds, 25)
+  let pio_result = @lib.pigeon_inspired_optimization(pio_config, @lib.sphere_function, rng)
+  println("   最优值: \{pio_result.best_value}")
+  println("   评估次数: \{pio_result.evaluations}")
+  println("")
+
+  println("43. 比较不同评估预算下的性能:")
   let results = @lib.run_benchmark_at_evals(
     @lib.sphere_function,
     "Sphere Function",

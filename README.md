@@ -48,6 +48,16 @@
 | 群体智能 | 磷虾群算法 (KH) | 模拟磷虾诱导运动、觅食和扩散 |
 | 进化算法 | 帝国主义竞争算法 (ICA) | 模拟帝国殖民、同化和竞争 |
 | 估计分布 | 随机分形搜索 (SFS) | 基于分形发现和学习两阶段搜索 |
+| 群体智能 | 飞蛾搜索算法 (MSA) | 基于飞蛾 Lévy 飞行和螺旋搜索 |
+| 群体智能 | 路径finder算法 (PFA) | 基于领导者-跟随者层级移动 |
+| 群体智能 | 菌落捕食算法 (CPA) | 模拟捕食-逃跑概率行为 |
+| 群体智能 | 细菌菌落优化 (BCO) | 基于细菌趋化聚集行为 |
+| 群体智能 | 飞狐优化算法 (FFOA) | 带惯性权重的群体飞行搜索 |
+| 群体智能 | 人工鱼群算法 (AFSA) | 模拟鱼群觅食、聚群和追尾行为 |
+| 群体智能 | 烟花算法 (FWA) | 模拟烟花爆炸及火花分布机制 |
+| 人类行为 | 头脑风暴优化 (BSO) | 模拟人类头脑风暴聚类的创意生成过程 |
+| 进化算法 | 回溯搜索算法 (BSA) | 基于历史种群记忆的交叉变异 |
+| 群体智能 | 鸽群优化 (PIO) | 模拟信鸽导航的地图指南针与地标两阶段 |
 
 ## 项目结构
 
@@ -61,10 +71,10 @@ BlackBoxOptimization/
 │   └── main.mbt                  # 基准测试入口
 ├── test/                         # 测试包
 │   ├── moon.pkg.json             # 包配置
-│   └── lib_test.mbt              # 单元测试（74 个测试用例）
+│   └── lib_test.mbt              # 单元测试（104 个测试用例）
 ├── example/                      # 示例包
 │   ├── moon.pkg.json             # 包配置
-│   └── simple_usage.mbt          # 使用示例（28 个示例）
+│   └── simple_usage.mbt          # 使用示例（42 个示例）
 ├── .github/workflows/            # CI 配置
 │   └── ci.yml                    # GitHub Actions
 ├── moon.mod.json                 # 模块配置
@@ -98,7 +108,7 @@ moon run main
 ### 运行测试
 
 ```bash
-# 运行所有测试（74 个测试用例）
+# 运行所有测试（104 个测试用例）
 moon test
 
 # 代码检查
@@ -309,6 +319,46 @@ let ica_result = @lib.imperialist_competitive_algorithm(ica_config, f, rng)
 // 随机分形搜索 (SFS)
 let sfs_config = @lib.make_sfs_config(1000, dim, bounds, 25)
 let sfs_result = @lib.stochastic_fractal_search(sfs_config, f, rng)
+
+// 飞蛾搜索算法 (MSA)
+let msa_config = @lib.make_msa_config(1000, dim, bounds, 25)
+let msa_result = @lib.moth_search_algorithm(msa_config, f, rng)
+
+// 路径finder算法 (PFA)
+let pfa_config = @lib.make_pfa_config(1000, dim, bounds, 25)
+let pfa_result = @lib.pathfinder_algorithm(pfa_config, f, rng)
+
+// 菌落捕食算法 (CPA)
+let cpa_config = @lib.make_cpa_config(1000, dim, bounds, 25)
+let cpa_result = @lib.colony_predation_algorithm(cpa_config, f, rng)
+
+// 细菌菌落优化 (BCO)
+let bco_config = @lib.make_bco_config(1000, dim, bounds, 25)
+let bco_result = @lib.bacteria_colony_optimization(bco_config, f, rng)
+
+// 飞狐优化算法 (FFOA)
+let ffoa_config = @lib.make_ffoa_config(1000, dim, bounds, 25)
+let ffoa_result = @lib.flying_fox_optimization(ffoa_config, f, rng)
+
+// 人工鱼群算法 (AFSA)
+let afsa_config = @lib.make_afsa_config(1000, dim, bounds, 25, 2.0, 0.5, 0.5)
+let afsa_result = @lib.artificial_fish_swarm(afsa_config, f, rng)
+
+// 烟花算法 (FWA)
+let fwa_config = @lib.make_fwa_config(1000, dim, bounds, 25)
+let fwa_result = @lib.fireworks_algorithm(fwa_config, f, rng)
+
+// 头脑风暴优化 (BSO)
+let bso_config = @lib.make_bso_config(1000, dim, bounds, 25)
+let bso_result = @lib.brain_storm_optimization(bso_config, f, rng)
+
+// 回溯搜索算法 (BSA)
+let bsa_config = @lib.make_bsa_config(1000, dim, bounds, 25)
+let bsa_result = @lib.backtracking_search_algorithm(bsa_config, f, rng)
+
+// 鸽群优化 (PIO)
+let pio_config = @lib.make_pio_config(1000, dim, bounds, 25)
+let pio_result = @lib.pigeon_inspired_optimization(pio_config, f, rng)
 ```
 
 ### 内置测试函数
@@ -608,6 +658,59 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | discovery_iterations | 发现阶段迭代 | 3 |
 | learning_iterations | 学习阶段迭代 | 2 |
 
+### MSA (飞蛾搜索算法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 飞蛾数量 | 25 |
+
+### PFA (路径finder算法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 动物数量 | 25 |
+
+### CPA (菌落捕食算法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 个体数量 | 25 |
+
+### BCO (细菌菌落优化)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 细菌数量 | 25 |
+
+### FFOA (飞狐优化算法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 飞狐数量 | 25 |
+
+### AFSA (人工鱼群算法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 人工鱼数量 | 25 |
+| visual | 视野范围 | 2.0 |
+| step | 移动步长 | 0.5 |
+| crowd_factor | 拥挤度因子 | 0.5 |
+
+### FWA (烟花算法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 烟花数量 | 25 |
+
+### BSO (头脑风暴优化)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 创意(个体)数量 | 25 |
+
+### BSA (回溯搜索算法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 种群大小 | 25 |
+
+### PIO (鸽群优化)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 鸽群大小 | 25 |
+
 ## 性能对比
 
 ### Sphere 函数（5维）
@@ -656,6 +759,16 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | KH | 0.193 | 0.193 | 0.193 |
 | ICA | 0.906 | 0.906 | 0.906 |
 | **SFS** | **1.82e-4** | **5.63e-5** | **3.36e-6** |
+| MSA | 13.47 | 2.77 | 0.413 |
+| PFA | 0.226 | 0.109 | 0.353 |
+| CPA | 1.90 | 0.592 | 2.73 |
+| **BCO** | **0.245** | **0.00157** | **0.00270** |
+| FFOA | 0.701 | 0.759 | 0.346 |
+| AFSA | 0.134 | 0.0183 | 0.0183 |
+| FWA | 7.28 | 4.21 | 4.21 |
+| BSO | 0.00321 | 0.0000290 | 0.0000208 |
+| BSA | 1.57 | 0.182 | 0.00170 |
+| PIO | 0.00676 | 1.83e-10 | 1.88e-18 |
 
 ### Rastrigin 函数（5维）
 
@@ -703,6 +816,16 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | KH | 6.30 | 7.86 |
 | ICA | 17.97 | 17.97 |
 | **SFS** | **0.454** | **0.0113** |
+| MSA | 31.65 | 35.67 |
+| PFA | 21.95 | 24.16 |
+| CPA | 25.99 | 23.13 |
+| **BCO** | **2.29** | **1.58** |
+| FFOA | 24.17 | 25.06 |
+| AFSA | 14.88 | 7.53 |
+| FWA | 27.79 | 27.79 |
+| BSO | 2.998 | 1.993 |
+| BSA | 29.99 | 22.36 |
+| PIO | 5.97 | 5.97 |
 
 ### Rosenbrock 函数（5维）
 
@@ -750,14 +873,25 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | KH | 9.59 | 13.22 |
 | ICA | 9.57 | 32.58 |
 | **SFS** | **0.0123** | **0.0128** |
+| MSA | 544.40 | 173.63 |
+| PFA | 7.19 | 11.27 |
+| CPA | 16.30 | 82.19 |
+| **BCO** | **3.22** | **1.89** |
+| FFOA | 86.24 | 316.22 |
+| AFSA | 7.87 | 6.79 |
+| FWA | 522.59 | 121.52 |
+| BSO | 2.39 | 0.407 |
+| BSA | 31.70 | 6.59 |
+| PIO | 3.47 | 1.72 |
 
 ## 算法分类特点
 
 | 类别 | 代表算法 | 特点 |
 |------|----------|------|
 | **单点搜索** | 随机搜索、爬山法、模拟退火 | 简单、易于实现，适合低维问题 |
-| **群体智能** | PSO、萤火虫、蚁群、蜂群、布谷鸟、灰狼、鲸群、蝙蝠、和声、正弦余弦、飞蛾火焰、蚁狮、麻雀搜索、哈里斯鹰、花粉传播、蜻蜓、乌鸦、樽海鞘、Monarch蝴蝶、人工生态系统、入侵杂草、细菌觅食、混合蛙跳、萤火虫群、动物迁徙、磷虾群 | 基于群体行为，全局搜索能力强 |
-| **进化算法** | DE、GA、帝国主义竞争算法 | 基于种群进化，鲁棒性好 |
+| **群体智能** | PSO、萤火虫、蚁群、蜂群、布谷鸟、灰狼、鲸群、蝙蝠、和声、正弦余弦、飞蛾火焰、蚁狮、麻雀搜索、哈里斯鹰、花粉传播、蜻蜓、乌鸦、樽海鞘、Monarch蝴蝶、人工生态系统、入侵杂草、细菌觅食、混合蛙跳、萤火虫群、动物迁徙、磷虾群、飞蛾搜索、路径finder、菌落捕食、细菌菌落、飞狐优化、人工鱼群、烟花、鸽群 | 基于群体行为，全局搜索能力强 |
+| **进化算法** | DE、GA、帝国主义竞争算法、回溯搜索算法 | 基于种群进化，鲁棒性好 |
+| **人类行为** | 头脑风暴优化 | 模拟人类头脑风暴过程 |
 | **估计分布** | CEM、随机分形搜索 | 基于概率分布估计，适合连续优化 |
 | **确定性直接搜索** | Nelder-Mead、Hooke-Jeeves | 无需梯度，适合不可导函数 |
 | **局部搜索** | 禁忌搜索、引导局部搜索 | 强化局部开发，避免陷入局部最优 |

@@ -890,3 +890,108 @@ test "FFOA improves with more evaluations" {
 
   assert_true(result2.best_value <= result1.best_value)
 }
+
+test "AFSA produces valid result" {
+  let config = @lib.make_afsa_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25, 2.0, 0.5, 0.5)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.artificial_fish_swarm(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "AFSA improves with more evaluations" {
+  let config1 = @lib.make_afsa_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25, 2.0, 0.5, 0.5)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.artificial_fish_swarm(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_afsa_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25, 2.0, 0.5, 0.5)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.artificial_fish_swarm(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "FWA produces valid result" {
+  let config = @lib.make_fwa_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.fireworks_algorithm(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "FWA improves with more evaluations" {
+  let config1 = @lib.make_fwa_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.fireworks_algorithm(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_fwa_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.fireworks_algorithm(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "BSO produces valid result" {
+  let config = @lib.make_bso_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.brain_storm_optimization(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "BSO improves with more evaluations" {
+  let config1 = @lib.make_bso_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.brain_storm_optimization(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_bso_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.brain_storm_optimization(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "BSA produces valid result" {
+  let config = @lib.make_bsa_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.backtracking_search_algorithm(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "BSA improves with more evaluations" {
+  let config1 = @lib.make_bsa_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.backtracking_search_algorithm(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_bsa_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.backtracking_search_algorithm(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "PIO produces valid result" {
+  let config = @lib.make_pio_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.pigeon_inspired_optimization(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "PIO improves with more evaluations" {
+  let config1 = @lib.make_pio_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.pigeon_inspired_optimization(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_pio_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.pigeon_inspired_optimization(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}

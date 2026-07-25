@@ -6746,6 +6746,559 @@ pub fn flying_fox_optimization(config: FFOAConfig, f: (Array[Double]) -> Double,
   }
 }
 
+// ===== Artificial Fish Swarm Algorithm (AFSA) =====
+pub struct AFSAConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+  visual: Double
+  step: Double
+  crowd_factor: Double
+}
+
+pub fn make_afsa_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int, visual: Double, step: Double, crowd: Double) -> AFSAConfig {
+  AFSAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+    visual: visual,
+    step: step,
+    crowd_factor: crowd
+  }
+}
+
+pub fn artificial_fish_swarm(config: AFSAConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let visual = config.visual
+  let step = config.step
+  let crowd = config.crowd_factor
+  let mut current_rng = rng
+
+  let fish: Array[Array[Double]] = []
+  let values: Array[Double] = []
+
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    fish.push(sol)
+    values.push(evaluate(f, sol))
+  }
+
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos: Array[Double] = fish[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < config.max_evaluations {
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+
+      // Find neighbors within visual range
+      let mut neighbor_count = 0
+      let neighbor_sum: Array[Double] = []
+      let mut neighbor_val_sum = 0.0
+      let mut best_neighbor_idx = -1
+      let mut best_neighbor_val = values[i]
+      for d in 0..<dim {
+        neighbor_sum.push(0.0)
+      }
+
+      for j in 0..<n {
+        if j == i { continue }
+        let dist = euclidean_distance(fish[i], fish[j])
+        if dist <= visual {
+          neighbor_count = neighbor_count + 1
+          for d in 0..<dim {
+            neighbor_sum[d] = neighbor_sum[d] + fish[j][d]
+          }
+          neighbor_val_sum = neighbor_val_sum + values[j]
+          if values[j] < best_neighbor_val {
+            best_neighbor_val = values[j]
+            best_neighbor_idx = j
+          }
+        }
+      }
+
+      let new_pos: Array[Double] = []
+      if neighbor_count > 0 {
+        let neighbor_avg_val = neighbor_val_sum / neighbor_count.to_double()
+        // Swarm behavior: move towards center if not crowded and center is better
+        if neighbor_avg_val < values[i] && neighbor_count.to_double() < crowd * n.to_double() {
+          for d in 0..<dim {
+            let center = neighbor_sum[d] / neighbor_count.to_double()
+            let (rng2, r) = RNG::next(current_rng)
+            current_rng = rng2
+            let pos = fish[i][d] + step * r * (center - fish[i][d]) / visual
+            new_pos.push(max(bounds.min, min(bounds.max, pos)))
+          }
+        } else if best_neighbor_idx >= 0 && best_neighbor_val < values[i] {
+          // Follow behavior: move towards best neighbor
+          for d in 0..<dim {
+            let (rng3, r) = RNG::next(current_rng)
+            current_rng = rng3
+            let pos = fish[i][d] + step * r * (fish[best_neighbor_idx][d] - fish[i][d]) / visual
+            new_pos.push(max(bounds.min, min(bounds.max, pos)))
+          }
+        } else {
+          // Prey behavior: random search in visual range
+          for d in 0..<dim {
+            let (rng4, r) = RNG::next(current_rng)
+            current_rng = rng4
+            let pos = fish[i][d] + (r - 0.5) * 2.0 * visual
+            new_pos.push(max(bounds.min, min(bounds.max, pos)))
+          }
+        }
+      } else {
+        // No neighbors: prey behavior (random search)
+        for d in 0..<dim {
+          let (rng5, r) = RNG::next(current_rng)
+          current_rng = rng5
+          let pos = fish[i][d] + (r - 0.5) * 2.0 * visual
+          new_pos.push(max(bounds.min, min(bounds.max, pos)))
+        }
+      }
+
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+
+      if new_val < values[i] {
+        fish[i] = new_pos
+        values[i] = new_val
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
+// ===== Fireworks Algorithm (FWA) =====
+pub struct FWAConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+}
+
+pub fn make_fwa_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> FWAConfig {
+  FWAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz
+  }
+}
+
+pub fn fireworks_algorithm(config: FWAConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let mut current_rng = rng
+
+  let fireworks: Array[Array[Double]] = []
+  let values: Array[Double] = []
+
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    fireworks.push(sol)
+    values.push(evaluate(f, sol))
+  }
+
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos: Array[Double] = fireworks[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+  let range = bounds.max - bounds.min
+
+  while evaluations < config.max_evaluations {
+    // Calculate explosion amplitudes and spark counts
+    let min_val = values[sorted_idx[n - 1]]
+    let max_val = values[sorted_idx[0]]
+    let val_sum = array_sum(values)
+
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+
+      // Explosion amplitude: better fireworks have smaller amplitude
+      let ratio = if max_val == min_val { 0.5 } else { (values[i] - max_val) / (min_val - max_val) }
+      let amplitude = range * (1.0 - ratio * 0.8)
+      let num_sparks = max_int(2, min_int(8, 8 - (ratio * 6.0).to_int()))
+
+      // Generate sparks
+      for s in 0..<num_sparks {
+        if evaluations >= config.max_evaluations { break }
+
+        let new_pos: Array[Double] = []
+        for d in 0..<dim {
+          let (rng2, r) = RNG::next(current_rng)
+          current_rng = rng2
+          let gauss = box_muller(r, r * 0.5 + 0.1)
+          let pos = fireworks[i][d] + amplitude * gauss
+          new_pos.push(max(bounds.min, min(bounds.max, pos)))
+        }
+
+        let new_val = evaluate(f, new_pos)
+        evaluations = evaluations + 1
+
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+    }
+
+    // Keep best fireworks for next generation
+    let new_sorted = sort_indices(values)
+    for i in 0..<n {
+      fireworks[i] = fireworks[new_sorted[i]]
+      values[i] = values[new_sorted[i]]
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
+// ===== Brain Storm Optimization (BSO) =====
+pub struct BSOConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+}
+
+pub fn make_bso_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> BSOConfig {
+  BSOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz
+  }
+}
+
+pub fn brain_storm_optimization(config: BSOConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let num_clusters = 3
+  let mut current_rng = rng
+
+  let ideas: Array[Array[Double]] = []
+  let values: Array[Double] = []
+
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    ideas.push(sol)
+    values.push(evaluate(f, sol))
+  }
+
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos: Array[Double] = ideas[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+    let sorted = sort_indices(values)
+
+    // Assign to clusters (simple round-robin based on sorted order)
+    let cluster_centers: Array[Array[Double]] = []
+    for c in 0..<num_clusters {
+      cluster_centers.push(ideas[sorted[c]])
+    }
+
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+
+      let (rng2, r1) = RNG::next(current_rng)
+      current_rng = rng2
+      let (rng3, r2) = RNG::next(current_rng)
+      current_rng = rng3
+
+      let new_pos: Array[Double] = []
+      // Select a cluster center and add perturbation
+      let cluster_idx = (r1 * num_clusters.to_double()).to_int()
+      let cluster_idx = if cluster_idx >= num_clusters { num_clusters - 1 } else { cluster_idx }
+      let center = cluster_centers[cluster_idx]
+
+      for d in 0..<dim {
+        let (rng4, r3) = RNG::next(current_rng)
+        current_rng = rng4
+        let (rng5, r4) = RNG::next(current_rng)
+        current_rng = rng5
+        let gauss = box_muller(r3, r4)
+        // Perturbation decreases over iterations
+        let perturbation = gauss * (1.0 - iter) * (bounds.max - bounds.min) * 0.1
+        let pos = center[d] + perturbation
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+
+      if new_val < values[i] {
+        ideas[i] = new_pos
+        values[i] = new_val
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
+// ===== Backtracking Search Algorithm (BSA) =====
+pub struct BSAConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+}
+
+pub fn make_bsa_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> BSAConfig {
+  BSAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz
+  }
+}
+
+pub fn backtracking_search_algorithm(config: BSAConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let mut current_rng = rng
+
+  let population: Array[Array[Double]] = []
+  let old_population: Array[Array[Double]] = []
+  let values: Array[Double] = []
+
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    population.push(sol)
+    values.push(evaluate(f, sol))
+
+    let (rng2, old_sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng2
+    old_population.push(old_sol)
+  }
+
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos: Array[Double] = population[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+
+    // At interval, save current population as historical
+    let (rng2, r_flag) = RNG::next(current_rng)
+    current_rng = rng2
+    if r_flag < 0.5 {
+      for i in 0..<n {
+        for d in 0..<dim {
+          old_population[i][d] = population[i][d]
+        }
+      }
+    }
+
+    // Generate permutation for historical population indices
+    let perm: Array[Int] = []
+    for i in 0..<n {
+      let (rng_p, r_p) = RNG::next(current_rng)
+      current_rng = rng_p
+      perm.push((r_p * n.to_double()).to_int() % n)
+    }
+
+    // Generate trial population via crossover with historical
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+
+      let old_idx = perm[i]
+      let new_pos: Array[Double] = []
+      for d in 0..<dim {
+        let (rng3, r1) = RNG::next(current_rng)
+        current_rng = rng3
+        let (rng4, r2) = RNG::next(current_rng)
+        current_rng = rng4
+
+        // Mix current with permuted historical, scaled by direction
+        let direction = if r1 < 0.5 { 1.0 } else { -1.0 }
+        let scale = 3.0 * r2
+        let trial = population[i][d] + direction * scale * (old_population[old_idx][d] - population[i][d])
+        new_pos.push(max(bounds.min, min(bounds.max, trial)))
+      }
+
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+
+      if new_val < values[i] {
+        population[i] = new_pos
+        values[i] = new_val
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
+// ===== Pigeon-Inspired Optimization (PIO) =====
+pub struct PIOConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+}
+
+pub fn make_pio_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> PIOConfig {
+  PIOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz
+  }
+}
+
+pub fn pigeon_inspired_optimization(config: PIOConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let mut current_rng = rng
+
+  let pigeons: Array[Array[Double]] = []
+  let velocities: Array[Array[Double]] = []
+  let values: Array[Double] = []
+
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    pigeons.push(sol)
+    values.push(evaluate(f, sol))
+
+    let vel: Array[Double] = []
+    for d in 0..<dim {
+      let (rng2, v) = RNG::next(current_rng)
+      current_rng = rng2
+      vel.push((v - 0.5) * 2.0)
+    }
+    velocities.push(vel)
+  }
+
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos: Array[Double] = pigeons[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  // Phase 1: Map and compass operator (first 60% of evaluations)
+  let phase1_end = config.max_evaluations * 6 / 10
+
+  while evaluations < config.max_evaluations {
+    if evaluations < phase1_end {
+      // Map and compass phase
+      let iter = evaluations.to_double() / phase1_end.to_double()
+      let map_factor = exp_approx(-5.0 * iter)
+
+      for i in 0..<n {
+        if evaluations >= config.max_evaluations { break }
+
+        let new_pos: Array[Double] = []
+        for d in 0..<dim {
+          let (rng3, r) = RNG::next(current_rng)
+          current_rng = rng3
+          velocities[i][d] = velocities[i][d] * map_factor + r * (best_pos[d] - pigeons[i][d])
+          let pos = pigeons[i][d] + velocities[i][d]
+          new_pos.push(max(bounds.min, min(bounds.max, pos)))
+        }
+
+        pigeons[i] = new_pos
+        let new_val = evaluate(f, new_pos)
+        evaluations = evaluations + 1
+        values[i] = new_val
+
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+    } else {
+      // Landmark phase: move towards center of best pigeons
+      let iter = (evaluations - phase1_end).to_double() / (config.max_evaluations - phase1_end).to_double()
+      let num_landmark = max_int(1, n / 2 - (iter * n.to_double() / 2.0).to_int())
+
+      let sorted = sort_indices(values)
+      let center: Array[Double] = []
+      for d in 0..<dim {
+        let mut sum = 0.0
+        for k in 0..<num_landmark {
+          sum = sum + pigeons[sorted[k]][d]
+        }
+        center.push(sum / num_landmark.to_double())
+      }
+
+      for i in 0..<n {
+        if evaluations >= config.max_evaluations { break }
+
+        let new_pos: Array[Double] = []
+        for d in 0..<dim {
+          let (rng4, r) = RNG::next(current_rng)
+          current_rng = rng4
+          let pos = pigeons[i][d] + r * (center[d] - pigeons[i][d])
+          new_pos.push(max(bounds.min, min(bounds.max, pos)))
+        }
+
+        pigeons[i] = new_pos
+        let new_val = evaluate(f, new_pos)
+        evaluations = evaluations + 1
+        values[i] = new_val
+
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
 fn box_muller(u1: Double, u2: Double) -> Double {
   let pi = 3.14159265358979323846
   let sqrt_val = (-2.0 * ln_approx(u1)).sqrt()
@@ -7471,6 +8024,56 @@ pub fn run_benchmark_at_evals(
     relative_error: ffoa_error
   })
 
+  let afsa_config = make_afsa_config(max_evals, dim, bounds, 25, 2.0, 0.5, 0.5)
+  let afsa_result = artificial_fish_swarm(afsa_config, f, rng)
+  let afsa_error = calc_relative_error(afsa_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "AFSA",
+    best_value: afsa_result.best_value,
+    evaluations: afsa_result.evaluations,
+    relative_error: afsa_error
+  })
+
+  let fwa_config = make_fwa_config(max_evals, dim, bounds, 25)
+  let fwa_result = fireworks_algorithm(fwa_config, f, rng)
+  let fwa_error = calc_relative_error(fwa_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "FWA",
+    best_value: fwa_result.best_value,
+    evaluations: fwa_result.evaluations,
+    relative_error: fwa_error
+  })
+
+  let bso_config = make_bso_config(max_evals, dim, bounds, 25)
+  let bso_result = brain_storm_optimization(bso_config, f, rng)
+  let bso_error = calc_relative_error(bso_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "BSO",
+    best_value: bso_result.best_value,
+    evaluations: bso_result.evaluations,
+    relative_error: bso_error
+  })
+
+  let bsa_config = make_bsa_config(max_evals, dim, bounds, 25)
+  let bsa_result = backtracking_search_algorithm(bsa_config, f, rng)
+  let bsa_error = calc_relative_error(bsa_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "BSA",
+    best_value: bsa_result.best_value,
+    evaluations: bsa_result.evaluations,
+    relative_error: bsa_error
+  })
+
+  let pio_config = make_pio_config(max_evals, dim, bounds, 25)
+  let pio_result = pigeon_inspired_optimization(pio_config, f, rng)
+  let pio_error = calc_relative_error(pio_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "PIO",
+    best_value: pio_result.best_value,
+    evaluations: pio_result.evaluations,
+    relative_error: pio_error
+  })
+
   results
 }
 
@@ -7556,6 +8159,11 @@ pub fn run_multiple_trials(
   let cpa_values: Array[Double] = []
   let bco_values: Array[Double] = []
   let ffoa_values: Array[Double] = []
+  let afsa_values: Array[Double] = []
+  let fwa_values: Array[Double] = []
+  let bso_values: Array[Double] = []
+  let bsa_values: Array[Double] = []
+  let pio_values: Array[Double] = []
 
   for trial in 0..<num_trials {
     let seed = base_seed + trial.to_double() * 1000.0
@@ -7780,6 +8388,26 @@ pub fn run_multiple_trials(
     let ffoa_config = make_ffoa_config(max_evals, dim, bounds, 25)
     let ffoa_result = flying_fox_optimization(ffoa_config, f, rng)
     ffoa_values.push(ffoa_result.best_value)
+
+    let afsa_config = make_afsa_config(max_evals, dim, bounds, 25, 2.0, 0.5, 0.5)
+    let afsa_result = artificial_fish_swarm(afsa_config, f, rng)
+    afsa_values.push(afsa_result.best_value)
+
+    let fwa_config = make_fwa_config(max_evals, dim, bounds, 25)
+    let fwa_result = fireworks_algorithm(fwa_config, f, rng)
+    fwa_values.push(fwa_result.best_value)
+
+    let bso_config = make_bso_config(max_evals, dim, bounds, 25)
+    let bso_result = brain_storm_optimization(bso_config, f, rng)
+    bso_values.push(bso_result.best_value)
+
+    let bsa_config = make_bsa_config(max_evals, dim, bounds, 25)
+    let bsa_result = backtracking_search_algorithm(bsa_config, f, rng)
+    bsa_values.push(bsa_result.best_value)
+
+    let pio_config = make_pio_config(max_evals, dim, bounds, 25)
+    let pio_result = pigeon_inspired_optimization(pio_config, f, rng)
+    pio_values.push(pio_result.best_value)
   }
 
   println("  Algorithm          | Min Value           | Max Value           | Avg Value           | Avg Error")
@@ -8090,6 +8718,36 @@ pub fn run_multiple_trials(
   let ffoa_avg = array_avg(ffoa_values)
   let ffoa_err = calc_relative_error(ffoa_avg, known_optimal)
   println("  | FFOA              | \{ffoa_min} | \{ffoa_max} | \{ffoa_avg} | \{ffoa_err} |")
+
+  let afsa_min = array_min(afsa_values)
+  let afsa_max = array_max(afsa_values)
+  let afsa_avg = array_avg(afsa_values)
+  let afsa_err = calc_relative_error(afsa_avg, known_optimal)
+  println("  | AFSA              | \{afsa_min} | \{afsa_max} | \{afsa_avg} | \{afsa_err} |")
+
+  let fwa_min = array_min(fwa_values)
+  let fwa_max = array_max(fwa_values)
+  let fwa_avg = array_avg(fwa_values)
+  let fwa_err = calc_relative_error(fwa_avg, known_optimal)
+  println("  | FWA               | \{fwa_min} | \{fwa_max} | \{fwa_avg} | \{fwa_err} |")
+
+  let bso_min = array_min(bso_values)
+  let bso_max = array_max(bso_values)
+  let bso_avg = array_avg(bso_values)
+  let bso_err = calc_relative_error(bso_avg, known_optimal)
+  println("  | BSO               | \{bso_min} | \{bso_max} | \{bso_avg} | \{bso_err} |")
+
+  let bsa_min = array_min(bsa_values)
+  let bsa_max = array_max(bsa_values)
+  let bsa_avg = array_avg(bsa_values)
+  let bsa_err = calc_relative_error(bsa_avg, known_optimal)
+  println("  | BSA               | \{bsa_min} | \{bsa_max} | \{bsa_avg} | \{bsa_err} |")
+
+  let pio_min = array_min(pio_values)
+  let pio_max = array_max(pio_values)
+  let pio_avg = array_avg(pio_values)
+  let pio_err = calc_relative_error(pio_avg, known_optimal)
+  println("  | PIO               | \{pio_min} | \{pio_max} | \{pio_avg} | \{pio_err} |")
 
   println("")
 }
