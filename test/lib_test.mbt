@@ -187,3 +187,63 @@ test "evaluate function works" {
   let result = @lib.evaluate(f, solution)
   assert_eq(result, 5.0)
 }
+
+test "CEM produces valid result" {
+  let config = @lib.make_cem_config(500, 3, @lib.make_bounds(-5.0, 5.0), 50, 0.1, 0.7)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.cross_entropy_method(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "cuckoo_search produces valid result" {
+  let config = @lib.make_cuckoo_config(500, 3, @lib.make_bounds(-5.0, 5.0), 15, 0.25, 1.5)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.cuckoo_search(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "GWO produces valid result" {
+  let config = @lib.make_gwo_config(500, 3, @lib.make_bounds(-5.0, 5.0), 15)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.grey_wolf_optimizer(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "Hooke-Jeeves produces valid result" {
+  let config = @lib.make_hooke_jeeves_config(500, 3, @lib.make_bounds(-5.0, 5.0), 0.5, 0.5, 1.0e-6)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.hooke_jeeves(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "CEM improves with more evaluations" {
+  let config1 = @lib.make_cem_config(100, 3, @lib.make_bounds(-5.0, 5.0), 50, 0.1, 0.7)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.cross_entropy_method(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_cem_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 50, 0.1, 0.7)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.cross_entropy_method(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "GWO improves with more evaluations" {
+  let config1 = @lib.make_gwo_config(100, 3, @lib.make_bounds(-5.0, 5.0), 15)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.grey_wolf_optimizer(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_gwo_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 15)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.grey_wolf_optimizer(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}

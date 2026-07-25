@@ -14,6 +14,15 @@
 | 进化算法 | 遗传算法 (GA) | 选择、交叉、变异 |
 | 确定性方法 | Nelder-Mead 单纯形法 | 无导数的几何变形方法 |
 | 群体智能 | 萤火虫算法 (Firefly) | 基于萤火虫吸引力模型 |
+| 群体智能 | 蚁群算法 (ACO) | 基于信息素的群智能优化 |
+| 群体智能 | 蜂群算法 (Bee Colony) | 模拟蜜蜂觅食行为 |
+| 局部搜索 | 禁忌搜索 (Tabu Search) | 使用禁忌表避免循环 |
+| 局部搜索 | 引导局部搜索 (Guided LS) | 使用惩罚项逃出局部最优 |
+| 进化策略 | CMA-ES | 协方差矩阵自适应进化策略 |
+| 估计分布 | 交叉熵方法 (CEM) | 基于高斯分布的迭代估计 |
+| 群体智能 | 布谷鸟搜索 (Cuckoo Search) | 基于巢寄生和Lévy飞行 |
+| 群体智能 | 灰狼优化 (GWO) | 模拟灰狼领导狩猎机制 |
+| 确定性方法 | Hooke-Jeeves 模式搜索 | 无导数的直接搜索方法 |
 
 ## 项目结构
 
@@ -68,7 +77,7 @@ moon run main
 moon test
 
 # 代码检查
-moon check --all
+moon check
 ```
 
 ## 使用方法
@@ -139,6 +148,42 @@ let nm_result = @lib.nelder_mead(nm_config, f, rng)
 // 萤火虫算法
 let ff_config = @lib.make_firefly_config(1000, dim, bounds, 30, 1.0, 1.0, 0.2)
 let ff_result = @lib.firefly_algorithm(ff_config, f, rng)
+
+// 蚁群算法 (ACO)
+let aco_config = @lib.make_aco_config(1000, dim, bounds, 20, 0.1, 1.0, 10.0)
+let aco_result = @lib.aco(aco_config, f, rng)
+
+// 蜂群算法 (Bee Colony)
+let bc_config = @lib.make_bee_colony_config(1000, dim, bounds, 25, 100)
+let bc_result = @lib.bee_colony(bc_config, f, rng)
+
+// 禁忌搜索 (Tabu Search)
+let ts_config = @lib.make_tabu_search_config(1000, dim, bounds, 50, 30, 0.5)
+let ts_result = @lib.tabu_search(ts_config, f, rng)
+
+// 引导局部搜索 (Guided LS)
+let ls_config = @lib.make_local_search_config(1000, dim, bounds, 30, 0.5, 0.5)
+let ls_result = @lib.local_search(ls_config, f, rng)
+
+// CMA-ES
+let cma_config = @lib.make_cmaes_config(1000, dim, bounds, 0.5, 20, 10)
+let cma_result = @lib.cma_es(cma_config, f, rng)
+
+// 交叉熵方法 (CEM)
+let cem_config = @lib.make_cem_config(1000, dim, bounds, 100, 0.1, 0.7)
+let cem_result = @lib.cross_entropy_method(cem_config, f, rng)
+
+// 布谷鸟搜索 (Cuckoo Search)
+let cs_config = @lib.make_cuckoo_config(1000, dim, bounds, 25, 0.25, 1.5)
+let cs_result = @lib.cuckoo_search(cs_config, f, rng)
+
+// 灰狼优化 (GWO)
+let gwo_config = @lib.make_gwo_config(1000, dim, bounds, 25)
+let gwo_result = @lib.grey_wolf_optimizer(gwo_config, f, rng)
+
+// Hooke-Jeeves 模式搜索
+let hj_config = @lib.make_hooke_jeeves_config(1000, dim, bounds, 0.5, 0.5, 1.0e-6)
+let hj_result = @lib.hooke_jeeves(hj_config, f, rng)
 ```
 
 ### 内置测试函数
@@ -205,27 +250,145 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | light_absorption | 光吸收系数 γ | 1.0 |
 | step_size | 随机步长 α | 0.2 |
 
-## 性能对比（Sphere 函数，5维）
+### ACO (蚁群算法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| ant_count | 蚂蚁数量 | 20 |
+| evaporation_rate | 信息素蒸发率 ρ | 0.1 |
+| pheromone_weight | 信息素权重 α | 1.0 |
+| heuristic_weight | 启发式权重 β | 10.0 |
+
+### Bee Colony (蜂群算法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| scout_bee_count | 侦察蜂数量 | 25 |
+| max_trials | 最大尝试次数 | 100 |
+
+### Tabu Search (禁忌搜索)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| tabu_list_size | 禁忌表大小 | 50 |
+| neighborhood_size | 邻域大小 | 30 |
+| step_size | 步长 | 0.5 |
+
+### Guided LS (引导局部搜索)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| neighborhood_size | 邻域大小 | 30 |
+| step_size | 步长 | 0.5 |
+| lambda | 惩罚系数 λ | 0.5 |
+
+### CMA-ES
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| sigma | 初始标准差 σ | 0.5 |
+| lambda | 种群大小 λ | 20 |
+| mu | 父代数量 μ | 10 |
+
+### CEM (交叉熵方法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| sample_size | 采样数量 | 100 |
+| elite_fraction | 精英比例 | 0.1 |
+| smoothing | 平滑系数 | 0.7 |
+
+### Cuckoo Search (布谷鸟搜索)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| nest_count | 巢穴数量 | 25 |
+| abandon_probability | 弃巢概率 p_a | 0.25 |
+| levy_parameter | Lévy飞行参数 β | 1.5 |
+
+### GWO (灰狼优化)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| wolf_count | 灰狼数量 | 25 |
+
+### Hooke-Jeeves (模式搜索)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| initial_step | 初始步长 | 0.5 |
+| step_reduction | 步长缩减因子 | 0.5 |
+| min_step | 最小步长 | 1e-6 |
+
+## 性能对比
+
+### Sphere 函数（5维）
 
 | 算法 | 1000 evals | 5000 evals | 10000 evals |
 |------|------------|------------|-------------|
 | 随机搜索 | 3.17 | 0.92 | 0.92 |
 | 爬山法 | 0.0094 | 0.0094 | 0.0094 |
 | 模拟退火 | 0.57 | 0.0059 | 0.0059 |
-| **PSO** | 1.05e-3 | **2.3e-14** | **4.3e-28** |
-| **DE** | 0.20 | **2.3e-8** | **7.8e-17** |
-| GA | 1.00 | 0.24 | 0.05 |
-| **Nelder-Mead** | 5.3e-32 | **1.6e-199** | **0** |
-| Firefly | 3.39 | 0.11 | 0.02 |
+| **PSO** | 8.56e-4 | **2.3e-15** | **3.4e-29** |
+| **DE** | 0.16 | **1.0e-8** | **8.7e-18** |
+| GA | 0.70 | 0.056 | 0.011 |
+| Nelder-Mead | 49.38 | 49.38 | 49.38 |
+| 萤火虫 | 4.25 | 0.92 | 0.92 |
+| 蚁群算法 | 2.43 | 2.43 | 2.12 |
+| **蜂群算法** | 0.27 | **3.3e-4** | **6.2e-10** |
+| 禁忌搜索 | 0.017 | 0.015 | 0.015 |
+| 引导局部搜索 | 0.017 | 0.017 | 0.017 |
+| **CMA-ES** | 0.024 | **3.6e-4** | **9.2e-7** |
+| **CEM** | 0.31 | **3.5e-7** | **1.0e-7** |
+| 布谷鸟搜索 | 0.74 | 0.25 | 0.25 |
+| **GWO** | 0.0016 | **1.0e-9** | **6.6e-16** |
+| **Hooke-Jeeves** | **1.7e-12** | **1.7e-12** | **1.7e-12** |
 
-## CI/CD
+### Rastrigin 函数（5维，10000 evals）
 
-项目使用 GitHub Actions 进行持续集成，配置文件位于 [.github/workflows/ci.yml](file:///home/developer/BlackBoxOptimization/.github/workflows/ci.yml)。
+| 算法 | 最优值 | 相对误差 |
+|------|--------|----------|
+| 随机搜索 | 17.38 | 17.38 |
+| 爬山法 | 52.75 | 52.75 |
+| 模拟退火 | 23.41 | 23.41 |
+| PSO | 2.98 | 2.98 |
+| DE | 1.35 | 1.35 |
+| GA | 1.66 | 1.66 |
+| Nelder-Mead | 61.39 | 61.39 |
+| 萤火虫 | 17.78 | 17.78 |
+| 蚁群算法 | 9.49 | 9.49 |
+| 蜂群算法 | 1.11 | 1.11 |
+| 禁忌搜索 | 6.91 | 6.91 |
+| 引导局部搜索 | 15.64 | 15.64 |
+| CMA-ES | 22.88 | 22.88 |
+| **CEM** | **2.3e-5** | **2.3e-5** |
+| 布谷鸟搜索 | 11.61 | 11.61 |
+| **GWO** | **0.0025** | **0.0025** |
+| Hooke-Jeeves | 45.77 | 45.77 |
 
-CI 流程包括：
-1. **Check**: `moon check --all` - 代码质量检查
-2. **Test**: `moon test` - 运行所有单元测试
-3. **Build**: `moon build --release` - 构建发布版本
+### Rosenbrock 函数（5维，10000 evals）
+
+| 算法 | 最优值 | 相对误差 |
+|------|--------|----------|
+| 随机搜索 | 22.78 | 22.78 |
+| 爬山法 | 5.63 | 5.63 |
+| 模拟退火 | 2.74 | 2.74 |
+| PSO | 4.09 | 4.09 |
+| **DE** | **4.0e-8** | **0** |
+| GA | 17.26 | 17.26 |
+| Nelder-Mead | 43504.88 | 43504.88 |
+| 萤火虫 | 91.21 | 91.21 |
+| 蚁群算法 | 7.47 | 7.47 |
+| 蜂群算法 | 0.26 | 0.26 |
+| 禁忌搜索 | 1.95 | 1.95 |
+| 引导局部搜索 | 3.67 | 3.67 |
+| CMA-ES | 1.25 | 1.25 |
+| CEM | 2.35 | 2.35 |
+| 布谷鸟搜索 | 15.32 | 15.32 |
+| **GWO** | **0.039** | **0.039** |
+| **Hooke-Jeeves** | **0.29** | **0.29** |
+
+## 算法分类特点
+
+| 类别 | 代表算法 | 特点 |
+|------|----------|------|
+| **单点搜索** | 随机搜索、爬山法、模拟退火 | 简单、易于实现，适合低维问题 |
+| **群体智能** | PSO、萤火虫、蚁群、蜂群、布谷鸟、灰狼 | 基于群体行为，全局搜索能力强 |
+| **进化算法** | DE、GA | 基于种群进化，鲁棒性好 |
+| **估计分布** | CEM | 基于概率分布估计，适合连续优化 |
+| **确定性直接搜索** | Nelder-Mead、Hooke-Jeeves | 无需梯度，适合不可导函数 |
+| **局部搜索** | 禁忌搜索、引导局部搜索 | 强化局部开发，避免陷入局部最优 |
 
 ## 许可证
 

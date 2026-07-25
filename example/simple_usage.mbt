@@ -29,7 +29,28 @@ fn main {
   println("   评估次数: \{sa_result.evaluations}")
   println("")
 
-  println("4. 比较不同评估预算下的性能:")
+  println("4. 运行交叉熵方法 (CEM):")
+  let cem_config = @lib.make_cem_config(1000, dim, bounds, 100, 0.1, 0.7)
+  let cem_result = @lib.cross_entropy_method(cem_config, @lib.sphere_function, rng)
+  println("   最优值: \{cem_result.best_value}")
+  println("   评估次数: \{cem_result.evaluations}")
+  println("")
+
+  println("5. 运行灰狼优化 (GWO):")
+  let gwo_config = @lib.make_gwo_config(1000, dim, bounds, 25)
+  let gwo_result = @lib.grey_wolf_optimizer(gwo_config, @lib.sphere_function, rng)
+  println("   最优值: \{gwo_result.best_value}")
+  println("   评估次数: \{gwo_result.evaluations}")
+  println("")
+
+  println("6. 运行 Hooke-Jeeves 模式搜索:")
+  let hj_config = @lib.make_hooke_jeeves_config(1000, dim, bounds, 0.5, 0.5, 1.0e-6)
+  let hj_result = @lib.hooke_jeeves(hj_config, @lib.sphere_function, rng)
+  println("   最优值: \{hj_result.best_value}")
+  println("   评估次数: \{hj_result.evaluations}")
+  println("")
+
+  println("7. 比较不同评估预算下的性能:")
   let results = @lib.run_benchmark_at_evals(
     @lib.sphere_function,
     "Sphere Function",
