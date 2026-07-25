@@ -302,7 +302,42 @@ fn main {
   println("   评估次数: \{pio_result.evaluations}")
   println("")
 
-  println("43. 比较不同评估预算下的性能:")
+  println("43. 运行算术优化算法 (AOA):")
+  let aoa_config = @lib.make_aoa_config(1000, dim, bounds, 25)
+  let aoa_result = @lib.arithmetic_optimization_algorithm(aoa_config, @lib.sphere_function, rng)
+  println("   最优值: \{aoa_result.best_value}")
+  println("   评估次数: \{aoa_result.evaluations}")
+  println("")
+
+  println("44. 运行蜜獾算法 (HBA):")
+  let hba_config = @lib.make_hba_config(1000, dim, bounds, 25)
+  let hba_result = @lib.honey_badger_algorithm(hba_config, @lib.sphere_function, rng)
+  println("   最优值: \{hba_result.best_value}")
+  println("   评估次数: \{hba_result.evaluations}")
+  println("")
+
+  println("45. 运行鹈鹕优化算法 (POA):")
+  let poa_config = @lib.make_poa_config(1000, dim, bounds, 25)
+  let poa_result = @lib.pelican_optimization_algorithm(poa_config, @lib.sphere_function, rng)
+  println("   最优值: \{poa_result.best_value}")
+  println("   评估次数: \{poa_result.evaluations}")
+  println("")
+
+  println("46. 运行金枪鱼群优化 (TSA):")
+  let tsa_config = @lib.make_tsa_config(1000, dim, bounds, 25)
+  let tsa_result = @lib.tuna_swarm_optimization(tsa_config, @lib.sphere_function, rng)
+  println("   最优值: \{tsa_result.best_value}")
+  println("   评估次数: \{tsa_result.evaluations}")
+  println("")
+
+  println("47. 运行金豺优化 (GJO):")
+  let gjo_config = @lib.make_gjo_config(1000, dim, bounds, 25)
+  let gjo_result = @lib.golden_jackal_optimization(gjo_config, @lib.sphere_function, rng)
+  println("   最优值: \{gjo_result.best_value}")
+  println("   评估次数: \{gjo_result.evaluations}")
+  println("")
+
+  println("48. 比较不同评估预算下的性能:")
   let results = @lib.run_benchmark_at_evals(
     @lib.sphere_function,
     "Sphere Function",

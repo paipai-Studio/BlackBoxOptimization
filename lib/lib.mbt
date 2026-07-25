@@ -7299,6 +7299,480 @@ pub fn pigeon_inspired_optimization(config: PIOConfig, f: (Array[Double]) -> Dou
   }
 }
 
+// ===== Arithmetic Optimization Algorithm (AOA) =====
+pub struct AOAConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+}
+
+pub fn make_aoa_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> AOAConfig {
+  AOAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz
+  }
+}
+
+pub fn arithmetic_optimization_algorithm(config: AOAConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let mut current_rng = rng
+
+  let positions: Array[Array[Double]] = []
+  let values: Array[Double] = []
+
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    positions.push(sol)
+    values.push(evaluate(f, sol))
+  }
+
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos: Array[Double] = positions[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+  let alpha = 5.0
+  let mu = 0.499
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+    // Math Optimizer Acceleration function: decreases from 1 to 0
+    let moa = 0.2 + iter * 0.8
+    // Math Optimizer probability: increases from -2 to 2
+    let mop = 1.0 - (iter.pow(1.0 / alpha))
+
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+
+      let new_pos: Array[Double] = []
+      for d in 0..<dim {
+        let (rng2, r1) = RNG::next(current_rng)
+        current_rng = rng2
+        let (rng3, r2) = RNG::next(current_rng)
+        current_rng = rng3
+
+        let pos = if r1 > moa {
+          // Exploration phase: division or multiplication
+          if r2 < 0.5 {
+            // D: best / (eps + mu * ((bounds.max - bounds.min) * r2 + bounds.min))
+            let denom = 0.0001 + mu * ((bounds.max - bounds.min) * r2 + bounds.min)
+            positions[i][d] * (1.0 - mop) + best_pos[d] / denom * mop
+          } else {
+            // M: best * (eps + mu * ((bounds.max - bounds.min) * r2 + bounds.min))
+            positions[i][d] * (1.0 - mop) + best_pos[d] * (0.0001 + mu * ((bounds.max - bounds.min) * r2 + bounds.min)) * mop
+          }
+        } else {
+          // Exploitation phase: subtraction or addition
+          if r2 < 0.5 {
+            // S: best - mop * ((bounds.max - bounds.min) * r2 + bounds.min)
+            positions[i][d] * mop + best_pos[d] * (1.0 - mop) - mop * ((bounds.max - bounds.min) * r2 + bounds.min) * 0.1
+          } else {
+            // A: best + mop * ((bounds.max - bounds.min) * r2 + bounds.min)
+            positions[i][d] * mop + best_pos[d] * (1.0 - mop) + mop * ((bounds.max - bounds.min) * r2 + bounds.min) * 0.1
+          }
+        }
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+
+      positions[i] = new_pos
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      values[i] = new_val
+
+      if new_val < best_val {
+        best_val = new_val
+        best_pos = new_pos
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
+// ===== Honey Badger Algorithm (HBA) =====
+pub struct HBAConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+}
+
+pub fn make_hba_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> HBAConfig {
+  HBAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz
+  }
+}
+
+pub fn honey_badger_algorithm(config: HBAConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let mut current_rng = rng
+
+  let positions: Array[Array[Double]] = []
+  let values: Array[Double] = []
+  let intensity: Array[Double] = []
+
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    positions.push(sol)
+    values.push(evaluate(f, sol))
+    intensity.push(0.0)
+  }
+
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos: Array[Double] = positions[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+  let beta = 6.0
+  let c = 2.0
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+    // Density factor decreases over time
+    let alpha = c - iter * c
+
+    // Calculate smell intensity for each badger
+    for i in 0..<n {
+      let dist = euclidean_distance(positions[i], best_pos)
+      let di = 0.01 + dist
+      intensity[i] = exp_approx(-(di * di) / (2.0 * 0.5))
+    }
+
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+
+      let (rng2, r1) = RNG::next(current_rng)
+      current_rng = rng2
+      let (rng3, r2) = RNG::next(current_rng)
+      current_rng = rng3
+      let (rng4, r3) = RNG::next(current_rng)
+      current_rng = rng4
+      let (rng5, r4) = RNG::next(current_rng)
+      current_rng = rng5
+
+      let new_pos: Array[Double] = []
+      for d in 0..<dim {
+        let pos = if r1 < 0.5 {
+          // Digging phase: move towards best with intensity and random perturbation
+          positions[i][d] + intensity[i] * beta * (best_pos[d] - positions[i][d]) + (r2 - 0.5) * alpha * (bounds.max - bounds.min) * 0.1
+        } else {
+          // Honey phase: guided by best with random factor
+          positions[i][d] + (r3 - 0.5) * 2.0 * (best_pos[d] - positions[i][d]) * (1.0 - r4)
+        }
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+
+      positions[i] = new_pos
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      values[i] = new_val
+
+      if new_val < best_val {
+        best_val = new_val
+        best_pos = new_pos
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
+// ===== Pelican Optimization Algorithm (POA) =====
+pub struct POAConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+}
+
+pub fn make_poa_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> POAConfig {
+  POAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz
+  }
+}
+
+pub fn pelican_optimization_algorithm(config: POAConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let mut current_rng = rng
+
+  let pelicans: Array[Array[Double]] = []
+  let values: Array[Double] = []
+
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    pelicans.push(sol)
+    values.push(evaluate(f, sol))
+  }
+
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos: Array[Double] = pelicans[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+
+      // Phase 1: Moving towards prey (exploration)
+      let (rng2, r1) = RNG::next(current_rng)
+      current_rng = rng2
+      let prey_idx = (r1 * n.to_double()).to_int() % n
+      let prey = pelicans[prey_idx]
+
+      let new_pos: Array[Double] = []
+      for d in 0..<dim {
+        let (rng3, r2) = RNG::next(current_rng)
+        current_rng = rng3
+        let pos = if values[prey_idx] < values[i] {
+          pelicans[i][d] + r2 * (prey[d] - pelicans[i][d])
+        } else {
+          pelicans[i][d] + r2 * (pelicans[i][d] - prey[d])
+        }
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+
+      if new_val < values[i] {
+        pelicans[i] = new_pos
+        values[i] = new_val
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+
+      // Phase 2: Surface expansion (exploitation)
+      if evaluations >= config.max_evaluations { break }
+
+      let new_pos2: Array[Double] = []
+      for d in 0..<dim {
+        let (rng4, r3) = RNG::next(current_rng)
+        current_rng = rng4
+        let pos2 = pelicans[i][d] + (r3 - 0.5) * 2.0 * (bounds.max - bounds.min) * (1.0 - iter) * 0.5
+        new_pos2.push(max(bounds.min, min(bounds.max, pos2)))
+      }
+
+      let new_val2 = evaluate(f, new_pos2)
+      evaluations = evaluations + 1
+
+      if new_val2 < values[i] {
+        pelicans[i] = new_pos2
+        values[i] = new_val2
+        if new_val2 < best_val {
+          best_val = new_val2
+          best_pos = new_pos2
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
+// ===== Tuna Swarm Optimization (TSA) =====
+pub struct TSAConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+}
+
+pub fn make_tsa_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> TSAConfig {
+  TSAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz
+  }
+}
+
+pub fn tuna_swarm_optimization(config: TSAConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let mut current_rng = rng
+
+  let tuna: Array[Array[Double]] = []
+  let values: Array[Double] = []
+
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    tuna.push(sol)
+    values.push(evaluate(f, sol))
+  }
+
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos: Array[Double] = tuna[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+  let z = 0.05
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+    let a = 2.0 - 2.0 * iter
+    let aa = a * (2.0 * 0.5 - 1.0)
+
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+
+      let new_pos: Array[Double] = []
+      for d in 0..<dim {
+        let (rng2, r1) = RNG::next(current_rng)
+        current_rng = rng2
+        let (rng3, r2) = RNG::next(current_rng)
+        current_rng = rng3
+        let (rng4, r3) = RNG::next(current_rng)
+        current_rng = rng4
+
+        let t = if r1 < 0.5 {
+          // Spiral movement towards best
+          let dist = best_pos[d] - tuna[i][d]
+          aa * dist + r2 * (best_pos[d] - tuna[i][d])
+        } else {
+          // Foraging behavior: random walk with best guidance
+          tuna[i][d] + aa * z * (bounds.max - bounds.min) * (r3 - 0.5) * 2.0
+        }
+        new_pos.push(max(bounds.min, min(bounds.max, t)))
+      }
+
+      tuna[i] = new_pos
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      values[i] = new_val
+
+      if new_val < best_val {
+        best_val = new_val
+        best_pos = new_pos
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
+// ===== Golden Jackal Optimization (GJO) =====
+pub struct GJOConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+}
+
+pub fn make_gjo_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> GJOConfig {
+  GJOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz
+  }
+}
+
+pub fn golden_jackal_optimization(config: GJOConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let mut current_rng = rng
+
+  let jackals: Array[Array[Double]] = []
+  let values: Array[Double] = []
+
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    jackals.push(sol)
+    values.push(evaluate(f, sol))
+  }
+
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  // Male and female jackals (top 2)
+  let mut best_pos: Array[Double] = jackals[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+  let mut second_pos: Array[Double] = jackals[sorted_idx[1]]
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+    // Energy decreases over iterations
+    let e1 = 2.0 * (1.0 - iter)
+
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+
+      let new_pos: Array[Double] = []
+      for d in 0..<dim {
+        let (rng3, r1) = RNG::next(current_rng)
+        current_rng = rng3
+        let (rng4, r2) = RNG::next(current_rng)
+        current_rng = rng4
+
+        // Guided by male (best) and female (second) jackals
+        let dist_male = best_pos[d] - jackals[i][d]
+        let dist_female = second_pos[d] - jackals[i][d]
+        // Average position with energy-based step size and random levy
+        let pos = jackals[i][d] + e1 * r1 * dist_male + e1 * r2 * dist_female
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+
+      if new_val < values[i] {
+        jackals[i] = new_pos
+        values[i] = new_val
+
+        if new_val < best_val {
+          second_pos = best_pos
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
 fn box_muller(u1: Double, u2: Double) -> Double {
   let pi = 3.14159265358979323846
   let sqrt_val = (-2.0 * ln_approx(u1)).sqrt()
@@ -8074,6 +8548,56 @@ pub fn run_benchmark_at_evals(
     relative_error: pio_error
   })
 
+  let aoa_config = make_aoa_config(max_evals, dim, bounds, 25)
+  let aoa_result = arithmetic_optimization_algorithm(aoa_config, f, rng)
+  let aoa_error = calc_relative_error(aoa_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "AOA",
+    best_value: aoa_result.best_value,
+    evaluations: aoa_result.evaluations,
+    relative_error: aoa_error
+  })
+
+  let hba_config = make_hba_config(max_evals, dim, bounds, 25)
+  let hba_result = honey_badger_algorithm(hba_config, f, rng)
+  let hba_error = calc_relative_error(hba_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "HBA",
+    best_value: hba_result.best_value,
+    evaluations: hba_result.evaluations,
+    relative_error: hba_error
+  })
+
+  let poa_config = make_poa_config(max_evals, dim, bounds, 25)
+  let poa_result = pelican_optimization_algorithm(poa_config, f, rng)
+  let poa_error = calc_relative_error(poa_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "POA",
+    best_value: poa_result.best_value,
+    evaluations: poa_result.evaluations,
+    relative_error: poa_error
+  })
+
+  let tsa_config = make_tsa_config(max_evals, dim, bounds, 25)
+  let tsa_result = tuna_swarm_optimization(tsa_config, f, rng)
+  let tsa_error = calc_relative_error(tsa_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "TSA",
+    best_value: tsa_result.best_value,
+    evaluations: tsa_result.evaluations,
+    relative_error: tsa_error
+  })
+
+  let gjo_config = make_gjo_config(max_evals, dim, bounds, 25)
+  let gjo_result = golden_jackal_optimization(gjo_config, f, rng)
+  let gjo_error = calc_relative_error(gjo_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "GJO",
+    best_value: gjo_result.best_value,
+    evaluations: gjo_result.evaluations,
+    relative_error: gjo_error
+  })
+
   results
 }
 
@@ -8164,6 +8688,11 @@ pub fn run_multiple_trials(
   let bso_values: Array[Double] = []
   let bsa_values: Array[Double] = []
   let pio_values: Array[Double] = []
+  let aoa_values: Array[Double] = []
+  let hba_values: Array[Double] = []
+  let poa_values: Array[Double] = []
+  let tsa_values: Array[Double] = []
+  let gjo_values: Array[Double] = []
 
   for trial in 0..<num_trials {
     let seed = base_seed + trial.to_double() * 1000.0
@@ -8408,6 +8937,26 @@ pub fn run_multiple_trials(
     let pio_config = make_pio_config(max_evals, dim, bounds, 25)
     let pio_result = pigeon_inspired_optimization(pio_config, f, rng)
     pio_values.push(pio_result.best_value)
+
+    let aoa_config = make_aoa_config(max_evals, dim, bounds, 25)
+    let aoa_result = arithmetic_optimization_algorithm(aoa_config, f, rng)
+    aoa_values.push(aoa_result.best_value)
+
+    let hba_config = make_hba_config(max_evals, dim, bounds, 25)
+    let hba_result = honey_badger_algorithm(hba_config, f, rng)
+    hba_values.push(hba_result.best_value)
+
+    let poa_config = make_poa_config(max_evals, dim, bounds, 25)
+    let poa_result = pelican_optimization_algorithm(poa_config, f, rng)
+    poa_values.push(poa_result.best_value)
+
+    let tsa_config = make_tsa_config(max_evals, dim, bounds, 25)
+    let tsa_result = tuna_swarm_optimization(tsa_config, f, rng)
+    tsa_values.push(tsa_result.best_value)
+
+    let gjo_config = make_gjo_config(max_evals, dim, bounds, 25)
+    let gjo_result = golden_jackal_optimization(gjo_config, f, rng)
+    gjo_values.push(gjo_result.best_value)
   }
 
   println("  Algorithm          | Min Value           | Max Value           | Avg Value           | Avg Error")
@@ -8748,6 +9297,36 @@ pub fn run_multiple_trials(
   let pio_avg = array_avg(pio_values)
   let pio_err = calc_relative_error(pio_avg, known_optimal)
   println("  | PIO               | \{pio_min} | \{pio_max} | \{pio_avg} | \{pio_err} |")
+
+  let aoa_min = array_min(aoa_values)
+  let aoa_max = array_max(aoa_values)
+  let aoa_avg = array_avg(aoa_values)
+  let aoa_err = calc_relative_error(aoa_avg, known_optimal)
+  println("  | AOA               | \{aoa_min} | \{aoa_max} | \{aoa_avg} | \{aoa_err} |")
+
+  let hba_min = array_min(hba_values)
+  let hba_max = array_max(hba_values)
+  let hba_avg = array_avg(hba_values)
+  let hba_err = calc_relative_error(hba_avg, known_optimal)
+  println("  | HBA               | \{hba_min} | \{hba_max} | \{hba_avg} | \{hba_err} |")
+
+  let poa_min = array_min(poa_values)
+  let poa_max = array_max(poa_values)
+  let poa_avg = array_avg(poa_values)
+  let poa_err = calc_relative_error(poa_avg, known_optimal)
+  println("  | POA               | \{poa_min} | \{poa_max} | \{poa_avg} | \{poa_err} |")
+
+  let tsa_min = array_min(tsa_values)
+  let tsa_max = array_max(tsa_values)
+  let tsa_avg = array_avg(tsa_values)
+  let tsa_err = calc_relative_error(tsa_avg, known_optimal)
+  println("  | TSA               | \{tsa_min} | \{tsa_max} | \{tsa_avg} | \{tsa_err} |")
+
+  let gjo_min = array_min(gjo_values)
+  let gjo_max = array_max(gjo_values)
+  let gjo_avg = array_avg(gjo_values)
+  let gjo_err = calc_relative_error(gjo_avg, known_optimal)
+  println("  | GJO               | \{gjo_min} | \{gjo_max} | \{gjo_avg} | \{gjo_err} |")
 
   println("")
 }

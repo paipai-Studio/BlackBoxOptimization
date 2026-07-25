@@ -58,6 +58,11 @@
 | 人类行为 | 头脑风暴优化 (BSO) | 模拟人类头脑风暴聚类的创意生成过程 |
 | 进化算法 | 回溯搜索算法 (BSA) | 基于历史种群记忆的交叉变异 |
 | 群体智能 | 鸽群优化 (PIO) | 模拟信鸽导航的地图指南针与地标两阶段 |
+| 数学启发 | 算术优化算法 (AOA) | 基于算术运算符(除/乘/减/加)的搜索 |
+| 群体智能 | 蜜獾算法 (HBA) | 模拟蜜獾挖洞与觅食的密度因子搜索 |
+| 群体智能 | 鹈鹕优化算法 (POA) | 模拟鹈鹕捕猎的两阶段策略 |
+| 群体智能 | 金枪鱼群优化 (TSA) | 基于螺旋运动和觅食行为的群体搜索 |
+| 群体智能 | 金豺优化 (GJO) | 模拟雄雌金豺协同捕猎的双引导搜索 |
 
 ## 项目结构
 
@@ -71,10 +76,10 @@ BlackBoxOptimization/
 │   └── main.mbt                  # 基准测试入口
 ├── test/                         # 测试包
 │   ├── moon.pkg.json             # 包配置
-│   └── lib_test.mbt              # 单元测试（104 个测试用例）
+│   └── lib_test.mbt              # 单元测试（114 个测试用例）
 ├── example/                      # 示例包
 │   ├── moon.pkg.json             # 包配置
-│   └── simple_usage.mbt          # 使用示例（42 个示例）
+│   └── simple_usage.mbt          # 使用示例（47 个示例）
 ├── .github/workflows/            # CI 配置
 │   └── ci.yml                    # GitHub Actions
 ├── moon.mod.json                 # 模块配置
@@ -108,7 +113,7 @@ moon run main
 ### 运行测试
 
 ```bash
-# 运行所有测试（104 个测试用例）
+# 运行所有测试（114 个测试用例）
 moon test
 
 # 代码检查
@@ -359,6 +364,26 @@ let bsa_result = @lib.backtracking_search_algorithm(bsa_config, f, rng)
 // 鸽群优化 (PIO)
 let pio_config = @lib.make_pio_config(1000, dim, bounds, 25)
 let pio_result = @lib.pigeon_inspired_optimization(pio_config, f, rng)
+
+// 算术优化算法 (AOA)
+let aoa_config = @lib.make_aoa_config(1000, dim, bounds, 25)
+let aoa_result = @lib.arithmetic_optimization_algorithm(aoa_config, f, rng)
+
+// 蜜獾算法 (HBA)
+let hba_config = @lib.make_hba_config(1000, dim, bounds, 25)
+let hba_result = @lib.honey_badger_algorithm(hba_config, f, rng)
+
+// 鹈鹕优化算法 (POA)
+let poa_config = @lib.make_poa_config(1000, dim, bounds, 25)
+let poa_result = @lib.pelican_optimization_algorithm(poa_config, f, rng)
+
+// 金枪鱼群优化 (TSA)
+let tsa_config = @lib.make_tsa_config(1000, dim, bounds, 25)
+let tsa_result = @lib.tuna_swarm_optimization(tsa_config, f, rng)
+
+// 金豺优化 (GJO)
+let gjo_config = @lib.make_gjo_config(1000, dim, bounds, 25)
+let gjo_result = @lib.golden_jackal_optimization(gjo_config, f, rng)
 ```
 
 ### 内置测试函数
@@ -711,6 +736,31 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 |------|------|--------|
 | population_size | 鸽群大小 | 25 |
 
+### AOA (算术优化算法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 种群大小 | 25 |
+
+### HBA (蜜獾算法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 蜜獾数量 | 25 |
+
+### POA (鹈鹕优化算法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 鹈鹕数量 | 25 |
+
+### TSA (金枪鱼群优化)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 金枪鱼数量 | 25 |
+
+### GJO (金豺优化)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 金豺数量 | 25 |
+
 ## 性能对比
 
 ### Sphere 函数（5维）
@@ -769,6 +819,11 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | BSO | 0.00321 | 0.0000290 | 0.0000208 |
 | BSA | 1.57 | 0.182 | 0.00170 |
 | PIO | 0.00676 | 1.83e-10 | 1.88e-18 |
+| AOA | 0.00280 | 5.27e-5 | 2.86e-4 |
+| HBA | 0.00949 | 0.0183 | 6.31e-4 |
+| POA | 0.00888 | 7.24e-10 | 6.18e-17 |
+| TSA | 0 | 0 | 0 |
+| GJO | 1.87e-7 | 1.07e-26 | 3.75e-56 |
 
 ### Rastrigin 函数（5维）
 
@@ -826,6 +881,11 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | BSO | 2.998 | 1.993 |
 | BSA | 29.99 | 22.36 |
 | PIO | 5.97 | 5.97 |
+| AOA | 0.552 | 0.0680 |
+| HBA | 7.46 | 6.36 |
+| POA | 1.12 | 0.00254 |
+| TSA | 0 | 0 |
+| GJO | 1.99 | 14.92 |
 
 ### Rosenbrock 函数（5维）
 
@@ -883,15 +943,21 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | BSO | 2.39 | 0.407 |
 | BSA | 31.70 | 6.59 |
 | PIO | 3.47 | 1.72 |
+| AOA | 0.0424 | 0.0327 |
+| HBA | 4.38 | 0.263 |
+| POA | 0.999 | 0.966 |
+| TSA | 3.77 | 3.77 |
+| GJO | 0.898 | 0.775 |
 
 ## 算法分类特点
 
 | 类别 | 代表算法 | 特点 |
 |------|----------|------|
 | **单点搜索** | 随机搜索、爬山法、模拟退火 | 简单、易于实现，适合低维问题 |
-| **群体智能** | PSO、萤火虫、蚁群、蜂群、布谷鸟、灰狼、鲸群、蝙蝠、和声、正弦余弦、飞蛾火焰、蚁狮、麻雀搜索、哈里斯鹰、花粉传播、蜻蜓、乌鸦、樽海鞘、Monarch蝴蝶、人工生态系统、入侵杂草、细菌觅食、混合蛙跳、萤火虫群、动物迁徙、磷虾群、飞蛾搜索、路径finder、菌落捕食、细菌菌落、飞狐优化、人工鱼群、烟花、鸽群 | 基于群体行为，全局搜索能力强 |
+| **群体智能** | PSO、萤火虫、蚁群、蜂群、布谷鸟、灰狼、鲸群、蝙蝠、和声、正弦余弦、飞蛾火焰、蚁狮、麻雀搜索、哈里斯鹰、花粉传播、蜻蜓、乌鸦、樽海鞘、Monarch蝴蝶、人工生态系统、入侵杂草、细菌觅食、混合蛙跳、萤火虫群、动物迁徙、磷虾群、飞蛾搜索、路径finder、菌落捕食、细菌菌落、飞狐优化、人工鱼群、烟花、鸽群、蜜獾、鹈鹕、金枪鱼群、金豺 | 基于群体行为，全局搜索能力强 |
 | **进化算法** | DE、GA、帝国主义竞争算法、回溯搜索算法 | 基于种群进化，鲁棒性好 |
 | **人类行为** | 头脑风暴优化 | 模拟人类头脑风暴过程 |
+| **数学启发** | 算术优化算法 | 基于数学算术运算符的搜索机制 |
 | **估计分布** | CEM、随机分形搜索 | 基于概率分布估计，适合连续优化 |
 | **确定性直接搜索** | Nelder-Mead、Hooke-Jeeves | 无需梯度，适合不可导函数 |
 | **局部搜索** | 禁忌搜索、引导局部搜索 | 强化局部开发，避免陷入局部最优 |

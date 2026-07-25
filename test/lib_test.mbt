@@ -995,3 +995,108 @@ test "PIO improves with more evaluations" {
 
   assert_true(result2.best_value <= result1.best_value)
 }
+
+test "AOA produces valid result" {
+  let config = @lib.make_aoa_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.arithmetic_optimization_algorithm(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "AOA improves with more evaluations" {
+  let config1 = @lib.make_aoa_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.arithmetic_optimization_algorithm(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_aoa_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.arithmetic_optimization_algorithm(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "HBA produces valid result" {
+  let config = @lib.make_hba_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.honey_badger_algorithm(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "HBA improves with more evaluations" {
+  let config1 = @lib.make_hba_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.honey_badger_algorithm(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_hba_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.honey_badger_algorithm(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "POA produces valid result" {
+  let config = @lib.make_poa_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.pelican_optimization_algorithm(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "POA improves with more evaluations" {
+  let config1 = @lib.make_poa_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.pelican_optimization_algorithm(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_poa_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.pelican_optimization_algorithm(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "TSA produces valid result" {
+  let config = @lib.make_tsa_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.tuna_swarm_optimization(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "TSA improves with more evaluations" {
+  let config1 = @lib.make_tsa_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.tuna_swarm_optimization(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_tsa_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.tuna_swarm_optimization(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "GJO produces valid result" {
+  let config = @lib.make_gjo_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.golden_jackal_optimization(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "GJO improves with more evaluations" {
+  let config1 = @lib.make_gjo_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.golden_jackal_optimization(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_gjo_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.golden_jackal_optimization(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
