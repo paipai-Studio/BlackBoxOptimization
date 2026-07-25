@@ -4826,6 +4826,583 @@ pub fn animal_migration_optimization(config: AMOConfig, f: (Array[Double]) -> Do
   }
 }
 
+// ===== Multi-Verse Optimizer (MVO) =====
+
+pub struct MVOConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+  wormhole_exploitation: Double
+  travelling_distance_rate: Double
+}
+
+pub fn make_mvo_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> MVOConfig {
+  MVOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+    wormhole_exploitation: 1.0,
+    travelling_distance_rate: 0.6
+  }
+}
+
+pub fn multi_verse_optimizer(config: MVOConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+
+  let mut current_rng = rng
+  let universes: Array[Array[Double]] = []
+  let values: Array[Double] = []
+
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    universes.push(sol)
+    values.push(evaluate(f, sol))
+  }
+
+  let mut evaluations = n
+  let mut best_pos: Array[Double] = []
+  let mut best_val = 1.0e308
+  let mut worst_val = -1.0e308
+
+  for i in 0..<n {
+    if values[i] < best_val {
+      best_val = values[i]
+      best_pos = universes[i]
+    }
+    if values[i] > worst_val {
+      worst_val = values[i]
+    }
+  }
+
+  let mut sorted_idx = sort_indices(values)
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+
+    // Update wormhole existence probability
+    let wep = 1.0 + iter
+    // Update travelling distance rate
+    let tdr = 1.0 - iter.abs()
+
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+
+      let new_pos: Array[Double] = []
+      for d in 0..<dim {
+        let (rng2, r1) = RNG::next(current_rng)
+        current_rng = rng2
+        let (rng3, r_wep) = RNG::next(current_rng)
+        current_rng = rng3
+        let (rng4, r_tdr) = RNG::next(current_rng)
+        current_rng = rng4
+        let (rng5, r_idx) = RNG::next(current_rng)
+        current_rng = rng5
+
+        let mut pos: Double = 0.0
+        if r_wep < wep {
+          // White/black hole tunnel
+          let j = (r_idx * n.to_double()).floor().to_int() % n
+          let j_idx = if j < 0 { n + j } else { j }
+          if values[i] < values[j_idx] {
+            pos = universes[i][d] + tdr * (bounds.max - bounds.min) * r1
+          } else {
+            pos = universes[j_idx][d] + tdr * (bounds.max - bounds.min) * r1
+          }
+        } else {
+          // Wormhole
+          if r_tdr < 0.5 {
+            pos = best_pos[d] + (bounds.max - bounds.min) * r1
+          } else {
+            pos = best_pos[d] - (bounds.max - bounds.min) * r1
+          }
+        }
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+
+      universes[i] = new_pos
+      let new_val = evaluate(f, new_pos)
+      values[i] = new_val
+      evaluations = evaluations + 1
+
+      if new_val < best_val {
+        best_val = new_val
+        best_pos = new_pos
+      }
+    }
+
+    sorted_idx = sort_indices(values)
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
+// ===== Krill Herd (KH) =====
+
+pub struct KHConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+  max_speed: Double
+  foraging_speed: Double
+}
+
+pub fn make_kh_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> KHConfig {
+  KHConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+    max_speed: 0.01,
+    foraging_speed: 0.02
+  }
+}
+
+pub fn krill_herd(config: KHConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+
+  let mut current_rng = rng
+  let krills: Array[Array[Double]] = []
+  let velocities: Array[Array[Double]] = []
+  let values: Array[Double] = []
+
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    krills.push(sol)
+    values.push(evaluate(f, sol))
+
+    let vel: Array[Double] = []
+    for d in 0..<dim {
+      let (rng2, r) = RNG::next(current_rng)
+      current_rng = rng2
+      vel.push(0.0)
+    }
+    velocities.push(vel)
+  }
+
+  let mut evaluations = n
+  let mut best_pos: Array[Double] = []
+  let mut best_val = 1.0e308
+  let mut worst_val = -1.0e308
+
+  for i in 0..<n {
+    if values[i] < best_val {
+      best_val = values[i]
+      best_pos = krills[i]
+    }
+    if values[i] > worst_val {
+      worst_val = values[i]
+    }
+  }
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+    let step_size = config.max_speed * (1.0 - iter)
+
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+
+      // Find neighbors
+      let neighbors: Array[Int] = []
+      let max_neighbors = 2
+      for j in 0..<n {
+        if j == i { continue }
+        if neighbors.length() >= max_neighbors { break }
+        let dist = euclidean_dist(krills[i], krills[j])
+        if dist < 1.0 {
+          neighbors.push(j)
+        }
+      }
+
+      // Direction of motion (induced + foraging)
+      let motion: Array[Double] = []
+      for d in 0..<dim {
+        // Induced motion: follow neighbors
+        let mut induced = 0.0
+        for ni in 0..<neighbors.length() {
+          let j = neighbors[ni]
+          let dist = euclidean_dist(krills[i], krills[j])
+          if dist > 1.0e-10 {
+            induced = induced + (krills[j][d] - krills[i][d]) / dist
+          }
+        }
+        // Foraging motion: toward food (best)
+        let food = best_pos[d] - krills[i][d]
+        // Random diffusion
+        let (rng3, r_diff) = RNG::next(current_rng)
+        current_rng = rng3
+
+        let dir = induced * config.foraging_speed + food * 0.5 + r_diff * step_size
+        motion.push(dir)
+      }
+
+      let new_pos: Array[Double] = []
+      for d in 0..<dim {
+        let (rng4, r1) = RNG::next(current_rng)
+        current_rng = rng4
+        let vel = velocities[i][d] + step_size * motion[d]
+        velocities[i][d] = vel
+        let pos = krills[i][d] + r1 * velocities[i][d]
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+
+      krills[i] = new_pos
+      let new_val = evaluate(f, new_pos)
+      values[i] = new_val
+      evaluations = evaluations + 1
+
+      if new_val < best_val {
+        best_val = new_val
+        best_pos = new_pos
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
+// ===== Imperialist Competitive Algorithm (ICA) =====
+
+pub struct ICAConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+  imperialist_count: Int
+  assimilation_rate: Double
+  revolution_rate: Double
+}
+
+pub fn make_ica_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> ICAConfig {
+  ICAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+    imperialist_count: 3,
+    assimilation_rate: 0.3,
+    revolution_rate: 0.3
+  }
+}
+
+pub fn imperialist_competitive_algorithm(config: ICAConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let imp_count = config.imperialist_count
+
+  let mut current_rng = rng
+  let countries: Array[Array[Double]] = []
+  let values: Array[Double] = []
+
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    countries.push(sol)
+    values.push(evaluate(f, sol))
+  }
+
+  let mut evaluations = n
+  let mut best_pos: Array[Double] = []
+  let mut best_val = 1.0e308
+
+  // Sort and assign imperialists and colonies
+  let mut sorted_idx = sort_indices(values)
+
+  while evaluations < config.max_evaluations {
+    // Re-sort
+    sorted_idx = sort_indices(values)
+
+    // Imperialists: best imp_count countries
+    let imperialists: Array[Int] = []
+    for i in 0..<imp_count {
+      imperialists.push(sorted_idx[i])
+    }
+
+    // Assign colonies to imperialists based on cost
+    let colonies: Array[Array[Int]] = []
+    for i in 0..<imp_count {
+      let col: Array[Int] = []
+      colonies.push(col)
+    }
+
+    let total_imperialist_cost: Double = {
+      let mut s = 0.0
+      for i in 0..<imp_count {
+        let idx = imperialists[i]
+        s = s + (values[idx] - values[sorted_idx[imp_count]]) + 1.0e-10
+      }
+      s
+    }
+
+    for i in imp_count..<n {
+      let idx = sorted_idx[i]
+      // Assign to weakest imperialist (simplified: round-robin by probability)
+      let (rng2, r_assign) = RNG::next(current_rng)
+      current_rng = rng2
+      let imp_idx = (r_assign * imp_count.to_double()).floor().to_int()
+      let target = max_int(0, min_int(imp_count - 1, imp_idx))
+      colonies[target].push(idx)
+    }
+
+    // Assimilation: colonies move toward their imperialist
+    for k in 0..<imp_count {
+      if evaluations >= config.max_evaluations { break }
+      let imp_idx = imperialists[k]
+      let imp_pos = countries[imp_idx]
+
+      for c in 0..<colonies[k].length() {
+        if evaluations >= config.max_evaluations { break }
+        let col_idx = colonies[k][c]
+
+        let (rng3, r_assim) = RNG::next(current_rng)
+        current_rng = rng3
+
+        let new_pos: Array[Double] = []
+        for d in 0..<dim {
+          let pos = countries[col_idx][d] + r_assim * config.assimilation_rate * (imp_pos[d] - countries[col_idx][d])
+          new_pos.push(max(bounds.min, min(bounds.max, pos)))
+        }
+
+        countries[col_idx] = new_pos
+        let new_val = evaluate(f, new_pos)
+        values[col_idx] = new_val
+        evaluations = evaluations + 1
+
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+
+        if values[col_idx] < values[imp_idx] {
+          // Revolution: colony becomes new imperialist
+          let temp = countries[col_idx]
+          countries[col_idx] = countries[imp_idx]
+          countries[imp_idx] = temp
+          let temp_val = values[col_idx]
+          values[col_idx] = values[imp_idx]
+          values[imp_idx] = temp_val
+        }
+      }
+    }
+
+    // Revolution: random perturbation
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+      let (rng4, r_rev) = RNG::next(current_rng)
+      current_rng = rng4
+      if r_rev < config.revolution_rate {
+        let dims_to_change = max_int(1, dim / 3)
+        let new_pos: Array[Double] = []
+        for d in 0..<dim {
+          let (rng5, r_p) = RNG::next(current_rng)
+          current_rng = rng5
+          if d < dims_to_change {
+            new_pos.push(bounds.min + r_p * (bounds.max - bounds.min))
+          } else {
+            new_pos.push(countries[i][d])
+          }
+        }
+        countries[i] = new_pos
+        let new_val = evaluate(f, new_pos)
+        values[i] = new_val
+        evaluations = evaluations + 1
+
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
+// ===== Stochastic Fractal Search (SFS) =====
+
+pub struct SFSConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+  discovery_iterations: Int
+  learning_iterations: Int
+}
+
+pub fn make_sfs_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> SFSConfig {
+  SFSConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+    discovery_iterations: 3,
+    learning_iterations: 2
+  }
+}
+
+pub fn stochastic_fractal_search(config: SFSConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let range = bounds.max - bounds.min
+
+  let mut current_rng = rng
+  let points: Array[Array[Double]] = []
+  let values: Array[Double] = []
+
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    points.push(sol)
+    values.push(evaluate(f, sol))
+  }
+
+  let mut evaluations = n
+  let mut best_pos: Array[Double] = []
+  let mut best_val = 1.0e308
+
+  for i in 0..<n {
+    if values[i] < best_val {
+      best_val = values[i]
+      best_pos = points[i]
+    }
+  }
+
+  while evaluations < config.max_evaluations {
+    // Discovery phase: create new points around existing ones
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+
+      for d in 0..<dim {
+        if evaluations >= config.max_evaluations { break }
+
+        let sigma = range * 0.1
+        let (rng2, r_gauss) = RNG::next(current_rng)
+        current_rng = rng2
+        let (rng3, r_gauss2) = RNG::next(current_rng)
+        current_rng = rng3
+        let gauss_val = box_muller(r_gauss, r_gauss2)
+
+        // Explore nearby
+        let pos1 = points[i][d] + sigma * gauss_val
+        let new_pos: Array[Double] = []
+        for dd in 0..<dim {
+          if dd == d {
+            new_pos.push(max(bounds.min, min(bounds.max, pos1)))
+          } else {
+            new_pos.push(points[i][dd])
+          }
+        }
+
+        if evaluations < config.max_evaluations {
+          let new_val = evaluate(f, new_pos)
+          evaluations = evaluations + 1
+          if new_val < best_val {
+            best_val = new_val
+            best_pos = new_pos
+          }
+          if new_val < values[i] {
+            points[i] = new_pos
+            values[i] = new_val
+          }
+        }
+
+        if evaluations >= config.max_evaluations { break }
+
+        // Explore in opposite direction
+        let pos2 = points[i][d] - sigma * gauss_val
+        let new_pos2: Array[Double] = []
+        for dd in 0..<dim {
+          if dd == d {
+            new_pos2.push(max(bounds.min, min(bounds.max, pos2)))
+          } else {
+            new_pos2.push(points[i][dd])
+          }
+        }
+
+        if evaluations < config.max_evaluations {
+          let new_val2 = evaluate(f, new_pos2)
+          evaluations = evaluations + 1
+          if new_val2 < best_val {
+            best_val = new_val2
+            best_pos = new_pos2
+          }
+          if new_val2 < values[i] {
+            points[i] = new_pos2
+            values[i] = new_val2
+          }
+        }
+      }
+    }
+
+    // Learning phase: points move toward better neighbors
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+
+      let (rng4, r_learn) = RNG::next(current_rng)
+      current_rng = rng4
+
+      // Find a better point
+      let mut better_idx = -1
+      let mut min_dist = 1.0e308
+      for j in 0..<n {
+        if j == i { continue }
+        if values[j] < values[i] {
+          let dist = euclidean_dist(points[i], points[j])
+          if dist < min_dist {
+            min_dist = dist
+            better_idx = j
+          }
+        }
+      }
+
+      if better_idx >= 0 && min_dist < 1.0e308 {
+        let new_pos: Array[Double] = []
+        for d in 0..<dim {
+          let pos = points[i][d] + r_learn * (points[better_idx][d] - points[i][d])
+          new_pos.push(max(bounds.min, min(bounds.max, pos)))
+        }
+        points[i] = new_pos
+        let new_val = evaluate(f, new_pos)
+        values[i] = new_val
+        evaluations = evaluations + 1
+
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations: evaluations
+  }
+}
+
 fn box_muller(u1: Double, u2: Double) -> Double {
   let pi = 3.14159265358979323846
   let sqrt_val = (-2.0 * ln_approx(u1)).sqrt()
@@ -5381,6 +5958,46 @@ pub fn run_benchmark_at_evals(
     relative_error: amo_error
   })
 
+  let mvo_config = make_mvo_config(max_evals, dim, bounds, 25)
+  let mvo_result = multi_verse_optimizer(mvo_config, f, rng)
+  let mvo_error = calc_relative_error(mvo_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "MVO",
+    best_value: mvo_result.best_value,
+    evaluations: mvo_result.evaluations,
+    relative_error: mvo_error
+  })
+
+  let kh_config = make_kh_config(max_evals, dim, bounds, 25)
+  let kh_result = krill_herd(kh_config, f, rng)
+  let kh_error = calc_relative_error(kh_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "KH",
+    best_value: kh_result.best_value,
+    evaluations: kh_result.evaluations,
+    relative_error: kh_error
+  })
+
+  let ica_config = make_ica_config(max_evals, dim, bounds, 25)
+  let ica_result = imperialist_competitive_algorithm(ica_config, f, rng)
+  let ica_error = calc_relative_error(ica_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "ICA",
+    best_value: ica_result.best_value,
+    evaluations: ica_result.evaluations,
+    relative_error: ica_error
+  })
+
+  let sfs_config = make_sfs_config(max_evals, dim, bounds, 25)
+  let sfs_result = stochastic_fractal_search(sfs_config, f, rng)
+  let sfs_error = calc_relative_error(sfs_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "SFS",
+    best_value: sfs_result.best_value,
+    evaluations: sfs_result.evaluations,
+    relative_error: sfs_error
+  })
+
   results
 }
 
@@ -5449,6 +6066,10 @@ pub fn run_multiple_trials(
   let gsa_values: Array[Double] = []
   let tlbo_values: Array[Double] = []
   let amo_values: Array[Double] = []
+  let mvo_values: Array[Double] = []
+  let kh_values: Array[Double] = []
+  let ica_values: Array[Double] = []
+  let sfs_values: Array[Double] = []
 
   for trial in 0..<num_trials {
     let seed = base_seed + trial.to_double() * 1000.0
@@ -5605,6 +6226,22 @@ pub fn run_multiple_trials(
     let amo_config = make_amo_config(max_evals, dim, bounds, 25, 5)
     let amo_result = animal_migration_optimization(amo_config, f, rng)
     amo_values.push(amo_result.best_value)
+
+    let mvo_config = make_mvo_config(max_evals, dim, bounds, 25)
+    let mvo_result = multi_verse_optimizer(mvo_config, f, rng)
+    mvo_values.push(mvo_result.best_value)
+
+    let kh_config = make_kh_config(max_evals, dim, bounds, 25)
+    let kh_result = krill_herd(kh_config, f, rng)
+    kh_values.push(kh_result.best_value)
+
+    let ica_config = make_ica_config(max_evals, dim, bounds, 25)
+    let ica_result = imperialist_competitive_algorithm(ica_config, f, rng)
+    ica_values.push(ica_result.best_value)
+
+    let sfs_config = make_sfs_config(max_evals, dim, bounds, 25)
+    let sfs_result = stochastic_fractal_search(sfs_config, f, rng)
+    sfs_values.push(sfs_result.best_value)
   }
 
   println("  Algorithm          | Min Value           | Max Value           | Avg Value           | Avg Error")
@@ -5813,6 +6450,30 @@ pub fn run_multiple_trials(
   let amo_avg = array_avg(amo_values)
   let amo_err = calc_relative_error(amo_avg, known_optimal)
   println("  | AMO               | \{amo_min} | \{amo_max} | \{amo_avg} | \{amo_err} |")
+
+  let mvo_min = array_min(mvo_values)
+  let mvo_max = array_max(mvo_values)
+  let mvo_avg = array_avg(mvo_values)
+  let mvo_err = calc_relative_error(mvo_avg, known_optimal)
+  println("  | MVO               | \{mvo_min} | \{mvo_max} | \{mvo_avg} | \{mvo_err} |")
+
+  let kh_min = array_min(kh_values)
+  let kh_max = array_max(kh_values)
+  let kh_avg = array_avg(kh_values)
+  let kh_err = calc_relative_error(kh_avg, known_optimal)
+  println("  | KH                | \{kh_min} | \{kh_max} | \{kh_avg} | \{kh_err} |")
+
+  let ica_min = array_min(ica_values)
+  let ica_max = array_max(ica_values)
+  let ica_avg = array_avg(ica_values)
+  let ica_err = calc_relative_error(ica_avg, known_optimal)
+  println("  | ICA               | \{ica_min} | \{ica_max} | \{ica_avg} | \{ica_err} |")
+
+  let sfs_min = array_min(sfs_values)
+  let sfs_max = array_max(sfs_values)
+  let sfs_avg = array_avg(sfs_values)
+  let sfs_err = calc_relative_error(sfs_avg, known_optimal)
+  println("  | SFS               | \{sfs_min} | \{sfs_max} | \{sfs_avg} | \{sfs_err} |")
 
   println("")
 }

@@ -169,7 +169,35 @@ fn main {
   println("   评估次数: \{amo_result.evaluations}")
   println("")
 
-  println("24. 比较不同评估预算下的性能:")
+  println("24. 运行多宇宙优化 (MVO):")
+  let mvo_config = @lib.make_mvo_config(1000, dim, bounds, 25)
+  let mvo_result = @lib.multi_verse_optimizer(mvo_config, @lib.sphere_function, rng)
+  println("   最优值: \{mvo_result.best_value}")
+  println("   评估次数: \{mvo_result.evaluations}")
+  println("")
+
+  println("25. 运行磷虾群算法 (KH):")
+  let kh_config = @lib.make_kh_config(1000, dim, bounds, 25)
+  let kh_result = @lib.krill_herd(kh_config, @lib.sphere_function, rng)
+  println("   最优值: \{kh_result.best_value}")
+  println("   评估次数: \{kh_result.evaluations}")
+  println("")
+
+  println("26. 运行帝国主义竞争算法 (ICA):")
+  let ica_config = @lib.make_ica_config(1000, dim, bounds, 25)
+  let ica_result = @lib.imperialist_competitive_algorithm(ica_config, @lib.sphere_function, rng)
+  println("   最优值: \{ica_result.best_value}")
+  println("   评估次数: \{ica_result.evaluations}")
+  println("")
+
+  println("27. 运行随机分形搜索 (SFS):")
+  let sfs_config = @lib.make_sfs_config(1000, dim, bounds, 25)
+  let sfs_result = @lib.stochastic_fractal_search(sfs_config, @lib.sphere_function, rng)
+  println("   最优值: \{sfs_result.best_value}")
+  println("   评估次数: \{sfs_result.evaluations}")
+  println("")
+
+  println("28. 比较不同评估预算下的性能:")
   let results = @lib.run_benchmark_at_evals(
     @lib.sphere_function,
     "Sphere Function",

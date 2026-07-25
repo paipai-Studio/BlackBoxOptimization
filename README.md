@@ -44,6 +44,10 @@
 | 物理启发 | 引力搜索算法 (GSA) | 基于牛顿万有引力定律的搜索 |
 | 教学模型 | 教与学优化 (TLBO) | 模拟班级教学和学习过程 |
 | 群体智能 | 动物迁徙优化 (AMO) | 模拟动物群体迁徙跟随行为 |
+| 物理启发 | 多宇宙优化 (MVO) | 基于白洞/黑洞/虫洞的宇宙机制 |
+| 群体智能 | 磷虾群算法 (KH) | 模拟磷虾诱导运动、觅食和扩散 |
+| 进化算法 | 帝国主义竞争算法 (ICA) | 模拟帝国殖民、同化和竞争 |
+| 估计分布 | 随机分形搜索 (SFS) | 基于分形发现和学习两阶段搜索 |
 
 ## 项目结构
 
@@ -57,10 +61,10 @@ BlackBoxOptimization/
 │   └── main.mbt                  # 基准测试入口
 ├── test/                         # 测试包
 │   ├── moon.pkg.json             # 包配置
-│   └── lib_test.mbt              # 单元测试（66 个测试用例）
+│   └── lib_test.mbt              # 单元测试（74 个测试用例）
 ├── example/                      # 示例包
 │   ├── moon.pkg.json             # 包配置
-│   └── simple_usage.mbt          # 使用示例（23 个示例）
+│   └── simple_usage.mbt          # 使用示例（28 个示例）
 ├── .github/workflows/            # CI 配置
 │   └── ci.yml                    # GitHub Actions
 ├── moon.mod.json                 # 模块配置
@@ -94,7 +98,7 @@ moon run main
 ### 运行测试
 
 ```bash
-# 运行所有测试（66 个测试用例）
+# 运行所有测试（74 个测试用例）
 moon test
 
 # 代码检查
@@ -289,6 +293,22 @@ let tlbo_result = @lib.teaching_learning_based_optimization(tlbo_config, f, rng)
 // 动物迁徙优化 (AMO)
 let amo_config = @lib.make_amo_config(1000, dim, bounds, 25, 5)
 let amo_result = @lib.animal_migration_optimization(amo_config, f, rng)
+
+// 多宇宙优化 (MVO)
+let mvo_config = @lib.make_mvo_config(1000, dim, bounds, 25)
+let mvo_result = @lib.multi_verse_optimizer(mvo_config, f, rng)
+
+// 磷虾群算法 (KH)
+let kh_config = @lib.make_kh_config(1000, dim, bounds, 25)
+let kh_result = @lib.krill_herd(kh_config, f, rng)
+
+// 帝国主义竞争算法 (ICA)
+let ica_config = @lib.make_ica_config(1000, dim, bounds, 25)
+let ica_result = @lib.imperialist_competitive_algorithm(ica_config, f, rng)
+
+// 随机分形搜索 (SFS)
+let sfs_config = @lib.make_sfs_config(1000, dim, bounds, 25)
+let sfs_result = @lib.stochastic_fractal_search(sfs_config, f, rng)
 ```
 
 ### 内置测试函数
@@ -559,6 +579,35 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | population_size | 动物群大小 | 25 |
 | migration_interval | 迁徙间隔 | 5 |
 
+### MVO (多宇宙优化)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 宇宙数量 | 25 |
+| wormhole_exploitation | 虫洞开发率 | 1.0 |
+| travelling_distance_rate | 距离旅行率 | 0.6 |
+
+### KH (磷虾群算法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 磷虾数量 | 25 |
+| max_speed | 最大速度 | 0.01 |
+| foraging_speed | 觅食速度 | 0.02 |
+
+### ICA (帝国主义竞争算法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 国家数量 | 25 |
+| imperialist_count | 帝国主义者数量 | 3 |
+| assimilation_rate | 同化率 | 0.3 |
+| revolution_rate | 革命率 | 0.3 |
+
+### SFS (随机分形搜索)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 搜索点数量 | 25 |
+| discovery_iterations | 发现阶段迭代 | 3 |
+| learning_iterations | 学习阶段迭代 | 2 |
+
 ## 性能对比
 
 ### Sphere 函数（5维）
@@ -603,6 +652,10 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | GSA | 18.11 | 18.11 | 18.11 |
 | **TLBO** | **1.41e-4** | **4.26e-24** | **9.02e-47** |
 | **AMO** | **0.0171** | **5.02e-7** | **8.41e-12** |
+| MVO | 13.47 | 13.47 | 13.47 |
+| KH | 0.193 | 0.193 | 0.193 |
+| ICA | 0.906 | 0.906 | 0.906 |
+| **SFS** | **1.82e-4** | **5.63e-5** | **3.36e-6** |
 
 ### Rastrigin 函数（5维）
 
@@ -646,6 +699,10 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | GSA | 65.32 | 65.32 |
 | **TLBO** | **0.0333** | **0** |
 | AMO | 6.97 | 6.96 |
+| MVO | 48.86 | 48.86 |
+| KH | 6.30 | 7.86 |
+| ICA | 17.97 | 17.97 |
+| **SFS** | **0.454** | **0.0113** |
 
 ### Rosenbrock 函数（5维）
 
@@ -689,19 +746,23 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | GSA | 4343.62 | 4343.62 |
 | TLBO | 1.72 | 1.57 |
 | AMO | 3.91 | 3.60 |
+| MVO | 4875.10 | 4875.10 |
+| KH | 9.59 | 13.22 |
+| ICA | 9.57 | 32.58 |
+| **SFS** | **0.0123** | **0.0128** |
 
 ## 算法分类特点
 
 | 类别 | 代表算法 | 特点 |
 |------|----------|------|
 | **单点搜索** | 随机搜索、爬山法、模拟退火 | 简单、易于实现，适合低维问题 |
-| **群体智能** | PSO、萤火虫、蚁群、蜂群、布谷鸟、灰狼、鲸群、蝙蝠、和声、正弦余弦、飞蛾火焰、蚁狮、麻雀搜索、哈里斯鹰、花粉传播、蜻蜓、乌鸦、樽海鞘、Monarch蝴蝶、人工生态系统、入侵杂草、细菌觅食、混合蛙跳、萤火虫群、动物迁徙 | 基于群体行为，全局搜索能力强 |
-| **进化算法** | DE、GA | 基于种群进化，鲁棒性好 |
-| **估计分布** | CEM | 基于概率分布估计，适合连续优化 |
+| **群体智能** | PSO、萤火虫、蚁群、蜂群、布谷鸟、灰狼、鲸群、蝙蝠、和声、正弦余弦、飞蛾火焰、蚁狮、麻雀搜索、哈里斯鹰、花粉传播、蜻蜓、乌鸦、樽海鞘、Monarch蝴蝶、人工生态系统、入侵杂草、细菌觅食、混合蛙跳、萤火虫群、动物迁徙、磷虾群 | 基于群体行为，全局搜索能力强 |
+| **进化算法** | DE、GA、帝国主义竞争算法 | 基于种群进化，鲁棒性好 |
+| **估计分布** | CEM、随机分形搜索 | 基于概率分布估计，适合连续优化 |
 | **确定性直接搜索** | Nelder-Mead、Hooke-Jeeves | 无需梯度，适合不可导函数 |
 | **局部搜索** | 禁忌搜索、引导局部搜索 | 强化局部开发，避免陷入局部最优 |
 | **进化策略** | CMA-ES | 协方差自适应，适合病态问题 |
-| **物理启发** | GSA | 基于万有引力定律，自适应引力常数 |
+| **物理启发** | GSA、MVO | 基于万有引力/宇宙机制，自适应搜索 |
 | **教学模型** | TLBO | 无需算法特定参数，收敛速度快 |
 
 ## 许可证
