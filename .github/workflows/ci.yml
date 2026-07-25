@@ -24,10 +24,10 @@ jobs:
         run: moon version
 
       - name: Moon check
-        run: moon check --all
+        run: moon check
+
+      - name: Moon build
+        run: moon build
 
       - name: Moon test
         run: moon test
-
-      - name: Moon build
-        run: moon build --release

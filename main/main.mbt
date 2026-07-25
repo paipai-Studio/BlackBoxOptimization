@@ -1,6 +1,11 @@
 // Black-Box Optimization Framework - 主入口
 
-import lib
+struct FuncConfig {
+  f: (Array[Double]) -> Double
+  name: String
+  bounds: @lib.Bounds
+  optimal: Double
+}
 
 fn main {
   println("╔══════════════════════════════════════════════════════════╗")
@@ -10,24 +15,24 @@ fn main {
 
   let dim = 5
 
-  let sphere_config = {
-    f: lib.sphere_function,
+  let sphere_config = FuncConfig::{
+    f: @lib.sphere_function,
     name: "Sphere Function",
-    bounds: lib.Bounds::{ min: -5.0, max: 5.0 },
+    bounds: @lib.make_bounds(-5.0, 5.0),
     optimal: 0.0
   }
 
-  let rastrigin_config = {
-    f: lib.rastrigin_function,
+  let rastrigin_config = FuncConfig::{
+    f: @lib.rastrigin_function,
     name: "Rastrigin Function",
-    bounds: lib.Bounds::{ min: -5.12, max: 5.12 },
+    bounds: @lib.make_bounds(-5.12, 5.12),
     optimal: 0.0
   }
 
-  let rosenbrock_config = {
-    f: lib.rosenbrock_function,
+  let rosenbrock_config = FuncConfig::{
+    f: @lib.rosenbrock_function,
     name: "Rosenbrock Function",
-    bounds: lib.Bounds::{ min: -5.0, max: 5.0 },
+    bounds: @lib.make_bounds(-5.0, 5.0),
     optimal: 0.0
   }
 
@@ -37,15 +42,15 @@ fn main {
   println("└──────────────────────────────────────────────────────────┘")
   println("")
 
-  println("  cos(0)     = \{lib.cos_approx(0.0)} (expected: 1.0)")
-  println("  cos(pi)    = \{lib.cos_approx(lib.PI)} (expected: -1.0)")
-  println("  cos(pi/2)  = \{lib.cos_approx(lib.PI / 2.0)} (expected: 0.0)")
-  println("  cos(3pi)   = \{lib.cos_approx(3.0 * lib.PI)} (expected: -1.0)")
-  println("  cos(16.0)  = \{lib.cos_approx(16.0)} (test large input)")
+  println("  cos(0)     = \{@lib.cos_approx(0.0)} (expected: 1.0)")
+  println("  cos(pi)    = \{@lib.cos_approx(@lib.PI)} (expected: -1.0)")
+  println("  cos(pi/2)  = \{@lib.cos_approx(@lib.PI / 2.0)} (expected: 0.0)")
+  println("  cos(3pi)   = \{@lib.cos_approx(3.0 * @lib.PI)} (expected: -1.0)")
+  println("  cos(16.0)  = \{@lib.cos_approx(16.0)} (test large input)")
   println("")
 
   let zeros: Array[Double] = [0.0, 0.0, 0.0, 0.0, 0.0]
-  let rast_at_optimal = lib.rastrigin_function(zeros)
+  let rast_at_optimal = @lib.rastrigin_function(zeros)
   println("  Rastrigin at (0,0,0,0,0) = \{rast_at_optimal} (expected: 0.0)")
   println("")
 
@@ -55,16 +60,16 @@ fn main {
   println("└──────────────────────────────────────────────────────────┘")
   println("")
 
-  let base_rng = lib.RNG::{ seed: 42.0 }
+  let base_rng = @lib.make_rng(42.0)
 
   println("──────────────────────────────────────────────────────────")
-  lib.run_evals_comparison(sphere_config.f, sphere_config.name, dim, sphere_config.bounds, sphere_config.optimal, base_rng)
+  @lib.run_evals_comparison(sphere_config.f, sphere_config.name, dim, sphere_config.bounds, sphere_config.optimal, base_rng)
 
   println("──────────────────────────────────────────────────────────")
-  lib.run_evals_comparison(rastrigin_config.f, rastrigin_config.name, dim, rastrigin_config.bounds, rastrigin_config.optimal, base_rng)
+  @lib.run_evals_comparison(rastrigin_config.f, rastrigin_config.name, dim, rastrigin_config.bounds, rastrigin_config.optimal, base_rng)
 
   println("──────────────────────────────────────────────────────────")
-  lib.run_evals_comparison(rosenbrock_config.f, rosenbrock_config.name, dim, rosenbrock_config.bounds, rosenbrock_config.optimal, base_rng)
+  @lib.run_evals_comparison(rosenbrock_config.f, rosenbrock_config.name, dim, rosenbrock_config.bounds, rosenbrock_config.optimal, base_rng)
 
   // ===== 第三部分：多次运行统计 =====
   println("┌──────────────────────────────────────────────────────────┐")
@@ -76,15 +81,15 @@ fn main {
   let eval_budget = 10000
 
   println("=== Sphere Function ===")
-  lib.run_multiple_trials(sphere_config.f, sphere_config.name, dim, sphere_config.bounds, sphere_config.optimal, eval_budget, num_trials, 100.0)
+  @lib.run_multiple_trials(sphere_config.f, sphere_config.name, dim, sphere_config.bounds, sphere_config.optimal, eval_budget, num_trials, 100.0)
   println("")
 
   println("=== Rastrigin Function ===")
-  lib.run_multiple_trials(rastrigin_config.f, rastrigin_config.name, dim, rastrigin_config.bounds, rastrigin_config.optimal, eval_budget, num_trials, 200.0)
+  @lib.run_multiple_trials(rastrigin_config.f, rastrigin_config.name, dim, rastrigin_config.bounds, rastrigin_config.optimal, eval_budget, num_trials, 200.0)
   println("")
 
   println("=== Rosenbrock Function ===")
-  lib.run_multiple_trials(rosenbrock_config.f, rosenbrock_config.name, dim, rosenbrock_config.bounds, rosenbrock_config.optimal, eval_budget, num_trials, 300.0)
+  @lib.run_multiple_trials(rosenbrock_config.f, rosenbrock_config.name, dim, rosenbrock_config.bounds, rosenbrock_config.optimal, eval_budget, num_trials, 300.0)
 
   println("")
   println("╔══════════════════════════════════════════════════════════╗")

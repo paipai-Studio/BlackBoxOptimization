@@ -1,7 +1,0 @@
-import {
-  "blackbox_optimization/lib" @lib
-}
-
-options(
-  "is-test": true
-)

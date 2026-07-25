@@ -1,0 +1,4 @@
+{
+  "import": ["blackbox_optimization/lib"],
+  "is-test": true
+}
