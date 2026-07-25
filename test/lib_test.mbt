@@ -680,3 +680,213 @@ test "SFS improves with more evaluations" {
 
   assert_true(result2.best_value <= result1.best_value)
 }
+
+test "SOS produces valid result" {
+  let config = @lib.make_sos_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.symbiotic_organisms_search(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "SOS improves with more evaluations" {
+  let config1 = @lib.make_sos_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.symbiotic_organisms_search(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_sos_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.symbiotic_organisms_search(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "BBO produces valid result" {
+  let config = @lib.make_bbo_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25, 0.01)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.biogeography_based_optimization(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "BBO improves with more evaluations" {
+  let config1 = @lib.make_bbo_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25, 0.01)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.biogeography_based_optimization(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_bbo_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25, 0.01)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.biogeography_based_optimization(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "EHO produces valid result" {
+  let config = @lib.make_eho_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25, 5, 0.5)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.elephant_herding_optimization(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "EHO improves with more evaluations" {
+  let config1 = @lib.make_eho_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25, 5, 0.5)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.elephant_herding_optimization(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_eho_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25, 5, 0.5)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.elephant_herding_optimization(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "EO produces valid result" {
+  let config = @lib.make_eo_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.equilibrium_optimizer(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "EO improves with more evaluations" {
+  let config1 = @lib.make_eo_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.equilibrium_optimizer(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_eo_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.equilibrium_optimizer(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "WDO produces valid result" {
+  let config = @lib.make_wdo_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.wind_driven_optimization(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "WDO improves with more evaluations" {
+  let config1 = @lib.make_wdo_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.wind_driven_optimization(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_wdo_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.wind_driven_optimization(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "MSA produces valid result" {
+  let config = @lib.make_msa_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.moth_search_algorithm(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "MSA improves with more evaluations" {
+  let config1 = @lib.make_msa_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.moth_search_algorithm(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_msa_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.moth_search_algorithm(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "PFA produces valid result" {
+  let config = @lib.make_pfa_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.pathfinder_algorithm(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "PFA improves with more evaluations" {
+  let config1 = @lib.make_pfa_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.pathfinder_algorithm(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_pfa_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.pathfinder_algorithm(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "CPA produces valid result" {
+  let config = @lib.make_cpa_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.colony_predation_algorithm(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "CPA improves with more evaluations" {
+  let config1 = @lib.make_cpa_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.colony_predation_algorithm(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_cpa_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.colony_predation_algorithm(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "BCO produces valid result" {
+  let config = @lib.make_bco_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.bacteria_colony_optimization(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "BCO improves with more evaluations" {
+  let config1 = @lib.make_bco_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.bacteria_colony_optimization(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_bco_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.bacteria_colony_optimization(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "FFOA produces valid result" {
+  let config = @lib.make_ffoa_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.flying_fox_optimization(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "FFOA improves with more evaluations" {
+  let config1 = @lib.make_ffoa_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.flying_fox_optimization(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_ffoa_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.flying_fox_optimization(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}

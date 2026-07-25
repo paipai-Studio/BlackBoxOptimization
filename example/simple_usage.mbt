@@ -197,7 +197,77 @@ fn main {
   println("   评估次数: \{sfs_result.evaluations}")
   println("")
 
-  println("28. 比较不同评估预算下的性能:")
+  println("28. 运行共生生物搜索 (SOS):")
+  let sos_config = @lib.make_sos_config(1000, dim, bounds, 25)
+  let sos_result = @lib.symbiotic_organisms_search(sos_config, @lib.sphere_function, rng)
+  println("   最优值: \{sos_result.best_value}")
+  println("   评估次数: \{sos_result.evaluations}")
+  println("")
+
+  println("29. 运行生物地理学优化 (BBO):")
+  let bbo_config = @lib.make_bbo_config(1000, dim, bounds, 25, 0.01)
+  let bbo_result = @lib.biogeography_based_optimization(bbo_config, @lib.sphere_function, rng)
+  println("   最优值: \{bbo_result.best_value}")
+  println("   评估次数: \{bbo_result.evaluations}")
+  println("")
+
+  println("30. 运行大象牧群优化 (EHO):")
+  let eho_config = @lib.make_eho_config(1000, dim, bounds, 25, 5, 0.5)
+  let eho_result = @lib.elephant_herding_optimization(eho_config, @lib.sphere_function, rng)
+  println("   最优值: \{eho_result.best_value}")
+  println("   评估次数: \{eho_result.evaluations}")
+  println("")
+
+  println("31. 运行均衡优化 (EO):")
+  let eo_config = @lib.make_eo_config(1000, dim, bounds, 25)
+  let eo_result = @lib.equilibrium_optimizer(eo_config, @lib.sphere_function, rng)
+  println("   最优值: \{eo_result.best_value}")
+  println("   评估次数: \{eo_result.evaluations}")
+  println("")
+
+  println("32. 运行风驱动优化 (WDO):")
+  let wdo_config = @lib.make_wdo_config(1000, dim, bounds, 25)
+  let wdo_result = @lib.wind_driven_optimization(wdo_config, @lib.sphere_function, rng)
+  println("   最优值: \{wdo_result.best_value}")
+  println("   评估次数: \{wdo_result.evaluations}")
+  println("")
+
+  println("33. 运行飞蛾搜索算法 (MSA):")
+  let msa_config = @lib.make_msa_config(1000, dim, bounds, 25)
+  let msa_result = @lib.moth_search_algorithm(msa_config, @lib.sphere_function, rng)
+  println("   最优值: \{msa_result.best_value}")
+  println("   评估次数: \{msa_result.evaluations}")
+  println("")
+
+  println("34. 运行路径finder算法 (PFA):")
+  let pfa_config = @lib.make_pfa_config(1000, dim, bounds, 25)
+  let pfa_result = @lib.pathfinder_algorithm(pfa_config, @lib.sphere_function, rng)
+  println("   最优值: \{pfa_result.best_value}")
+  println("   评估次数: \{pfa_result.evaluations}")
+  println("")
+
+  println("35. 运行菌落捕食算法 (CPA):")
+  let cpa_config = @lib.make_cpa_config(1000, dim, bounds, 25)
+  let cpa_result = @lib.colony_predation_algorithm(cpa_config, @lib.sphere_function, rng)
+  println("   最优值: \{cpa_result.best_value}")
+  println("   评估次数: \{cpa_result.evaluations}")
+  println("")
+
+  println("36. 运行细菌菌落优化 (BCO):")
+  let bco_config = @lib.make_bco_config(1000, dim, bounds, 25)
+  let bco_result = @lib.bacteria_colony_optimization(bco_config, @lib.sphere_function, rng)
+  println("   最优值: \{bco_result.best_value}")
+  println("   评估次数: \{bco_result.evaluations}")
+  println("")
+
+  println("37. 运行飞狐优化算法 (FFOA):")
+  let ffoa_config = @lib.make_ffoa_config(1000, dim, bounds, 25)
+  let ffoa_result = @lib.flying_fox_optimization(ffoa_config, @lib.sphere_function, rng)
+  println("   最优值: \{ffoa_result.best_value}")
+  println("   评估次数: \{ffoa_result.evaluations}")
+  println("")
+
+  println("38. 比较不同评估预算下的性能:")
   let results = @lib.run_benchmark_at_evals(
     @lib.sphere_function,
     "Sphere Function",
