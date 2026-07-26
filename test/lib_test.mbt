@@ -1100,3 +1100,66 @@ test "GJO improves with more evaluations" {
 
   assert_true(result2.best_value <= result1.best_value)
 }
+
+test "Jaya produces valid result" {
+  let config = @lib.make_jaya_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.jaya_optimization(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "Jaya improves with more evaluations" {
+  let config1 = @lib.make_jaya_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.jaya_optimization(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_jaya_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.jaya_optimization(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "SLC produces valid result" {
+  let config = @lib.make_slc_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.soccer_league_competition(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "SLC improves with more evaluations" {
+  let config1 = @lib.make_slc_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.soccer_league_competition(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_slc_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.soccer_league_competition(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "GBPSO produces valid result" {
+  let config = @lib.make_gbpso_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.gaussian_bare_bones_pso(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "GBPSO improves with more evaluations" {
+  let config1 = @lib.make_gbpso_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.gaussian_bare_bones_pso(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_gbpso_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.gaussian_bare_bones_pso(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}

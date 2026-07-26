@@ -1,6 +1,6 @@
 # BlackBoxOptimization
 
-基于 MoonBit 实现的黑盒优化算法框架，支持多种经典优化算法，提供统一的接口和基准测试框架。
+基于 MoonBit 实现的黑盒优化算法框架，支持 65 种经典优化算法，提供统一的接口和基准测试框架。
 
 ## 支持的算法
 
@@ -48,6 +48,14 @@
 | 群体智能 | 磷虾群算法 (KH) | 模拟磷虾诱导运动、觅食和扩散 |
 | 进化算法 | 帝国主义竞争算法 (ICA) | 模拟帝国殖民、同化和竞争 |
 | 估计分布 | 随机分形搜索 (SFS) | 基于分形发现和学习两阶段搜索 |
+| 群体智能 | 共生生物搜索 (SOS) | 模拟生物间互利共生/偏利共生/寄生关系 |
+| 进化算法 | 生物地理学优化 (BBO) | 基于栖息地适宜度与物种迁移模型 |
+| 群体智能 | 大象牧群优化 (EHO) | 模拟大象族群分离与母系领导机制 |
+| 物理启发 | 均衡优化 (EO) | 基于控制理论均衡池与指数衰减策略 |
+| 物理启发 | 风驱动优化 (WDO) | 模拟大气风速更新与科里奥利力 |
+| 数学启发 | Jaya算法 | 基于最优-最差个体更新策略 |
+| 人类行为 | 足球联赛竞争算法 (SLC) | 模拟足球联赛团队竞争与球员交换 |
+| 群体智能 | 高斯骨干粒子群优化 (GBPSO) | 基于高斯分布的简化粒子群算法 |
 | 群体智能 | 飞蛾搜索算法 (MSA) | 基于飞蛾 Lévy 飞行和螺旋搜索 |
 | 群体智能 | 路径finder算法 (PFA) | 基于领导者-跟随者层级移动 |
 | 群体智能 | 菌落捕食算法 (CPA) | 模拟捕食-逃跑概率行为 |
@@ -76,10 +84,10 @@ BlackBoxOptimization/
 │   └── main.mbt                  # 基准测试入口
 ├── test/                         # 测试包
 │   ├── moon.pkg.json             # 包配置
-│   └── lib_test.mbt              # 单元测试（114 个测试用例）
+│   └── lib_test.mbt              # 单元测试（120 个测试用例）
 ├── example/                      # 示例包
 │   ├── moon.pkg.json             # 包配置
-│   └── simple_usage.mbt          # 使用示例（47 个示例）
+│   └── simple_usage.mbt          # 使用示例（51 个示例）
 ├── .github/workflows/            # CI 配置
 │   └── ci.yml                    # GitHub Actions
 ├── moon.mod.json                 # 模块配置
@@ -113,7 +121,7 @@ moon run main
 ### 运行测试
 
 ```bash
-# 运行所有测试（114 个测试用例）
+# 运行所有测试（120 个测试用例）
 moon test
 
 # 代码检查
@@ -324,6 +332,38 @@ let ica_result = @lib.imperialist_competitive_algorithm(ica_config, f, rng)
 // 随机分形搜索 (SFS)
 let sfs_config = @lib.make_sfs_config(1000, dim, bounds, 25)
 let sfs_result = @lib.stochastic_fractal_search(sfs_config, f, rng)
+
+// 共生生物搜索 (SOS)
+let sos_config = @lib.make_sos_config(1000, dim, bounds, 25)
+let sos_result = @lib.symbiotic_organisms_search(sos_config, f, rng)
+
+// 生物地理学优化 (BBO)
+let bbo_config = @lib.make_bbo_config(1000, dim, bounds, 25, 0.01)
+let bbo_result = @lib.biogeography_based_optimization(bbo_config, f, rng)
+
+// 大象牧群优化 (EHO)
+let eho_config = @lib.make_eho_config(1000, dim, bounds, 25, 5, 0.5)
+let eho_result = @lib.elephant_herding_optimization(eho_config, f, rng)
+
+// 均衡优化 (EO)
+let eo_config = @lib.make_eo_config(1000, dim, bounds, 25)
+let eo_result = @lib.equilibrium_optimizer(eo_config, f, rng)
+
+// 风驱动优化 (WDO)
+let wdo_config = @lib.make_wdo_config(1000, dim, bounds, 25)
+let wdo_result = @lib.wind_driven_optimization(wdo_config, f, rng)
+
+// Jaya算法
+let jaya_config = @lib.make_jaya_config(1000, dim, bounds, 25)
+let jaya_result = @lib.jaya_optimization(jaya_config, f, rng)
+
+// 足球联赛竞争算法 (SLC)
+let slc_config = @lib.make_slc_config(1000, dim, bounds, 25)
+let slc_result = @lib.soccer_league_competition(slc_config, f, rng)
+
+// 高斯骨干粒子群优化 (GBPSO)
+let gbpso_config = @lib.make_gbpso_config(1000, dim, bounds, 25)
+let gbpso_result = @lib.gaussian_bare_bones_pso(gbpso_config, f, rng)
 
 // 飞蛾搜索算法 (MSA)
 let msa_config = @lib.make_msa_config(1000, dim, bounds, 25)
@@ -683,6 +723,49 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | discovery_iterations | 发现阶段迭代 | 3 |
 | learning_iterations | 学习阶段迭代 | 2 |
 
+### SOS (共生生物搜索)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 种群大小 | 25 |
+
+### BBO (生物地理学优化)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 栖息地数量 | 25 |
+| mutation_rate | 变异率 | 0.01 |
+
+### EHO (大象牧群优化)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 大象数量 | 25 |
+| clan_count | 族群数量 | 5 |
+| alpha | 更新权重 α | 0.5 |
+
+### EO (均衡优化)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 种群大小 | 25 |
+
+### WDO (风驱动优化)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 空气质点数量 | 25 |
+
+### Jaya算法
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 种群大小 | 25 |
+
+### SLC (足球联赛竞争算法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 球员数量 | 25 |
+
+### GBPSO (高斯骨干粒子群优化)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 粒子数量 | 25 |
+
 ### MSA (飞蛾搜索算法)
 | 参数 | 说明 | 推荐值 |
 |------|------|--------|
@@ -809,6 +892,14 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | KH | 0.193 | 0.193 | 0.193 |
 | ICA | 0.906 | 0.906 | 0.906 |
 | **SFS** | **1.82e-4** | **5.63e-5** | **3.36e-6** |
+| **SOS** | **3.17e-4** | **~0** | **~0** |
+| BBO | 13.46 | 8.47 | 4.10 |
+| EHO | 0.0112 | 7.69e-4 | 2.37e-4 |
+| EO | 6.88 | 0.598 | 0.00655 |
+| WDO | 3.96 | 10.78 | 0.142 |
+| **Jaya** | **0.0133** | **~0** | **~0** |
+| **SLC** | **2.87e-5** | **2.70e-5** | **2.70e-5** |
+| **GBPSO** | **~0** | **~0** | **~0** |
 | MSA | 13.47 | 2.77 | 0.413 |
 | PFA | 0.226 | 0.109 | 0.353 |
 | CPA | 1.90 | 0.592 | 2.73 |
@@ -871,6 +962,14 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | KH | 6.30 | 7.86 |
 | ICA | 17.97 | 17.97 |
 | **SFS** | **0.454** | **0.0113** |
+| SOS | 2.98 | 2.98 |
+| BBO | 37.32 | 37.32 |
+| EHO | 5.11 | 5.04 |
+| EO | 50.30 | 45.77 |
+| WDO | 125.66 | 101.08 |
+| Jaya | 7.82 | 6.71 |
+| **SLC** | **2.01** | **2.01** |
+| GBPSO | 9.95 | 9.95 |
 | MSA | 31.65 | 35.67 |
 | PFA | 21.95 | 24.16 |
 | CPA | 25.99 | 23.13 |
@@ -933,6 +1032,14 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | KH | 9.59 | 13.22 |
 | ICA | 9.57 | 32.58 |
 | **SFS** | **0.0123** | **0.0128** |
+| SOS | 4.51 | 4.16 |
+| BBO | 2373.73 | 636.06 |
+| EHO | 1.54 | 0.394 |
+| EO | 4.90 | 0.160 |
+| WDO | 55358.40 | 559.77 |
+| **Jaya** | **0.706** | **0.0925** |
+| SLC | 62.59 | 62.59 |
+| **GBPSO** | **0.00110** | **0.000123** |
 | MSA | 544.40 | 173.63 |
 | PFA | 7.19 | 11.27 |
 | CPA | 16.30 | 82.19 |
@@ -954,15 +1061,15 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | 类别 | 代表算法 | 特点 |
 |------|----------|------|
 | **单点搜索** | 随机搜索、爬山法、模拟退火 | 简单、易于实现，适合低维问题 |
-| **群体智能** | PSO、萤火虫、蚁群、蜂群、布谷鸟、灰狼、鲸群、蝙蝠、和声、正弦余弦、飞蛾火焰、蚁狮、麻雀搜索、哈里斯鹰、花粉传播、蜻蜓、乌鸦、樽海鞘、Monarch蝴蝶、人工生态系统、入侵杂草、细菌觅食、混合蛙跳、萤火虫群、动物迁徙、磷虾群、飞蛾搜索、路径finder、菌落捕食、细菌菌落、飞狐优化、人工鱼群、烟花、鸽群、蜜獾、鹈鹕、金枪鱼群、金豺 | 基于群体行为，全局搜索能力强 |
-| **进化算法** | DE、GA、帝国主义竞争算法、回溯搜索算法 | 基于种群进化，鲁棒性好 |
-| **人类行为** | 头脑风暴优化 | 模拟人类头脑风暴过程 |
-| **数学启发** | 算术优化算法 | 基于数学算术运算符的搜索机制 |
+| **群体智能** | PSO、萤火虫、蚁群、蜂群、布谷鸟、灰狼、鲸群、蝙蝠、和声、正弦余弦、飞蛾火焰、蚁狮、麻雀搜索、哈里斯鹰、花粉传播、蜻蜓、乌鸦、樽海鞘、Monarch蝴蝶、人工生态系统、入侵杂草、细菌觅食、混合蛙跳、萤火虫群、动物迁徙、磷虾群、共生生物搜索、大象牧群优化、飞蛾搜索、路径finder、菌落捕食、细菌菌落、飞狐优化、人工鱼群、烟花、鸽群、蜜獾、鹈鹕、金枪鱼群、金豺、高斯骨干粒子群 | 基于群体行为，全局搜索能力强 |
+| **进化算法** | DE、GA、帝国主义竞争算法、生物地理学优化、回溯搜索算法、Jaya算法、足球联赛竞争算法 | 基于种群进化，鲁棒性好 |
+| **人类行为** | 头脑风暴优化、足球联赛竞争算法 | 模拟人类社会行为过程 |
+| **数学启发** | 算术优化算法、Jaya算法 | 基于数学原理的搜索机制 |
 | **估计分布** | CEM、随机分形搜索 | 基于概率分布估计，适合连续优化 |
 | **确定性直接搜索** | Nelder-Mead、Hooke-Jeeves | 无需梯度，适合不可导函数 |
 | **局部搜索** | 禁忌搜索、引导局部搜索 | 强化局部开发，避免陷入局部最优 |
 | **进化策略** | CMA-ES | 协方差自适应，适合病态问题 |
-| **物理启发** | GSA、MVO | 基于万有引力/宇宙机制，自适应搜索 |
+| **物理启发** | GSA、MVO、均衡优化、风驱动优化 | 基于物理规律，自适应搜索 |
 | **教学模型** | TLBO | 无需算法特定参数，收敛速度快 |
 
 ## 许可证

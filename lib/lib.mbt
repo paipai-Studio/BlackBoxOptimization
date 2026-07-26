@@ -6070,18 +6070,21 @@ pub fn jaya_optimization(config: JAYAConfig, f: (Array[Double]) -> Double, rng: 
         current_rng = rng3
 
         let cur_pos = population[i][d]
-        let pos = cur_pos + r1 * (best_pos[d] - abs_val(cur_pos)) - r2 * (worst_pos[d] - abs_val(cur_pos))
+        let pos = cur_pos + r1 * (best_pos[d] - cur_pos) - r2 * (worst_pos[d] - cur_pos)
         new_pos.push(max(bounds.min, min(bounds.max, pos)))
       }
 
-      population[i] = new_pos
       let new_val = evaluate(f, new_pos)
       evaluations = evaluations + 1
-      values[i] = new_val
 
-      if new_val < best_val {
-        best_val = new_val
-        best_pos = new_pos
+      if new_val < values[i] {
+        population[i] = new_pos
+        values[i] = new_val
+
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
       }
     }
   }

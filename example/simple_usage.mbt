@@ -337,7 +337,28 @@ fn main {
   println("   评估次数: \{gjo_result.evaluations}")
   println("")
 
-  println("48. 比较不同评估预算下的性能:")
+  println("48. 运行Jaya算法:")
+  let jaya_config = @lib.make_jaya_config(1000, dim, bounds, 25)
+  let jaya_result = @lib.jaya_optimization(jaya_config, @lib.sphere_function, rng)
+  println("   最优值: \{jaya_result.best_value}")
+  println("   评估次数: \{jaya_result.evaluations}")
+  println("")
+
+  println("49. 运行足球联赛竞争算法 (SLC):")
+  let slc_config = @lib.make_slc_config(1000, dim, bounds, 25)
+  let slc_result = @lib.soccer_league_competition(slc_config, @lib.sphere_function, rng)
+  println("   最优值: \{slc_result.best_value}")
+  println("   评估次数: \{slc_result.evaluations}")
+  println("")
+
+  println("50. 运行高斯骨干粒子群优化 (GBPSO):")
+  let gbpso_config = @lib.make_gbpso_config(1000, dim, bounds, 25)
+  let gbpso_result = @lib.gaussian_bare_bones_pso(gbpso_config, @lib.sphere_function, rng)
+  println("   最优值: \{gbpso_result.best_value}")
+  println("   评估次数: \{gbpso_result.evaluations}")
+  println("")
+
+  println("51. 比较不同评估预算下的性能:")
   let results = @lib.run_benchmark_at_evals(
     @lib.sphere_function,
     "Sphere Function",
