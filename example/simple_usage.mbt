@@ -393,7 +393,42 @@ fn main {
   println("   评估次数: \{wca_result.evaluations}")
   println("")
 
-  println("56. 比较不同评估预算下的性能:")
+  println("57. 运行黏菌算法 (SMA):")
+  let sma_config = @lib.make_sma_config(1000, dim, bounds, 25)
+  let sma_result = @lib.slime_mould_algorithm(sma_config, @lib.sphere_function, rng)
+  println("   最优值: \{sma_result.best_value}")
+  println("   评估次数: \{sma_result.evaluations}")
+  println("")
+
+  println("58. 运行苍鹰优化器 (AO):")
+  let ao_config = @lib.make_ao_config(1000, dim, bounds, 25)
+  let ao_result = @lib.aquila_optimizer(ao_config, @lib.sphere_function, rng)
+  println("   最优值: \{ao_result.best_value}")
+  println("   评估次数: \{ao_result.evaluations}")
+  println("")
+
+  println("59. 运行黑猩猩优化算法 (ChOA):")
+  let choa_config = @lib.make_choa_config(1000, dim, bounds, 25)
+  let choa_result = @lib.chimp_optimization_algorithm(choa_config, @lib.sphere_function, rng)
+  println("   最优值: \{choa_result.best_value}")
+  println("   评估次数: \{choa_result.evaluations}")
+  println("")
+
+  println("60. 运行蒲公英优化器 (DO):")
+  let do_config = @lib.make_do_config(1000, dim, bounds, 25)
+  let do_result = @lib.dandelion_optimizer(do_config, @lib.sphere_function, rng)
+  println("   最优值: \{do_result.best_value}")
+  println("   评估次数: \{do_result.evaluations}")
+  println("")
+
+  println("61. 运行斑马优化算法 (ZOA):")
+  let zoa_config = @lib.make_zoa_config(1000, dim, bounds, 25)
+  let zoa_result = @lib.zebra_optimization_algorithm(zoa_config, @lib.sphere_function, rng)
+  println("   最优值: \{zoa_result.best_value}")
+  println("   评估次数: \{zoa_result.evaluations}")
+  println("")
+
+  println("62. 比较不同评估预算下的性能:")
   let results = @lib.run_benchmark_at_evals(
     @lib.sphere_function,
     "Sphere Function",

@@ -8128,6 +8128,66 @@ pub fn gorilla_troops_optimizer(config: GTOConfig, f: (Array[Double]) -> Double,
   OptimizationResult::{ best_solution: best_pos, best_value: best_val, evaluations: evaluations }
 }
 
+// ===== Slime Mould Algorithm (SMA) =====
+pub struct SMAConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+}
+
+pub fn make_sma_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> SMAConfig {
+  SMAConfig::{ max_evaluations: max_evals, dimension: dim, bounds: b, population_size: pop_sz }
+}
+
+// ===== Aquila Optimizer (AO) =====
+pub struct AOConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+}
+
+pub fn make_ao_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> AOConfig {
+  AOConfig::{ max_evaluations: max_evals, dimension: dim, bounds: b, population_size: pop_sz }
+}
+
+// ===== Chimp Optimization Algorithm (ChOA) =====
+pub struct ChOAConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+}
+
+pub fn make_choa_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> ChOAConfig {
+  ChOAConfig::{ max_evaluations: max_evals, dimension: dim, bounds: b, population_size: pop_sz }
+}
+
+// ===== Dandelion Optimizer (DO) =====
+pub struct DOConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+}
+
+pub fn make_do_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> DOConfig {
+  DOConfig::{ max_evaluations: max_evals, dimension: dim, bounds: b, population_size: pop_sz }
+}
+
+// ===== Zebra Optimization Algorithm (ZOA) =====
+pub struct ZOAConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+}
+
+pub fn make_zoa_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> ZOAConfig {
+  ZOAConfig::{ max_evaluations: max_evals, dimension: dim, bounds: b, population_size: pop_sz }
+}
+
 // ===== Water Cycle Algorithm (WCA) =====
 pub struct WCAConfig {
   max_evaluations: Int
@@ -8192,6 +8252,344 @@ pub fn water_cycle_algorithm(config: WCAConfig, f: (Array[Double]) -> Double, rn
       evaluations = evaluations + 1
       if new_val < values[i] {
         raindrops[i] = new_pos
+        values[i] = new_val
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+    }
+  }
+  OptimizationResult::{ best_solution: best_pos, best_value: best_val, evaluations: evaluations }
+}
+
+pub fn slime_mould_algorithm(config: SMAConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let mut current_rng = rng
+
+  let slime: Array[Array[Double]] = []
+  let values: Array[Double] = []
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    slime.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos: Array[Double] = slime[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+  let mut worst_val = values[sorted_idx[n - 1]]
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+    let t = 1.0 - iter
+    let (rng_t1, z1) = RNG::next(current_rng)
+    current_rng = rng_t1
+    let (rng_t2, z2) = RNG::next(current_rng)
+    current_rng = rng_t2
+    let mut z = z1 + z2 * (0.02 + 0.25 * iter)
+
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+      let (rng2, r1) = RNG::next(current_rng)
+      current_rng = rng2
+      let (rng3, r2) = RNG::next(current_rng)
+      current_rng = rng3
+      let (rng4, r3) = RNG::next(current_rng)
+      current_rng = rng4
+
+      let new_pos: Array[Double] = []
+      for d in 0..<dim {
+        let pos = if r1 < z {
+          let a = slime[i][d] + r2 * (best_pos[d] - slime[i][d])
+          a
+        } else {
+          let b = slime[i][d] - r3 * (slime[i][d] - best_pos[d])
+          b
+        }
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      if new_val < values[i] {
+        slime[i] = new_pos
+        values[i] = new_val
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+    }
+    // update z
+    let (rng_z1, zr) = RNG::next(current_rng)
+    current_rng = rng_z1
+    z = 1.0 - zr * 0.5
+  }
+  OptimizationResult::{ best_solution: best_pos, best_value: best_val, evaluations: evaluations }
+}
+
+pub fn aquila_optimizer(config: AOConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let mut current_rng = rng
+
+  let eagles: Array[Array[Double]] = []
+  let values: Array[Double] = []
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    eagles.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos: Array[Double] = eagles[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+    let alpha = 0.1
+    let beta = 0.5
+    let (rng_a1, r1) = RNG::next(current_rng)
+    current_rng = rng_a1
+    let (rng_a2, r2) = RNG::next(current_rng)
+    current_rng = rng_a2
+    let (rng_a3, r3) = RNG::next(current_rng)
+    current_rng = rng_a3
+    let (rng_a4, r4) = RNG::next(current_rng)
+    current_rng = rng_a4
+
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+      let new_pos: Array[Double] = []
+      for d in 0..<dim {
+        let pos = if iter < 1.0 / 3.0 {
+          // exploration type 1
+          let y = r1 * (bounds.max - bounds.min) + bounds.min
+          eagles[i][d] - y
+        } else if iter < 2.0 / 3.0 {
+          // exploration type 2
+          let y = r1 * (bounds.max - bounds.min) + bounds.min
+          let (rng_b1, rb1) = RNG::next(current_rng)
+          current_rng = rng_b1
+          let x = rb1 * (eagles[i][d] - y)
+          x + r2 * (eagles[i][d] - best_pos[d])
+        } else {
+          // exploitation type 1
+          let (rng_b2, rb2) = RNG::next(current_rng)
+          current_rng = rng_b2
+          let y = (best_pos[d] + eagles[i][d]) / 2.0
+          eagles[i][d] - r3 * (y - eagles[i][d])
+        }
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      if new_val < values[i] {
+        eagles[i] = new_pos
+        values[i] = new_val
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+    }
+  }
+  OptimizationResult::{ best_solution: best_pos, best_value: best_val, evaluations: evaluations }
+}
+
+pub fn chimp_optimization_algorithm(config: ChOAConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let mut current_rng = rng
+
+  let chimps: Array[Array[Double]] = []
+  let values: Array[Double] = []
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    chimps.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos: Array[Double] = chimps[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+    let (rng_c1, r1) = RNG::next(current_rng)
+    current_rng = rng_c1
+    let (rng_c2, r2) = RNG::next(current_rng)
+    current_rng = rng_c2
+    let (rng_c3, r3) = RNG::next(current_rng)
+    current_rng = rng_c3
+    let (rng_c4, r4) = RNG::next(current_rng)
+    current_rng = rng_c4
+
+    let (rng_c5, r5) = RNG::next(current_rng)
+    current_rng = rng_c5
+    let (rng_c6, r6) = RNG::next(current_rng)
+    current_rng = rng_c6
+    let (rng_c7, r7) = RNG::next(current_rng)
+    current_rng = rng_c7
+
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+      let new_pos: Array[Double] = []
+      for d in 0..<dim {
+        let pos = if iter < 0.5 {
+          // exploration
+          if r5 < 0.5 {
+            // driving chimp
+            let (rng_cd1, rd1) = RNG::next(current_rng)
+            current_rng = rng_cd1
+            let (rng_cd2, rd2) = RNG::next(current_rng)
+            current_rng = rng_cd2
+            let pos_a = best_pos[d] + rd1 * (best_pos[d] - chimps[i][d])
+            let pos_b = best_pos[d] + rd2 * (best_pos[d] - chimps[i][d])
+            if evaluate(f, [pos_a]) < evaluate(f, [pos_b]) { pos_a } else { pos_b }
+          } else {
+            // chasing chimp
+            let (rng_cc1, rc1) = RNG::next(current_rng)
+            current_rng = rng_cc1
+            chimps[i][d] + rc1 * (best_pos[d] - chimps[i][d])
+          }
+        } else {
+          // exploitation
+          chimps[i][d] + r7 * (best_pos[d] - chimps[i][d])
+        }
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      if new_val < values[i] {
+        chimps[i] = new_pos
+        values[i] = new_val
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+    }
+  }
+  OptimizationResult::{ best_solution: best_pos, best_value: best_val, evaluations: evaluations }
+}
+
+pub fn dandelion_optimizer(config: DOConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let mut current_rng = rng
+
+  let dandelions: Array[Array[Double]] = []
+  let values: Array[Double] = []
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    dandelions.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos: Array[Double] = dandelions[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+    let (rng_d1, r1) = RNG::next(current_rng)
+    current_rng = rng_d1
+    let (rng_d2, r2) = RNG::next(current_rng)
+    current_rng = rng_d2
+    let (rng_d3, r3) = RNG::next(current_rng)
+    current_rng = rng_d3
+    let (rng_d4, r4) = RNG::next(current_rng)
+    current_rng = rng_d4
+
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+      let new_pos: Array[Double] = []
+      for d in 0..<dim {
+        let pos = if r1 < 0.5 {
+          // ascent stage
+          let step = (bounds.max - bounds.min) * (0.1 - 0.2 * iter)
+          dandelions[i][d] + r2 * step * (best_pos[d] - dandelions[i][d]).abs()
+        } else {
+          // descent stage
+          dandelions[i][d] + r3 * (best_pos[d] - dandelions[i][d])
+        }
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      if new_val < values[i] {
+        dandelions[i] = new_pos
+        values[i] = new_val
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+    }
+  }
+  OptimizationResult::{ best_solution: best_pos, best_value: best_val, evaluations: evaluations }
+}
+
+pub fn zebra_optimization_algorithm(config: ZOAConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let mut current_rng = rng
+
+  let zebras: Array[Array[Double]] = []
+  let values: Array[Double] = []
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    zebras.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos: Array[Double] = zebras[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+    let (rng_z1, r1) = RNG::next(current_rng)
+    current_rng = rng_z1
+    let (rng_z2, r2) = RNG::next(current_rng)
+    current_rng = rng_z2
+    let (rng_z3, r3) = RNG::next(current_rng)
+    current_rng = rng_z3
+    let (rng_z4, r4) = RNG::next(current_rng)
+    current_rng = rng_z4
+
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+      let new_pos: Array[Double] = []
+      for d in 0..<dim {
+        let pos = if r1 < 0.5 {
+          // exploration
+          let (rng_z5, r5) = RNG::next(current_rng)
+          current_rng = rng_z5
+          let step = 2.0 * (bounds.max - bounds.min) * (0.5 - iter)
+          zebras[i][d] + r2 * step * (r5 - 0.5)
+        } else {
+          // exploitation
+          zebras[i][d] + r3 * (best_pos[d] - zebras[i][d]) + r4 * 0.1 * (bounds.max - bounds.min)
+        }
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      if new_val < values[i] {
+        zebras[i] = new_pos
         values[i] = new_val
         if new_val < best_val {
           best_val = new_val
@@ -9037,6 +9435,56 @@ pub fn run_benchmark_at_evals(
     relative_error: wca_error
   })
 
+  let sma_config = make_sma_config(max_evals, dim, bounds, 25)
+  let sma_result = slime_mould_algorithm(sma_config, f, rng)
+  let sma_error = calc_relative_error(sma_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "SMA",
+    best_value: sma_result.best_value,
+    evaluations: sma_result.evaluations,
+    relative_error: sma_error
+  })
+
+  let ao_config = make_ao_config(max_evals, dim, bounds, 25)
+  let ao_result = aquila_optimizer(ao_config, f, rng)
+  let ao_error = calc_relative_error(ao_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "AO",
+    best_value: ao_result.best_value,
+    evaluations: ao_result.evaluations,
+    relative_error: ao_error
+  })
+
+  let choa_config = make_choa_config(max_evals, dim, bounds, 25)
+  let choa_result = chimp_optimization_algorithm(choa_config, f, rng)
+  let choa_error = calc_relative_error(choa_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "ChOA",
+    best_value: choa_result.best_value,
+    evaluations: choa_result.evaluations,
+    relative_error: choa_error
+  })
+
+  let do_config = make_do_config(max_evals, dim, bounds, 25)
+  let do_result = dandelion_optimizer(do_config, f, rng)
+  let do_error = calc_relative_error(do_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "DO",
+    best_value: do_result.best_value,
+    evaluations: do_result.evaluations,
+    relative_error: do_error
+  })
+
+  let zoa_config = make_zoa_config(max_evals, dim, bounds, 25)
+  let zoa_result = zebra_optimization_algorithm(zoa_config, f, rng)
+  let zoa_error = calc_relative_error(zoa_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "ZOA",
+    best_value: zoa_result.best_value,
+    evaluations: zoa_result.evaluations,
+    relative_error: zoa_error
+  })
+
   results
 }
 
@@ -9137,6 +9585,11 @@ pub fn run_multiple_trials(
   let cso_values: Array[Double] = []
   let gto_values: Array[Double] = []
   let wca_values: Array[Double] = []
+  let sma_values: Array[Double] = []
+  let ao_values: Array[Double] = []
+  let choa_values: Array[Double] = []
+  let do_values: Array[Double] = []
+  let zoa_values: Array[Double] = []
 
   for trial in 0..<num_trials {
     let seed = base_seed + trial.to_double() * 1000.0
@@ -9421,6 +9874,26 @@ pub fn run_multiple_trials(
     let wca_config = make_wca_config(max_evals, dim, bounds, 25, 4)
     let wca_result = water_cycle_algorithm(wca_config, f, rng)
     wca_values.push(wca_result.best_value)
+
+    let sma_config = make_sma_config(max_evals, dim, bounds, 25)
+    let sma_result = slime_mould_algorithm(sma_config, f, rng)
+    sma_values.push(sma_result.best_value)
+
+    let ao_config = make_ao_config(max_evals, dim, bounds, 25)
+    let ao_result = aquila_optimizer(ao_config, f, rng)
+    ao_values.push(ao_result.best_value)
+
+    let choa_config = make_choa_config(max_evals, dim, bounds, 25)
+    let choa_result = chimp_optimization_algorithm(choa_config, f, rng)
+    choa_values.push(choa_result.best_value)
+
+    let do_config = make_do_config(max_evals, dim, bounds, 25)
+    let do_result = dandelion_optimizer(do_config, f, rng)
+    do_values.push(do_result.best_value)
+
+    let zoa_config = make_zoa_config(max_evals, dim, bounds, 25)
+    let zoa_result = zebra_optimization_algorithm(zoa_config, f, rng)
+    zoa_values.push(zoa_result.best_value)
   }
 
   println("  Algorithm          | Min Value           | Max Value           | Avg Value           | Avg Error")
@@ -9821,6 +10294,36 @@ pub fn run_multiple_trials(
   let wca_avg = array_avg(wca_values)
   let wca_err = calc_relative_error(wca_avg, known_optimal)
   println("  | WCA               | \{wca_min} | \{wca_max} | \{wca_avg} | \{wca_err} |")
+
+  let sma_min = array_min(sma_values)
+  let sma_max = array_max(sma_values)
+  let sma_avg = array_avg(sma_values)
+  let sma_err = calc_relative_error(sma_avg, known_optimal)
+  println("  | SMA               | \{sma_min} | \{sma_max} | \{sma_avg} | \{sma_err} |")
+
+  let ao_min = array_min(ao_values)
+  let ao_max = array_max(ao_values)
+  let ao_avg = array_avg(ao_values)
+  let ao_err = calc_relative_error(ao_avg, known_optimal)
+  println("  | AO                | \{ao_min} | \{ao_max} | \{ao_avg} | \{ao_err} |")
+
+  let choa_min = array_min(choa_values)
+  let choa_max = array_max(choa_values)
+  let choa_avg = array_avg(choa_values)
+  let choa_err = calc_relative_error(choa_avg, known_optimal)
+  println("  | ChOA              | \{choa_min} | \{choa_max} | \{choa_avg} | \{choa_err} |")
+
+  let do_min = array_min(do_values)
+  let do_max = array_max(do_values)
+  let do_avg = array_avg(do_values)
+  let do_err = calc_relative_error(do_avg, known_optimal)
+  println("  | DO                | \{do_min} | \{do_max} | \{do_avg} | \{do_err} |")
+
+  let zoa_min = array_min(zoa_values)
+  let zoa_max = array_max(zoa_values)
+  let zoa_avg = array_avg(zoa_values)
+  let zoa_err = calc_relative_error(zoa_avg, known_optimal)
+  println("  | ZOA               | \{zoa_min} | \{zoa_max} | \{zoa_avg} | \{zoa_err} |")
 
   println("")
 }
