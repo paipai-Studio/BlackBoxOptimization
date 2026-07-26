@@ -1163,3 +1163,108 @@ test "GBPSO improves with more evaluations" {
 
   assert_true(result2.best_value <= result1.best_value)
 }
+
+test "GOA produces valid result" {
+  let config = @lib.make_goa_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.grasshopper_optimization_algorithm(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "GOA improves with more evaluations" {
+  let config1 = @lib.make_goa_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.grasshopper_optimization_algorithm(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_goa_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.grasshopper_optimization_algorithm(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "SOA produces valid result" {
+  let config = @lib.make_soa_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.seagull_optimization_algorithm(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "SOA improves with more evaluations" {
+  let config1 = @lib.make_soa_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.seagull_optimization_algorithm(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_soa_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.seagull_optimization_algorithm(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "CSO produces valid result" {
+  let config = @lib.make_cso_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.cat_swarm_optimization(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "CSO improves with more evaluations" {
+  let config1 = @lib.make_cso_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.cat_swarm_optimization(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_cso_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.cat_swarm_optimization(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "GTO produces valid result" {
+  let config = @lib.make_gto_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.gorilla_troops_optimizer(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "GTO improves with more evaluations" {
+  let config1 = @lib.make_gto_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.gorilla_troops_optimizer(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_gto_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.gorilla_troops_optimizer(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+test "WCA produces valid result" {
+  let config = @lib.make_wca_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25, 4)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.water_cycle_algorithm(config, @lib.sphere_function, rng)
+
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+test "WCA improves with more evaluations" {
+  let config1 = @lib.make_wca_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25, 4)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.water_cycle_algorithm(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_wca_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25, 4)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.water_cycle_algorithm(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}

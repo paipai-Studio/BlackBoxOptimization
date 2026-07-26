@@ -1,6 +1,6 @@
 # BlackBoxOptimization
 
-基于 MoonBit 实现的黑盒优化算法框架，支持 65 种经典优化算法，提供统一的接口和基准测试框架。
+基于 MoonBit 实现的黑盒优化算法框架，支持 70 种经典优化算法，提供统一的接口和基准测试框架。
 
 ## 支持的算法
 
@@ -71,6 +71,11 @@
 | 群体智能 | 鹈鹕优化算法 (POA) | 模拟鹈鹕捕猎的两阶段策略 |
 | 群体智能 | 金枪鱼群优化 (TSA) | 基于螺旋运动和觅食行为的群体搜索 |
 | 群体智能 | 金豺优化 (GJO) | 模拟雄雌金豺协同捕猎的双引导搜索 |
+| 群体智能 | 蝗虫优化算法 (GOA) | 模拟蝗虫群体觅食的吸引-排斥机制 |
+| 群体智能 | 海鸥优化算法 (SOA) | 模拟海鸥迁徙和螺旋攻击行为 |
+| 群体智能 | 猫群优化 (CSO) | 模拟猫的追踪和搜寻两种模式 |
+| 群体智能 | 大猩猩部队优化 (GTO) | 模拟大猩猩群体社会行为 |
+| 物理启发 | 水循环算法 (WCA) | 基于水循环和河流流动过程 |
 
 ## 项目结构
 
@@ -84,10 +89,10 @@ BlackBoxOptimization/
 │   └── main.mbt                  # 基准测试入口
 ├── test/                         # 测试包
 │   ├── moon.pkg.json             # 包配置
-│   └── lib_test.mbt              # 单元测试（120 个测试用例）
+│   └── lib_test.mbt              # 单元测试（130 个测试用例）
 ├── example/                      # 示例包
 │   ├── moon.pkg.json             # 包配置
-│   └── simple_usage.mbt          # 使用示例（51 个示例）
+│   └── simple_usage.mbt          # 使用示例（56 个示例）
 ├── .github/workflows/            # CI 配置
 │   └── ci.yml                    # GitHub Actions
 ├── moon.mod.json                 # 模块配置
@@ -121,7 +126,7 @@ moon run main
 ### 运行测试
 
 ```bash
-# 运行所有测试（120 个测试用例）
+# 运行所有测试（130 个测试用例）
 moon test
 
 # 代码检查
@@ -424,6 +429,26 @@ let tsa_result = @lib.tuna_swarm_optimization(tsa_config, f, rng)
 // 金豺优化 (GJO)
 let gjo_config = @lib.make_gjo_config(1000, dim, bounds, 25)
 let gjo_result = @lib.golden_jackal_optimization(gjo_config, f, rng)
+
+// 蝗虫优化算法 (GOA)
+let goa_config = @lib.make_goa_config(1000, dim, bounds, 25)
+let goa_result = @lib.grasshopper_optimization_algorithm(goa_config, f, rng)
+
+// 海鸥优化算法 (SOA)
+let soa_config = @lib.make_soa_config(1000, dim, bounds, 25)
+let soa_result = @lib.seagull_optimization_algorithm(soa_config, f, rng)
+
+// 猫群优化 (CSO)
+let cso_config = @lib.make_cso_config(1000, dim, bounds, 25)
+let cso_result = @lib.cat_swarm_optimization(cso_config, f, rng)
+
+// 大猩猩部队优化 (GTO)
+let gto_config = @lib.make_gto_config(1000, dim, bounds, 25)
+let gto_result = @lib.gorilla_troops_optimizer(gto_config, f, rng)
+
+// 水循环算法 (WCA)
+let wca_config = @lib.make_wca_config(1000, dim, bounds, 25, 4)
+let wca_result = @lib.water_cycle_algorithm(wca_config, f, rng)
 ```
 
 ### 内置测试函数
@@ -844,6 +869,33 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 |------|------|--------|
 | population_size | 金豺数量 | 25 |
 
+### GOA (蝗虫优化算法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 蝗虫数量 | 25 |
+
+### SOA (海鸥优化算法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 海鸥数量 | 25 |
+
+### CSO (猫群优化)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 猫的数量 | 25 |
+| mixture_ratio | 追踪模式比例 | 0.3 |
+
+### GTO (大猩猩部队优化)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 大猩猩数量 | 25 |
+
+### WCA (水循环算法)
+| 参数 | 说明 | 推荐值 |
+|------|------|--------|
+| population_size | 雨滴数量 | 25 |
+| num_rivers | 河流数量 | 4 |
+
 ## 性能对比
 
 ### Sphere 函数（5维）
@@ -915,6 +967,11 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | POA | 0.00888 | 7.24e-10 | 6.18e-17 |
 | TSA | 0 | 0 | 0 |
 | GJO | 1.87e-7 | 1.07e-26 | 3.75e-56 |
+| GOA | 0.0553 | 0.00414 | 1.65e-4 |
+| **SOA** | **4.89e-5** | **~0** | **~0** |
+| CSO | 0.0218 | 2.57e-5 | ~0 |
+| **GTO** | **0.0573** | **7.99e-6** | **9.28e-6** |
+| WCA | 0.0343 | 0.0129 | 0.0117 |
 
 ### Rastrigin 函数（5维）
 
@@ -985,6 +1042,11 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | POA | 1.12 | 0.00254 |
 | TSA | 0 | 0 |
 | GJO | 1.99 | 14.92 |
+| GOA | 4.25 | 7.04 |
+| SOA | 2.98 | 1.99 |
+| CSO | 6.11 | 5.97 |
+| **GTO** | **1.30** | **1.17** |
+| WCA | 3.19 | 4.32 |
 
 ### Rosenbrock 函数（5维）
 
@@ -1055,13 +1117,18 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | POA | 0.999 | 0.966 |
 | TSA | 3.77 | 3.77 |
 | GJO | 0.898 | 0.775 |
+| GOA | 0.922 | 3.65 |
+| SOA | 1.49 | 0.0162 |
+| CSO | 1.58 | 0.618 |
+| GTO | 3.00 | 0.0833 |
+| WCA | 3.55 | 2.74 |
 
 ## 算法分类特点
 
 | 类别 | 代表算法 | 特点 |
 |------|----------|------|
 | **单点搜索** | 随机搜索、爬山法、模拟退火 | 简单、易于实现，适合低维问题 |
-| **群体智能** | PSO、萤火虫、蚁群、蜂群、布谷鸟、灰狼、鲸群、蝙蝠、和声、正弦余弦、飞蛾火焰、蚁狮、麻雀搜索、哈里斯鹰、花粉传播、蜻蜓、乌鸦、樽海鞘、Monarch蝴蝶、人工生态系统、入侵杂草、细菌觅食、混合蛙跳、萤火虫群、动物迁徙、磷虾群、共生生物搜索、大象牧群优化、飞蛾搜索、路径finder、菌落捕食、细菌菌落、飞狐优化、人工鱼群、烟花、鸽群、蜜獾、鹈鹕、金枪鱼群、金豺、高斯骨干粒子群 | 基于群体行为，全局搜索能力强 |
+| **群体智能** | PSO、萤火虫、蚁群、蜂群、布谷鸟、灰狼、鲸群、蝙蝠、和声、正弦余弦、飞蛾火焰、蚁狮、麻雀搜索、哈里斯鹰、花粉传播、蜻蜓、乌鸦、樽海鞘、Monarch蝴蝶、人工生态系统、入侵杂草、细菌觅食、混合蛙跳、萤火虫群、动物迁徙、磷虾群、共生生物搜索、大象牧群优化、飞蛾搜索、路径finder、菌落捕食、细菌菌落、飞狐优化、人工鱼群、烟花、鸽群、蜜獾、鹈鹕、金枪鱼群、金豺、高斯骨干粒子群、蝗虫优化、海鸥优化、猫群优化、大猩猩部队优化 | 基于群体行为，全局搜索能力强 |
 | **进化算法** | DE、GA、帝国主义竞争算法、生物地理学优化、回溯搜索算法、Jaya算法、足球联赛竞争算法 | 基于种群进化，鲁棒性好 |
 | **人类行为** | 头脑风暴优化、足球联赛竞争算法 | 模拟人类社会行为过程 |
 | **数学启发** | 算术优化算法、Jaya算法 | 基于数学原理的搜索机制 |
@@ -1069,7 +1136,7 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | **确定性直接搜索** | Nelder-Mead、Hooke-Jeeves | 无需梯度，适合不可导函数 |
 | **局部搜索** | 禁忌搜索、引导局部搜索 | 强化局部开发，避免陷入局部最优 |
 | **进化策略** | CMA-ES | 协方差自适应，适合病态问题 |
-| **物理启发** | GSA、MVO、均衡优化、风驱动优化 | 基于物理规律，自适应搜索 |
+| **物理启发** | GSA、MVO、均衡优化、风驱动优化、水循环算法 | 基于物理规律，自适应搜索 |
 | **教学模型** | TLBO | 无需算法特定参数，收敛速度快 |
 
 ## 许可证

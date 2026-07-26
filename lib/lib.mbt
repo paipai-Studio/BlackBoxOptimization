@@ -7817,6 +7817,392 @@ fn sort_indices(values: Array[Double]) -> Array[Int] {
   indices
 }
 
+// ===== Grasshopper Optimization Algorithm (GOA) =====
+pub struct GOAConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+}
+
+pub fn make_goa_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> GOAConfig {
+  GOAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz
+  }
+}
+
+fn goa_s_func(r: Double) -> Double {
+  let f = 0.5
+  let l = 1.5
+  f * exp_approx(-r / l) - exp_approx(-r)
+}
+
+pub fn grasshopper_optimization_algorithm(config: GOAConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let mut current_rng = rng
+
+  let grasshoppers: Array[Array[Double]] = []
+  let values: Array[Double] = []
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    grasshoppers.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos: Array[Double] = grasshoppers[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+    let c = 1.0 - iter
+
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+      let new_pos: Array[Double] = []
+      for d in 0..<dim {
+        let mut sum_val = 0.0
+        for j in 0..<n {
+          if i != j {
+            let dist = abs_val(grasshoppers[i][d] - grasshoppers[j][d])
+            let s_val = goa_s_func(dist + 0.001)
+            let dir = grasshoppers[j][d] - grasshoppers[i][d]
+            sum_val = sum_val + s_val * dir / (dist + 0.001)
+          }
+        }
+        let pos = c * sum_val + best_pos[d]
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      if new_val < values[i] {
+        grasshoppers[i] = new_pos
+        values[i] = new_val
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+    }
+  }
+  OptimizationResult::{ best_solution: best_pos, best_value: best_val, evaluations: evaluations }
+}
+
+// ===== Seagull Optimization Algorithm (SOA) =====
+pub struct SOAConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+}
+
+pub fn make_soa_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> SOAConfig {
+  SOAConfig::{ max_evaluations: max_evals, dimension: dim, bounds: b, population_size: pop_sz }
+}
+
+pub fn seagull_optimization_algorithm(config: SOAConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let mut current_rng = rng
+
+  let seagulls: Array[Array[Double]] = []
+  let values: Array[Double] = []
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    seagulls.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos: Array[Double] = seagulls[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+    let fc = 2.0 - iter * 2.0
+
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+      let new_pos: Array[Double] = []
+      for d in 0..<dim {
+        let (rng2, r1) = RNG::next(current_rng)
+        current_rng = rng2
+        let (rng3, r2) = RNG::next(current_rng)
+        current_rng = rng3
+        let (rng4, r3) = RNG::next(current_rng)
+        current_rng = rng4
+        let b = r1 * fc
+        let a = fc - r2 * b
+        let spiral = a * cos_approx(2.0 * PI * r3) * (best_pos[d] - seagulls[i][d])
+        let pos = b * (best_pos[d] - seagulls[i][d]) + spiral + seagulls[i][d]
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      if new_val < values[i] {
+        seagulls[i] = new_pos
+        values[i] = new_val
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+    }
+  }
+  OptimizationResult::{ best_solution: best_pos, best_value: best_val, evaluations: evaluations }
+}
+
+// ===== Cat Swarm Optimization (CSO) =====
+pub struct CSOConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+  mixture_ratio: Double
+}
+
+pub fn make_cso_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> CSOConfig {
+  CSOConfig::{ max_evaluations: max_evals, dimension: dim, bounds: b, population_size: pop_sz, mixture_ratio: 0.3 }
+}
+
+pub fn cat_swarm_optimization(config: CSOConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let mr = config.mixture_ratio
+  let mut current_rng = rng
+
+  let cats: Array[Array[Double]] = []
+  let velocities: Array[Array[Double]] = []
+  let values: Array[Double] = []
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    cats.push(sol)
+    let vel: Array[Double] = []
+    for d in 0..<dim {
+      let (rng2, v) = RNG::next(current_rng)
+      current_rng = rng2
+      vel.push((v - 0.5) * (bounds.max - bounds.min) * 0.1)
+    }
+    velocities.push(vel)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos: Array[Double] = cats[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < config.max_evaluations {
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+      let (rng2, r) = RNG::next(current_rng)
+      current_rng = rng2
+      let is_tracing = r < mr
+      if is_tracing {
+        let new_pos: Array[Double] = []
+        for d in 0..<dim {
+          let w = 0.8
+          let c1 = 1.5
+          let (rng3, r1) = RNG::next(current_rng)
+          current_rng = rng3
+          let new_vel = w * velocities[i][d] + c1 * r1 * (best_pos[d] - cats[i][d])
+          let pos = cats[i][d] + new_vel
+          new_pos.push(max(bounds.min, min(bounds.max, pos)))
+          velocities[i][d] = max(bounds.min * 0.1, min(bounds.max * 0.1, new_vel))
+        }
+        let new_val = evaluate(f, new_pos)
+        evaluations = evaluations + 1
+        cats[i] = new_pos
+        values[i] = new_val
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      } else {
+        let srd = 0.2 * (bounds.max - bounds.min)
+        let cdc = dim / 2
+        let new_pos: Array[Double] = []
+        for d in 0..<dim {
+          let (rng3, r2) = RNG::next(current_rng)
+          current_rng = rng3
+          let mut p = cats[i][d]
+          if d < cdc {
+            p = p + (r2 - 0.5) * srd
+          }
+          new_pos.push(max(bounds.min, min(bounds.max, p)))
+        }
+        let new_val = evaluate(f, new_pos)
+        evaluations = evaluations + 1
+        if new_val < values[i] {
+          cats[i] = new_pos
+          values[i] = new_val
+          if new_val < best_val {
+            best_val = new_val
+            best_pos = new_pos
+          }
+        }
+      }
+    }
+  }
+  OptimizationResult::{ best_solution: best_pos, best_value: best_val, evaluations: evaluations }
+}
+
+// ===== Gorilla Troops Optimizer (GTO) =====
+pub struct GTOConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+}
+
+pub fn make_gto_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int) -> GTOConfig {
+  GTOConfig::{ max_evaluations: max_evals, dimension: dim, bounds: b, population_size: pop_sz }
+}
+
+pub fn gorilla_troops_optimizer(config: GTOConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let mut current_rng = rng
+
+  let gorillas: Array[Array[Double]] = []
+  let values: Array[Double] = []
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    gorillas.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos: Array[Double] = gorillas[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+    let c = 1.0 - iter
+
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+      let (rng2, r1) = RNG::next(current_rng)
+      current_rng = rng2
+      let (rng3, r2) = RNG::next(current_rng)
+      current_rng = rng3
+      let (rng4, r3) = RNG::next(current_rng)
+      current_rng = rng4
+
+      let new_pos: Array[Double] = []
+      for d in 0..<dim {
+        let (rng5, r4) = RNG::next(current_rng)
+        current_rng = rng5
+        let rand_val = if r1 > 0.5 { r4 } else { -r4 }
+        let pos = if r2 > 0.5 {
+          gorillas[i][d] + c * rand_val * (best_pos[d] - gorillas[i][d])
+        } else {
+          let j = (r3 * n.to_double()).to_int() % n
+          gorillas[i][d] + c * rand_val * (gorillas[j][d] - gorillas[i][d])
+        }
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      if new_val < values[i] {
+        gorillas[i] = new_pos
+        values[i] = new_val
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+    }
+  }
+  OptimizationResult::{ best_solution: best_pos, best_value: best_val, evaluations: evaluations }
+}
+
+// ===== Water Cycle Algorithm (WCA) =====
+pub struct WCAConfig {
+  max_evaluations: Int
+  dimension: Int
+  bounds: Bounds
+  population_size: Int
+  num_rivers: Int
+}
+
+pub fn make_wca_config(max_evals: Int, dim: Int, b: Bounds, pop_sz: Int, num_riv: Int) -> WCAConfig {
+  WCAConfig::{ max_evaluations: max_evals, dimension: dim, bounds: b, population_size: pop_sz, num_rivers: num_riv }
+}
+
+pub fn water_cycle_algorithm(config: WCAConfig, f: (Array[Double]) -> Double, rng: RNG) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let nr = config.num_rivers
+  let mut current_rng = rng
+
+  let raindrops: Array[Array[Double]] = []
+  let values: Array[Double] = []
+  for i in 0..<n {
+    let (rng1, sol) = random_solution(dim, bounds, current_rng)
+    current_rng = rng1
+    raindrops.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos: Array[Double] = raindrops[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  let river_indices: Array[Int] = []
+  for i in 1..=nr {
+    river_indices.push(sorted_idx[i])
+  }
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations { break }
+      let new_pos: Array[Double] = []
+      for d in 0..<dim {
+        let (rng2, r1) = RNG::next(current_rng)
+        current_rng = rng2
+        let (rng3, r2) = RNG::next(current_rng)
+        current_rng = rng3
+        let target = if i == sorted_idx[0] {
+          best_pos[d]
+        } else if river_indices.contains(i) {
+          best_pos[d]
+        } else {
+          let riv_idx = i % nr
+          raindrops[river_indices[riv_idx]][d]
+        }
+        let intensity = 1.0 - iter
+        let pos = raindrops[i][d] + r1 * intensity * (target - raindrops[i][d]) + (r2 - 0.5) * 0.1 * (bounds.max - bounds.min)
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      if new_val < values[i] {
+        raindrops[i] = new_pos
+        values[i] = new_val
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+    }
+  }
+  OptimizationResult::{ best_solution: best_pos, best_value: best_val, evaluations: evaluations }
+}
+
 // ===== 测试函数 =====
 
 pub fn sphere_function(x: Array[Double]) -> Double {
@@ -8601,6 +8987,56 @@ pub fn run_benchmark_at_evals(
     relative_error: gjo_error
   })
 
+  let goa_config = make_goa_config(max_evals, dim, bounds, 25)
+  let goa_result = grasshopper_optimization_algorithm(goa_config, f, rng)
+  let goa_error = calc_relative_error(goa_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "GOA",
+    best_value: goa_result.best_value,
+    evaluations: goa_result.evaluations,
+    relative_error: goa_error
+  })
+
+  let soa_config = make_soa_config(max_evals, dim, bounds, 25)
+  let soa_result = seagull_optimization_algorithm(soa_config, f, rng)
+  let soa_error = calc_relative_error(soa_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "SOA",
+    best_value: soa_result.best_value,
+    evaluations: soa_result.evaluations,
+    relative_error: soa_error
+  })
+
+  let cso_config = make_cso_config(max_evals, dim, bounds, 25)
+  let cso_result = cat_swarm_optimization(cso_config, f, rng)
+  let cso_error = calc_relative_error(cso_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "CSO",
+    best_value: cso_result.best_value,
+    evaluations: cso_result.evaluations,
+    relative_error: cso_error
+  })
+
+  let gto_config = make_gto_config(max_evals, dim, bounds, 25)
+  let gto_result = gorilla_troops_optimizer(gto_config, f, rng)
+  let gto_error = calc_relative_error(gto_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "GTO",
+    best_value: gto_result.best_value,
+    evaluations: gto_result.evaluations,
+    relative_error: gto_error
+  })
+
+  let wca_config = make_wca_config(max_evals, dim, bounds, 25, 4)
+  let wca_result = water_cycle_algorithm(wca_config, f, rng)
+  let wca_error = calc_relative_error(wca_result.best_value, known_optimal)
+  results.push(BenchmarkResult::{
+    algorithm_name: "WCA",
+    best_value: wca_result.best_value,
+    evaluations: wca_result.evaluations,
+    relative_error: wca_error
+  })
+
   results
 }
 
@@ -8696,6 +9132,11 @@ pub fn run_multiple_trials(
   let poa_values: Array[Double] = []
   let tsa_values: Array[Double] = []
   let gjo_values: Array[Double] = []
+  let goa_values: Array[Double] = []
+  let soa_values: Array[Double] = []
+  let cso_values: Array[Double] = []
+  let gto_values: Array[Double] = []
+  let wca_values: Array[Double] = []
 
   for trial in 0..<num_trials {
     let seed = base_seed + trial.to_double() * 1000.0
@@ -8960,6 +9401,26 @@ pub fn run_multiple_trials(
     let gjo_config = make_gjo_config(max_evals, dim, bounds, 25)
     let gjo_result = golden_jackal_optimization(gjo_config, f, rng)
     gjo_values.push(gjo_result.best_value)
+
+    let goa_config = make_goa_config(max_evals, dim, bounds, 25)
+    let goa_result = grasshopper_optimization_algorithm(goa_config, f, rng)
+    goa_values.push(goa_result.best_value)
+
+    let soa_config = make_soa_config(max_evals, dim, bounds, 25)
+    let soa_result = seagull_optimization_algorithm(soa_config, f, rng)
+    soa_values.push(soa_result.best_value)
+
+    let cso_config = make_cso_config(max_evals, dim, bounds, 25)
+    let cso_result = cat_swarm_optimization(cso_config, f, rng)
+    cso_values.push(cso_result.best_value)
+
+    let gto_config = make_gto_config(max_evals, dim, bounds, 25)
+    let gto_result = gorilla_troops_optimizer(gto_config, f, rng)
+    gto_values.push(gto_result.best_value)
+
+    let wca_config = make_wca_config(max_evals, dim, bounds, 25, 4)
+    let wca_result = water_cycle_algorithm(wca_config, f, rng)
+    wca_values.push(wca_result.best_value)
   }
 
   println("  Algorithm          | Min Value           | Max Value           | Avg Value           | Avg Error")
@@ -9330,6 +9791,36 @@ pub fn run_multiple_trials(
   let gjo_avg = array_avg(gjo_values)
   let gjo_err = calc_relative_error(gjo_avg, known_optimal)
   println("  | GJO               | \{gjo_min} | \{gjo_max} | \{gjo_avg} | \{gjo_err} |")
+
+  let goa_min = array_min(goa_values)
+  let goa_max = array_max(goa_values)
+  let goa_avg = array_avg(goa_values)
+  let goa_err = calc_relative_error(goa_avg, known_optimal)
+  println("  | GOA               | \{goa_min} | \{goa_max} | \{goa_avg} | \{goa_err} |")
+
+  let soa_min = array_min(soa_values)
+  let soa_max = array_max(soa_values)
+  let soa_avg = array_avg(soa_values)
+  let soa_err = calc_relative_error(soa_avg, known_optimal)
+  println("  | SOA               | \{soa_min} | \{soa_max} | \{soa_avg} | \{soa_err} |")
+
+  let cso_min = array_min(cso_values)
+  let cso_max = array_max(cso_values)
+  let cso_avg = array_avg(cso_values)
+  let cso_err = calc_relative_error(cso_avg, known_optimal)
+  println("  | CSO               | \{cso_min} | \{cso_max} | \{cso_avg} | \{cso_err} |")
+
+  let gto_min = array_min(gto_values)
+  let gto_max = array_max(gto_values)
+  let gto_avg = array_avg(gto_values)
+  let gto_err = calc_relative_error(gto_avg, known_optimal)
+  println("  | GTO               | \{gto_min} | \{gto_max} | \{gto_avg} | \{gto_err} |")
+
+  let wca_min = array_min(wca_values)
+  let wca_max = array_max(wca_values)
+  let wca_avg = array_avg(wca_values)
+  let wca_err = calc_relative_error(wca_avg, known_optimal)
+  println("  | WCA               | \{wca_min} | \{wca_max} | \{wca_avg} | \{wca_err} |")
 
   println("")
 }

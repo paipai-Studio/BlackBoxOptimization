@@ -358,7 +358,42 @@ fn main {
   println("   评估次数: \{gbpso_result.evaluations}")
   println("")
 
-  println("51. 比较不同评估预算下的性能:")
+  println("51. 运行蝗虫优化算法 (GOA):")
+  let goa_config = @lib.make_goa_config(1000, dim, bounds, 25)
+  let goa_result = @lib.grasshopper_optimization_algorithm(goa_config, @lib.sphere_function, rng)
+  println("   最优值: \{goa_result.best_value}")
+  println("   评估次数: \{goa_result.evaluations}")
+  println("")
+
+  println("52. 运行海鸥优化算法 (SOA):")
+  let soa_config = @lib.make_soa_config(1000, dim, bounds, 25)
+  let soa_result = @lib.seagull_optimization_algorithm(soa_config, @lib.sphere_function, rng)
+  println("   最优值: \{soa_result.best_value}")
+  println("   评估次数: \{soa_result.evaluations}")
+  println("")
+
+  println("53. 运行猫群优化 (CSO):")
+  let cso_config = @lib.make_cso_config(1000, dim, bounds, 25)
+  let cso_result = @lib.cat_swarm_optimization(cso_config, @lib.sphere_function, rng)
+  println("   最优值: \{cso_result.best_value}")
+  println("   评估次数: \{cso_result.evaluations}")
+  println("")
+
+  println("54. 运行大猩猩部队优化 (GTO):")
+  let gto_config = @lib.make_gto_config(1000, dim, bounds, 25)
+  let gto_result = @lib.gorilla_troops_optimizer(gto_config, @lib.sphere_function, rng)
+  println("   最优值: \{gto_result.best_value}")
+  println("   评估次数: \{gto_result.evaluations}")
+  println("")
+
+  println("55. 运行水循环算法 (WCA):")
+  let wca_config = @lib.make_wca_config(1000, dim, bounds, 25, 4)
+  let wca_result = @lib.water_cycle_algorithm(wca_config, @lib.sphere_function, rng)
+  println("   最优值: \{wca_result.best_value}")
+  println("   评估次数: \{wca_result.evaluations}")
+  println("")
+
+  println("56. 比较不同评估预算下的性能:")
   let results = @lib.run_benchmark_at_evals(
     @lib.sphere_function,
     "Sphere Function",
