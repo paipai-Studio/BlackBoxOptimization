@@ -6186,9 +6186,7 @@ pub fn rime_optimization_algorithm(
       if evaluations >= max_evals {
         break
       }
-      let r1 = RNG::next(current_rng)
       let r2 = RNG::next(current_rng)
-      let theta = PI * RNG::next(current_rng) / 10.0
       let fr = if total < 1.0e-12 {
         1.0 / n.to_double()
       } else {
@@ -6198,9 +6196,14 @@ pub fn rime_optimization_algorithm(
       let candidate : Array[Double] = []
       for d in 0..<dim {
         let pos = if r2 < p_soft {
-          // soft-rime: crystal growth around the best with a decaying amplitude
+          // soft-rime: per-dimension crystal growth around the best
           x_best[d] +
-          r1 * cos_approx(theta) * beta * range * 0.05 * (1.0 - iter)
+          (2.0 * RNG::next(current_rng) - 1.0) *
+          cos_approx(PI * RNG::next(current_rng) / 10.0) *
+          beta *
+          range *
+          0.05 *
+          (1.0 - iter)
         } else {
           // hard-rime: shrinking local search around the best
           x_best[d] +
