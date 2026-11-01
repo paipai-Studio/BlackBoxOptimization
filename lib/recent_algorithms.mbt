@@ -4017,3 +4017,227 @@ pub fn jde_algorithm(
     evaluations,
   }
 }
+
+// ===== SHADE: Success-History based Adaptive DE (2013) =====
+
+///|
+pub struct SHADEConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_shade_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SHADEConfig {
+  SHADEConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Standard Cauchy sample (location 0, scale 1).
+fn shade_cauchy(rng : RNG) -> Double {
+  let u = RNG::next(rng)
+  let t = 3.141592653589793 * (u - 0.5)
+  let s = sin_approx(t)
+  let c = cos_approx(t)
+  let c2 = if abs_val(c) < 1.0e-8 {
+    if c < 0.0 {
+      -1.0e-8
+    } else {
+      1.0e-8
+    }
+  } else {
+    c
+  }
+  s / c2
+}
+
+///|
+/// SHADE (Tanabe & Fukunaga, 2013): current-to-pbest/1 mutation with
+/// success-history memories M_F / M_CR, an external archive of replaced
+/// parents and a p-best pool.  Successful parameters are folded back into one
+/// memory slot per generation as weighted Lehmer/arithmetic means.  F is drawn
+/// from a Cauchy and CR from a normal centred on the memory values.
+pub fn shade_algorithm(
+  config : SHADEConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let pop_size = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let h_mem = 5
+
+  let m_f : Array[Double] = []
+  let m_cr : Array[Double] = []
+  for _i in 0..<h_mem {
+    m_f.push(0.5)
+    m_cr.push(0.5)
+  }
+  let archive : Array[Array[Double]] = []
+  let mut mem_idx = 0
+
+  let population : Array[Array[Double]] = []
+  let fitness : Array[Double] = []
+  for _i in 0..<pop_size {
+    let sol = random_solution(dim, bounds, current_rng)
+    population.push(sol)
+    fitness.push(evaluate(f, sol))
+  }
+  let mut evaluations = pop_size
+  let sorted0 = sort_indices(fitness)
+  let mut best_pos : Array[Double] = population[sorted0[0]]
+  let mut best_val = fitness[sorted0[0]]
+
+  while evaluations < max_evals {
+    let order = sort_indices(fitness)
+
+    // p-best pool size: p drawn from [2/N, 0.2]
+    let p_min = 2.0 / pop_size.to_double()
+    let p = p_min + RNG::next(current_rng) * (0.2 - p_min)
+    let mut pnum = (p * pop_size.to_double()).to_int()
+    if pnum < 2 {
+      pnum = 2
+    }
+    if pnum > pop_size {
+      pnum = pop_size
+    }
+
+    let s_f : Array[Double] = []
+    let s_cr : Array[Double] = []
+    let s_df : Array[Double] = []
+
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+
+      // Sample F (Cauchy) and CR (normal) from the success-history memory
+      let mem_k = (RNG::next(current_rng) * h_mem.to_double()).to_int() % h_mem
+      let mut cr_i = m_cr[mem_k] +
+        0.1 * box_muller(RNG::next(current_rng), RNG::next(current_rng))
+      if cr_i < 0.0 {
+        cr_i = 0.0
+      } else if cr_i > 1.0 {
+        cr_i = 1.0
+      }
+      let mut f_i = 0.0
+      let mut tries = 0
+      while f_i <= 0.0 && tries < 10 {
+        f_i = m_f[mem_k] + 0.1 * shade_cauchy(current_rng)
+        tries = tries + 1
+      }
+      if f_i <= 0.0 {
+        f_i = 0.5
+      }
+      if f_i > 1.0 {
+        f_i = 1.0
+      }
+
+      // p-best individual
+      let pbest_rank = (RNG::next(current_rng) * pnum.to_double()).to_int() %
+        pnum
+      let pbest = population[order[pbest_rank]]
+
+      // r1 from the population
+      let mut r1 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      while r1 == i {
+        r1 = (RNG::next(current_rng) * pop_size.to_double()).to_int() % pop_size
+      }
+
+      // r2 from population ∪ archive
+      let union_size = pop_size + archive.length()
+      let mut r2 = (RNG::next(current_rng) * union_size.to_double()).to_int() %
+        union_size
+      while r2 == i || r2 == r1 {
+        r2 = (RNG::next(current_rng) * union_size.to_double()).to_int() %
+          union_size
+      }
+      let r2_pos : Array[Double] = if r2 < pop_size {
+        population[r2]
+      } else {
+        archive[r2 - pop_size]
+      }
+
+      // current-to-pbest/1 with binomial crossover
+      let jrand = (RNG::next(current_rng) * dim.to_double()).to_int() % dim
+      let trial : Array[Double] = []
+      for j in 0..<dim {
+        let mutant = population[i][j] +
+          f_i * (pbest[j] - population[i][j]) +
+          f_i * (population[r1][j] - r2_pos[j])
+        let clamped = max(bounds.min, min(bounds.max, mutant))
+        if RNG::next(current_rng) < cr_i || j == jrand {
+          trial.push(clamped)
+        } else {
+          trial.push(population[i][j])
+        }
+      }
+
+      let trial_fit = evaluate(f, trial)
+      evaluations = evaluations + 1
+      if trial_fit < fitness[i] {
+        s_f.push(f_i)
+        s_cr.push(cr_i)
+        s_df.push(abs_val(fitness[i] - trial_fit))
+        // External archive of replaced parents (random replacement)
+        if archive.length() < pop_size {
+          archive.push(population[i])
+        } else {
+          let ridx = (RNG::next(current_rng) * archive.length().to_double()).to_int() %
+            archive.length()
+          archive[ridx] = population[i]
+        }
+        population[i] = trial
+        fitness[i] = trial_fit
+        if trial_fit < best_val {
+          best_val = trial_fit
+          best_pos = trial
+        }
+      }
+    }
+
+    // Fold this generation's successful parameters into one memory slot
+    let m = s_df.length()
+    if m > 0 {
+      let mut sum_w = 0.0
+      let mut sum_wf = 0.0
+      let mut sum_wf2 = 0.0
+      let mut sum_wcr = 0.0
+      for t in 0..<m {
+        let w = s_df[t]
+        sum_w = sum_w + w
+        sum_wf = sum_wf + w * s_f[t]
+        sum_wf2 = sum_wf2 + w * s_f[t] * s_f[t]
+        sum_wcr = sum_wcr + w * s_cr[t]
+      }
+      if sum_wf > 1.0e-12 {
+        m_f[mem_idx] = sum_wf2 / sum_wf
+        m_cr[mem_idx] = sum_wcr / sum_w
+      } else {
+        m_f[mem_idx] = 0.5
+        m_cr[mem_idx] = 0.5
+      }
+      mem_idx = (mem_idx + 1) % h_mem
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

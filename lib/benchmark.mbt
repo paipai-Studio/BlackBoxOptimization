@@ -786,6 +786,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
     name: "jDE",
     run: (e, d, b, r, f) => jde_algorithm(make_jde_config(e, d, b, 25), f, r),
   })
+  entries.push(AlgoEntry::{
+    name: "SHADE",
+    run: (e, d, b, r, f) => {
+      shade_algorithm(make_shade_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
