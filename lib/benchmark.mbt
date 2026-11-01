@@ -804,6 +804,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       osprey_optimization_algorithm(make_ooa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "TDO",
+    run: (e, d, b, r, f) => {
+      tasmanian_devil_optimization(make_tdo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
