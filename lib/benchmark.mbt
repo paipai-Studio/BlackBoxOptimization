@@ -976,6 +976,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       rat_swarm_optimizer(make_rso_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "EVO",
+    run: (e, d, b, r, f) => {
+      egyptian_vulture_optimization(make_evo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

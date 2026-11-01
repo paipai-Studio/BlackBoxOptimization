@@ -7760,3 +7760,101 @@ pub fn rat_swarm_optimizer(
     evaluations,
   }
 }
+
+// ===== EVO: Egyptian Vulture Optimization (2021) =====
+
+///|
+pub struct EVOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_evo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> EVOConfig {
+  EVOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Egyptian Vulture Optimization (2021): vultures spend part of the budget
+/// circling a shrinking neighbourhood of the best, and the rest attacking by
+/// attraction to the best or a fine local search.  Greedy acceptance and
+/// historical-best tracking are added.
+pub fn egyptian_vulture_optimization(
+  config : EVOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    let order = sort_indices(values)
+    let x_best = pop[order[0]]
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let r = RNG::next(current_rng)
+      let candidate : Array[Double] = []
+      for d in 0..<dim {
+        let pos = if r < 0.5 {
+          // exploration: circling the best's neighbourhood
+          x_best[d] + (2.0 * RNG::next(current_rng) - 1.0) * rb * range * 0.3
+        } else if r < 0.75 {
+          // exploitation: attack by attraction to the best
+          pop[i][d] + RNG::next(current_rng) * (x_best[d] - pop[i][d])
+        } else {
+          // exploitation: fine local search around the best
+          x_best[d] + rb * range * 0.1 * (2.0 * RNG::next(current_rng) - 1.0)
+        }
+        candidate.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let cv = evaluate(f, candidate)
+      evaluations = evaluations + 1
+      if cv < values[i] {
+        pop[i] = candidate
+        values[i] = cv
+        if cv < best_val {
+          best_val = cv
+          best_pos = candidate
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
