@@ -898,6 +898,10 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       info_optimization_algorithm(make_info_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SO",
+    run: (e, d, b, r, f) => snake_optimizer(make_so_config(e, d, b, 25), f, r),
+  })
   entries
 }
 

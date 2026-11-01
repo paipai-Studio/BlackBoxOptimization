@@ -6324,3 +6324,137 @@ pub fn info_optimization_algorithm(
     evaluations,
   }
 }
+
+// ===== SO: Snake Optimizer (2022) =====
+
+///|
+pub struct SOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_so_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SOConfig {
+  SOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Snake Optimizer (2022): the population splits into males and females.  Low
+/// food-quantity (worst-ranked) agents scatter, otherwise agents approach the
+/// food (best) when the temperature is high or fight using a male-female
+/// difference when it is low.  Steps decay with the budget fraction.  Greedy
+/// acceptance and historical-best tracking are added.
+pub fn snake_optimizer(
+  config : SOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let n_male = if n / 2 < 1 { 1 } else { n / 2 }
+  let n_female = n - n_male
+  let c2 = 0.05
+  let c3 = 2.0
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    let temp = exp_approx(-iter)
+    let order = sort_indices(values)
+    let x_food = pop[order[0]]
+    let rank : Array[Int32] = []
+    for _i in 0..<n {
+      rank.push(0)
+    }
+    for r in 0..<n {
+      rank[order[r]] = r
+    }
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let q = 1.0 - rank[i].to_double() / n.to_double()
+      let is_male = i < n_male
+      let same_rand = if is_male {
+        (RNG::next(current_rng) * n_male.to_double()).to_int() % n_male
+      } else {
+        n_male +
+        (RNG::next(current_rng) * n_female.to_double()).to_int() % n_female
+      }
+      let other_rand = if is_male {
+        n_male +
+        (RNG::next(current_rng) * n_female.to_double()).to_int() % n_female
+      } else {
+        (RNG::next(current_rng) * n_male.to_double()).to_int() % n_male
+      }
+      let candidate : Array[Double] = []
+      for d in 0..<dim {
+        let pos = if q < 0.25 {
+          // scarce food: scatter around a random same-sex agent
+          pop[same_rand][d] +
+          c2 * (2.0 * RNG::next(current_rng) - 1.0) * range * rb
+        } else if temp > 0.6 {
+          // hot: approach the food
+          x_food[d] +
+          c3 *
+          temp *
+          RNG::next(current_rng) *
+          rb *
+          (x_food[d] - pop[same_rand][d])
+        } else {
+          // cold: fight using a male-female difference
+          x_food[d] +
+          c3 *
+          RNG::next(current_rng) *
+          rb *
+          (pop[other_rand][d] - pop[same_rand][d])
+        }
+        candidate.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let cv = evaluate(f, candidate)
+      evaluations = evaluations + 1
+      if cv < values[i] {
+        pop[i] = candidate
+        values[i] = cv
+        if cv < best_val {
+          best_val = cv
+          best_pos = candidate
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
