@@ -816,6 +816,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       prairie_dog_optimization(make_pdo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "NGO",
+    run: (e, d, b, r, f) => {
+      northern_goshawk_optimization(make_ngo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

@@ -4724,3 +4724,113 @@ pub fn prairie_dog_optimization(
     evaluations,
   }
 }
+
+// ===== NGO: Northern Goshawk Optimization (2021) =====
+
+///|
+pub struct NGOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ngo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> NGOConfig {
+  NGOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Northern Goshawk Optimization (2021): each hawk alternates between an
+/// exploration phase (dive at a randomly chosen prey) and an exploitation
+/// phase (tail-chase with a shrinking radius).  Greedy acceptance and
+/// historical-best tracking are added, and the chase radius decays with the
+/// budget fraction so that larger budgets keep converging.
+pub fn northern_goshawk_optimization(
+  config : NGOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+
+  let hawks : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    hawks.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = hawks[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      // Phase 1: exploration - dive at a random prey
+      let prey = hawks[(RNG::next(current_rng) * n.to_double()).to_int() % n]
+      let r1 = RNG::next(current_rng)
+      let i_factor = if RNG::next(current_rng) < 0.5 { 1.0 } else { 2.0 }
+      let p1 : Array[Double] = []
+      for d in 0..<dim {
+        let pos = hawks[i][d] + r1 * (prey[d] - i_factor * hawks[i][d])
+        p1.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let v1 = evaluate(f, p1)
+      evaluations = evaluations + 1
+      if v1 < values[i] {
+        hawks[i] = p1
+        values[i] = v1
+        if v1 < best_val {
+          best_val = v1
+          best_pos = p1
+        }
+      }
+      // Phase 2: exploitation - tail chase with a decaying radius
+      if evaluations >= max_evals {
+        break
+      }
+      let radius = 0.02 * (1.0 - iter)
+      let p2 : Array[Double] = []
+      for d in 0..<dim {
+        let rnd = RNG::next(current_rng)
+        let pos = hawks[i][d] + radius * (2.0 * rnd - 1.0) * hawks[i][d]
+        p2.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let v2 = evaluate(f, p2)
+      evaluations = evaluations + 1
+      if v2 < values[i] {
+        hawks[i] = p2
+        values[i] = v2
+        if v2 < best_val {
+          best_val = v2
+          best_pos = p2
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
