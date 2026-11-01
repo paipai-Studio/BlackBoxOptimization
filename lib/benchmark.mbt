@@ -868,6 +868,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       dung_beetle_optimizer(make_dbo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "TSO",
+    run: (e, d, b, r, f) => {
+      tunicate_swarm_algorithm(make_tso_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
