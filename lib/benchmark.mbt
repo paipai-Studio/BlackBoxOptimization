@@ -874,6 +874,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       tunicate_swarm_algorithm(make_tso_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "KOA",
+    run: (e, d, b, r, f) => {
+      kookaburra_optimization_algorithm(make_koa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
