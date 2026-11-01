@@ -834,6 +834,10 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       gradient_based_optimizer(make_gbo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "GO",
+    run: (e, d, b, r, f) => growth_optimizer(make_go_config(e, d, b, 25), f, r),
+  })
   entries
 }
 

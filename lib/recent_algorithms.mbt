@@ -5050,3 +5050,122 @@ pub fn gradient_based_optimizer(
     evaluations,
   }
 }
+
+// ===== GO: Growth Optimizer (2023) =====
+
+///|
+pub struct GOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_go_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> GOConfig {
+  GOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Growth Optimizer (2023): each member first runs a learning phase that blends
+/// attraction to the incumbent best with a peer difference, then a reflection
+/// phase that samples a point projected beyond the best.  The reflection
+/// amplitude decays with the budget fraction so larger budgets settle into
+/// local refinement.  Greedy acceptance and historical-best tracking are added.
+pub fn growth_optimizer(
+  config : GOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let reflect_scale = 1.0 - iter
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let r = (RNG::next(current_rng) * n.to_double()).to_int() % n
+      // learning phase: attraction to best, with a decaying peer term
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let learned : Array[Double] = []
+      for d in 0..<dim {
+        let pos = pop[i][d] +
+          r1 * (best_pos[d] - pop[i][d]) +
+          reflect_scale * r2 * (pop[r][d] - pop[i][d])
+        learned.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let lv = evaluate(f, learned)
+      evaluations = evaluations + 1
+      if lv < values[i] {
+        pop[i] = learned
+        values[i] = lv
+        if lv < best_val {
+          best_val = lv
+          best_pos = learned
+        }
+      }
+      // reflection phase: decaying projection beyond the best plus a local jitter
+      if evaluations >= max_evals {
+        break
+      }
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let reflected : Array[Double] = []
+      for d in 0..<dim {
+        let pos = best_pos[d] +
+          reflect_scale *
+          (r3 * (best_pos[d] - pop[i][d]) - r4 * (pop[r][d] - pop[i][d])) +
+          (2.0 * RNG::next(current_rng) - 1.0) *
+          (bounds.max - bounds.min) *
+          0.01 *
+          reflect_scale
+        reflected.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let rv = evaluate(f, reflected)
+      evaluations = evaluations + 1
+      if rv < values[i] {
+        pop[i] = reflected
+        values[i] = rv
+        if rv < best_val {
+          best_val = rv
+          best_pos = reflected
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
