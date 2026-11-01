@@ -728,6 +728,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       zebra_optimization_algorithm(make_zoa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "MRFO",
+    run: (e, d, b, r, f) => {
+      manta_ray_foraging_optimization(make_mrfo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

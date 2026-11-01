@@ -2767,3 +2767,141 @@ pub fn zebra_optimization_algorithm(
     evaluations,
   }
 }
+
+// ===== Manta Ray Foraging Optimization (MRFO) =====
+
+///|
+pub struct MRFOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_mrfo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> MRFOConfig {
+  MRFOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Manta Ray Foraging Optimization (2020): each individual randomly performs
+/// chain foraging or cyclone foraging, then every individual does a
+/// somersault toward the best at the end of the generation.
+pub fn manta_ray_foraging_optimization(
+  config : MRFOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let somersault_factor = 2.0
+
+  let rays : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    rays.push(sol)
+    values.push(evaluate(f, sol))
+  }
+
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = rays[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+
+    // Chain foraging or cyclone foraging, chosen per individual
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations {
+        break
+      }
+      let choice = RNG::next(current_rng)
+      let new_pos : Array[Double] = []
+      if choice < 0.5 {
+        // Cyclone foraging (spiral toward best, or toward a random point)
+        let r1 = RNG::next(current_rng)
+        let beta = 2.0 *
+          exp_approx(r1 * (1.0 - iter) * sin_approx(2.0 * PI * r1))
+        let phase = RNG::next(current_rng)
+        let use_random = iter < phase
+        for d in 0..<dim {
+          let r2 = RNG::next(current_rng)
+          let r3 = RNG::next(current_rng)
+          let reference = if use_random {
+            bounds.min + r2 * range
+          } else {
+            best_pos[d]
+          }
+          let pos = reference +
+            r3 * (reference - rays[i][d]) +
+            beta * (reference - rays[i][d])
+          new_pos.push(max(bounds.min, min(bounds.max, pos)))
+        }
+      } else {
+        // Chain foraging: follow the previous ray toward the best
+        let r_log = RNG::next(current_rng)
+        let alpha = 2.0 * r_log * abs_val(@math.ln(max(r_log, 1.0e-10))).sqrt()
+        for d in 0..<dim {
+          let r2 = RNG::next(current_rng)
+          let prev = if i == 0 { best_pos[d] } else { rays[i - 1][d] }
+          let pos = rays[i][d] +
+            r2 * (prev - rays[i][d]) +
+            alpha * (best_pos[d] - rays[i][d])
+          new_pos.push(max(bounds.min, min(bounds.max, pos)))
+        }
+      }
+      rays[i] = new_pos
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      values[i] = new_val
+      if new_val < best_val {
+        best_val = new_val
+        best_pos = new_pos
+      }
+    }
+
+    // Somersault foraging for every individual
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations {
+        break
+      }
+      let new_pos : Array[Double] = []
+      for d in 0..<dim {
+        let r2 = RNG::next(current_rng)
+        let r3 = RNG::next(current_rng)
+        let pos = rays[i][d] +
+          somersault_factor * (r2 * best_pos[d] - r3 * rays[i][d])
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      rays[i] = new_pos
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      values[i] = new_val
+      if new_val < best_val {
+        best_val = new_val
+        best_pos = new_pos
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
