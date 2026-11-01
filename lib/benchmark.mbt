@@ -1018,6 +1018,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       spider_wasp_optimizer(make_swo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "GAO",
+    run: (e, d, b, r, f) => {
+      green_anaconda_optimization(make_gao_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
