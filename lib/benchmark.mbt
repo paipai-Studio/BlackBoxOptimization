@@ -770,6 +770,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       african_vultures_optimization(make_avoa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "WSO",
+    run: (e, d, b, r, f) => {
+      white_shark_optimizer(make_wso_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

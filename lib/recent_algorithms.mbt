@@ -3648,3 +3648,115 @@ pub fn african_vultures_optimization(
     evaluations,
   }
 }
+
+// ===== White Shark Optimizer (WSO, 2022) =====
+
+///|
+pub struct WSOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_wso_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> WSOConfig {
+  WSOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// White Shark Optimizer (2022): each shark carries a velocity that blends a
+/// fading inertia term with an attraction toward the incumbent best (the prey).
+/// A per-individual switch - whose "follow the prey" probability grows with the
+/// budget - alternates between following the prey and a wider search move.
+/// Adds greedy acceptance and historical-best tracking.
+pub fn white_shark_optimizer(
+  config : WSOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  let sharks : Array[Array[Double]] = []
+  let velocity : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    sharks.push(sol)
+    values.push(evaluate(f, sol))
+    let v : Array[Double] = []
+    for _d in 0..<dim {
+      v.push(0.0)
+    }
+    velocity.push(v)
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = sharks[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let tau = evaluations.to_double() / max_evals.to_double()
+    // Probability of following the prey grows so late phases converge
+    let follow_prob = 0.3 + 0.7 * tau
+
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+
+      let new_pos : Array[Double] = []
+      for d in 0..<dim {
+        let inertia = 0.5 * velocity[i][d] * (1.0 - tau)
+        let attract = (0.5 * r1 + 0.5 * r2) * (best_pos[d] - sharks[i][d])
+        let vel = inertia + attract
+        velocity[i][d] = vel
+        let pos = if r3 < follow_prob {
+          // Follow the prey
+          sharks[i][d] + vel
+        } else {
+          // Wider search move with a fading random component
+          let rnd = RNG::next(current_rng)
+          sharks[i][d] - vel + (2.0 * rnd - 1.0) * range * 0.1 * (1.0 - tau)
+        }
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+
+      // Greedy acceptance keeps the swarm from being randomized
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      if new_val < values[i] {
+        sharks[i] = new_pos
+        values[i] = new_val
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
