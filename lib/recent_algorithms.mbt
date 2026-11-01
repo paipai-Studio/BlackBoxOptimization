@@ -6926,3 +6926,108 @@ pub fn sand_cat_swarm_optimization(
     evaluations,
   }
 }
+
+// ===== SABO: Subtraction-Average-Based Optimizer (2023) =====
+
+///|
+pub struct SABOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_sabo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SABOConfig {
+  SABOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Subtraction-Average-Based Optimizer (2023): each agent moves by a random
+/// signed multiple of its average difference to the swarm (A_i = X_i - mean),
+/// combined with an attraction to the best and a shrinking Gaussian local
+/// search so larger budgets refine reliably.  Greedy acceptance and
+/// historical-best tracking are added.
+pub fn subtraction_average_based_optimizer(
+  config : SABOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    let order = sort_indices(values)
+    let x_best = pop[order[0]]
+    let mean : Array[Double] = []
+    for d in 0..<dim {
+      let mut s = 0.0
+      for j in 0..<n {
+        s = s + pop[j][d]
+      }
+      mean.push(s / n.to_double())
+    }
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let candidate : Array[Double] = []
+      for d in 0..<dim {
+        let avg = pop[i][d] - mean[d]
+        let r = 2.0 * RNG::next(current_rng) - 1.0
+        let pos = pop[i][d] +
+          r * avg +
+          RNG::next(current_rng) * (x_best[d] - pop[i][d]) +
+          rb *
+          range *
+          0.05 *
+          box_muller(RNG::next(current_rng), RNG::next(current_rng))
+        candidate.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let cv = evaluate(f, candidate)
+      evaluations = evaluations + 1
+      if cv < values[i] {
+        pop[i] = candidate
+        values[i] = cv
+        if cv < best_val {
+          best_val = cv
+          best_pos = candidate
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

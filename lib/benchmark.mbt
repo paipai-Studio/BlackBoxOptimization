@@ -930,6 +930,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       sand_cat_swarm_optimization(make_scso_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SABO",
+    run: (e, d, b, r, f) => {
+      subtraction_average_based_optimizer(make_sabo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
