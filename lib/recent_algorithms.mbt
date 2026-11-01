@@ -4374,3 +4374,122 @@ pub fn evolutionary_programming(
     evaluations,
   }
 }
+
+// ===== OOA: Osprey Optimization Algorithm (2023) =====
+
+///|
+pub struct OOAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ooa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> OOAConfig {
+  OOAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Osprey Optimization Algorithm (2023): in phase 1 each osprey dives at a
+/// randomly chosen fish (another individual) and in phase 2 carries the fish to
+/// a suitable position, modelled here as an attraction toward the incumbent best
+/// with a shrinking random component.  Both updates are greedy.  Adds
+/// historical-best tracking.
+pub fn osprey_optimization_algorithm(
+  config : OOAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  let ospreys : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    ospreys.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = ospreys[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+
+      // Phase 1: identify and attack a random fish (another individual)
+      let fish_idx = (RNG::next(current_rng) * n.to_double()).to_int() % n
+      let fish = ospreys[fish_idx]
+      let r1 = RNG::next(current_rng)
+      let i_factor = if RNG::next(current_rng) < 0.5 { 1.0 } else { 2.0 }
+      let new1 : Array[Double] = []
+      for d in 0..<dim {
+        let pos = ospreys[i][d] + r1 * (fish[d] - i_factor * ospreys[i][d])
+        new1.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      if evaluations < max_evals {
+        let v1 = evaluate(f, new1)
+        evaluations = evaluations + 1
+        if v1 < values[i] {
+          ospreys[i] = new1
+          values[i] = v1
+          if v1 < best_val {
+            best_val = v1
+            best_pos = new1
+          }
+        }
+      }
+
+      // Phase 2: carry the fish to a suitable position (shrink toward the best)
+      if evaluations < max_evals {
+        let r2 = RNG::next(current_rng)
+        let new2 : Array[Double] = []
+        for d in 0..<dim {
+          let jitter = (RNG::next(current_rng) - 0.5) *
+            2.0 *
+            range *
+            0.1 *
+            (1.0 - iter)
+          let pos = ospreys[i][d] + r2 * (best_pos[d] - ospreys[i][d]) + jitter
+          new2.push(max(bounds.min, min(bounds.max, pos)))
+        }
+        let v2 = evaluate(f, new2)
+        evaluations = evaluations + 1
+        if v2 < values[i] {
+          ospreys[i] = new2
+          values[i] = v2
+          if v2 < best_val {
+            best_val = v2
+            best_pos = new2
+          }
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

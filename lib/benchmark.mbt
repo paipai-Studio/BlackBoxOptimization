@@ -798,6 +798,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       evolutionary_programming(make_ep_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "OOA",
+    run: (e, d, b, r, f) => {
+      osprey_optimization_algorithm(make_ooa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
