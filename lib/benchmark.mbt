@@ -948,6 +948,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       artificial_hummingbird_algorithm(make_aha_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "BKA",
+    run: (e, d, b, r, f) => {
+      black_winged_kite_algorithm(make_bka_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

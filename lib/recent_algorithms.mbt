@@ -7252,3 +7252,104 @@ pub fn artificial_hummingbird_algorithm(
     evaluations,
   }
 }
+
+// ===== BKA: Black-winged Kite Algorithm (2023) =====
+
+///|
+pub struct BKAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bka_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BKAConfig {
+  BKAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Black-winged Kite Algorithm (2023): kites alternate between an attack
+/// behaviour that pounces toward the best with a sinusoidal velocity and a
+/// migration behaviour that leads toward the best habitat.  The attack
+/// probability and amplitudes decay with the budget fraction.  Greedy
+/// acceptance and historical-best tracking are added.
+pub fn black_winged_kite_algorithm(
+  config : BKAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    let p_attack = 0.1 + 0.9 * rb
+    let order = sort_indices(values)
+    let x_best = pop[order[0]]
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let attack = RNG::next(current_rng) < p_attack
+      let vel = 0.05 + 0.2 * rb
+      let candidate : Array[Double] = []
+      for d in 0..<dim {
+        let r = RNG::next(current_rng)
+        let pos = if attack {
+          // attack: pounce toward the best with a sinusoidal velocity
+          pop[i][d] +
+          vel * (1.0 + sin_approx(TWO_PI * r)) * (x_best[d] - pop[i][d]) +
+          rb * range * 0.05 * (2.0 * RNG::next(current_rng) - 1.0)
+        } else {
+          // migration: lead toward the best habitat
+          pop[i][d] + r * (x_best[d] - pop[i][d])
+        }
+        candidate.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let cv = evaluate(f, candidate)
+      evaluations = evaluations + 1
+      if cv < values[i] {
+        pop[i] = candidate
+        values[i] = cv
+        if cv < best_val {
+          best_val = cv
+          best_pos = candidate
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
