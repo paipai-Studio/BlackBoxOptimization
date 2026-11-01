@@ -170,6 +170,7 @@
 | 秃鹰搜索算法 | BES | 选择/搜索/俯冲三阶段 (2019) |
 | 鹅优化算法 | GOOSE | 觅食/警戒/编队迁徙 (2024) |
 | 鲍威尔共轭方向法 | Powell | 线搜索 + 共轭方向更新的经典直接搜索 (1964) |
+| 热交换优化 | TEO | 随机配对热交换 + 环境冷却 (2017) |
 
 > **通用群体智能参数**: 大部分算法默认 `population_size = 25`。下表列出各算法的特有参数。
 
@@ -199,7 +200,7 @@
 | WCA | `num_rivers` | 4 |
 | MFO | `spiral_constant` | 1.0 |
 | WOA | `spiral_constant` | 1.0 |
-| 其余算法 (GWO, SCA, ALO, HHO, SalpSA, AEO, SOS, GBPSO, MSA, PFA, CPA, BCO, FFOA, FWA, PIO, HBA, POA, TSA, GJO, GOA, SOA, GTO, SMA, AO, ChOA, DO, ZOA, MRFO, HGS, RSA, MPA, GEO, AVOA, WSO, COA, OOA, TDO, PDO, NGO, BWO, GBO, GO, WaOA, CLONALG, ABC, EM, DBO, TSO, KOA, FHO, RIME, INFO, SO, MGO, CHIO, PO, SCSO, SABO, HPO, AHA, BKA, ARO, FOX, DMO, RSO, EVO, EEFO, Golden-SA, YSGA, FBI, CapSA, SWO, GAO, MAO, UMDA, cGA, CA, COY, BES, GOOSE, Powell) | 仅需 `population_size` | 25 |
+| 其余算法 (GWO, SCA, ALO, HHO, SalpSA, AEO, SOS, GBPSO, MSA, PFA, CPA, BCO, FFOA, FWA, PIO, HBA, POA, TSA, GJO, GOA, SOA, GTO, SMA, AO, ChOA, DO, ZOA, MRFO, HGS, RSA, MPA, GEO, AVOA, WSO, COA, OOA, TDO, PDO, NGO, BWO, GBO, GO, WaOA, CLONALG, ABC, EM, DBO, TSO, KOA, FHO, RIME, INFO, SO, MGO, CHIO, PO, SCSO, SABO, HPO, AHA, BKA, ARO, FOX, DMO, RSO, EVO, EEFO, Golden-SA, YSGA, FBI, CapSA, SWO, GAO, MAO, UMDA, cGA, CA, COY, BES, GOOSE, Powell, TEO) | 仅需 `population_size` | 25 |
 
 ### 📐 确定性直接搜索
 无需梯度信息，通过几何模式进行直接搜索，适合不可导函数。

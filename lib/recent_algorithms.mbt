@@ -9532,3 +9532,147 @@ pub fn powell_conjugate_direction_method(
     evaluations,
   }
 }
+
+// ===== TEO: Thermal Exchange Optimization (2017) =====
+
+///|
+pub struct TEOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_teo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> TEOConfig {
+  TEOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Thermal Exchange Optimization (2017): objects are randomly paired and heat
+/// flows from the hotter (worse) to the cooler (better) one, while a fraction
+/// of the population cools towards the environment (the incumbent best).  The
+/// exchange amplitude decays with the budget fraction.  Greedy acceptance and
+/// historical-best tracking are added.
+pub fn thermal_exchange_optimization(
+  config : TEOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    let order = sort_indices(values)
+    let x_best = pop[order[0]]
+    // heat exchange: random pairs, heat flows from the hotter to the cooler
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      if i % 2 == 0 && i + 1 < n {
+        let j = i + 1
+        let better = if values[i] <= values[j] { i } else { j }
+        let worse = if better == i { j } else { i }
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let pos = pop[worse][d] +
+            RNG::next(current_rng) * rb * (pop[better][d] - pop[worse][d]) +
+            rb * range * 0.05 * (2.0 * RNG::next(current_rng) - 1.0)
+          cand.push(max(bounds.min, min(bounds.max, pos)))
+        }
+        let cv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        if cv < values[worse] {
+          pop[worse] = cand
+          values[worse] = cv
+          if cv < best_val {
+            best_val = cv
+            best_pos = cand
+          }
+        }
+        // the cooler object warms slightly towards thermal balance
+        if evaluations < max_evals {
+          let cand2 : Array[Double] = []
+          for d in 0..<dim {
+            let pos = pop[better][d] +
+              RNG::next(current_rng) *
+              rb *
+              (pop[worse][d] - pop[better][d]) *
+              0.3 +
+              rb * range * 0.03 * (2.0 * RNG::next(current_rng) - 1.0)
+            cand2.push(max(bounds.min, min(bounds.max, pos)))
+          }
+          let cv2 = evaluate(f, cand2)
+          evaluations = evaluations + 1
+          if cv2 < values[better] {
+            pop[better] = cand2
+            values[better] = cv2
+            if cv2 < best_val {
+              best_val = cv2
+              best_pos = cand2
+            }
+          }
+        }
+      }
+    }
+    // environmental cooling: a fraction of the objects converge on the best
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      if RNG::next(current_rng) < 0.3 {
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let pos = x_best[d] +
+            rb * range * 0.1 * (2.0 * RNG::next(current_rng) - 1.0)
+          cand.push(max(bounds.min, min(bounds.max, pos)))
+        }
+        let cv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        if cv < values[i] {
+          pop[i] = cand
+          values[i] = cv
+          if cv < best_val {
+            best_val = cv
+            best_pos = cand
+          }
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

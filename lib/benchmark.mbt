@@ -1076,6 +1076,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       powell_conjugate_direction_method(make_powell_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "TEO",
+    run: (e, d, b, r, f) => {
+      thermal_exchange_optimization(make_teo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
