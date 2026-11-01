@@ -1082,6 +1082,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       thermal_exchange_optimization(make_teo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SHO",
+    run: (e, d, b, r, f) => {
+      spotted_hyena_optimizer(make_sho_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
