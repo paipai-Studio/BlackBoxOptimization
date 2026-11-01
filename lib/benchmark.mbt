@@ -908,6 +908,16 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       mountain_gazelle_optimizer(make_mgo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "CHIO",
+    run: (e, d, b, r, f) => {
+      coronavirus_herd_immunity_optimization(
+        make_chio_config(e, d, b, 25),
+        f,
+        r,
+      )
+    },
+  })
   entries
 }
 
