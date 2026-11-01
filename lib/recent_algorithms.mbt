@@ -3033,3 +3033,120 @@ pub fn hunger_games_search(
     evaluations,
   }
 }
+
+// ===== Reptile Search Algorithm (RSA) =====
+
+///|
+pub struct RSAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_rsa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> RSAConfig {
+  RSAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Reptile Search Algorithm (2022): crocodile-inspired phases. The iteration
+/// ratio selects high walking (encircling), belly walking, hunting or hunting
+/// cooperation, with a shrinking factor driving the transition from
+/// exploration to exploitation.
+pub fn reptile_search_algorithm(
+  config : RSAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let current_rng = rng
+
+  let reptiles : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    reptiles.push(sol)
+    values.push(evaluate(f, sol))
+  }
+
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = reptiles[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+    let shrink = 2.0 * (1.0 - iter)
+
+    // Per-dimension average position of the population
+    let avg_pos : Array[Double] = []
+    for _d in 0..<dim {
+      avg_pos.push(0.0)
+    }
+    for i in 0..<n {
+      for d in 0..<dim {
+        avg_pos[d] = avg_pos[d] + reptiles[i][d]
+      }
+    }
+    for d in 0..<dim {
+      avg_pos[d] = avg_pos[d] / n.to_double()
+    }
+
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations {
+        break
+      }
+      let ridx = (RNG::next(current_rng) * n.to_double()).to_int() % n
+      let new_pos : Array[Double] = []
+      for d in 0..<dim {
+        let r1 = RNG::next(current_rng)
+        let r2 = RNG::next(current_rng)
+        let eta = best_pos[d] - reptiles[i][d]
+        let rr = (best_pos[d] - reptiles[ridx][d]) * r1 * shrink
+        let beta = 1.0 + (best_pos[d] - avg_pos[d]) * r2
+        let pos = if iter < 0.25 {
+          // High walking (encircling, most exploratory)
+          best_pos[d] - eta * beta - rr
+        } else if iter < 0.5 {
+          // Belly walking
+          best_pos[d] + eta * beta - rr
+        } else if iter < 0.75 {
+          // Hunting
+          best_pos[d] * (1.0 - iter) + eta * beta
+        } else {
+          // Hunting cooperation
+          best_pos[d] + eta * beta * 0.5 - rr
+        }
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+
+      reptiles[i] = new_pos
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      values[i] = new_val
+      if new_val < best_val {
+        best_val = new_val
+        best_pos = new_pos
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
