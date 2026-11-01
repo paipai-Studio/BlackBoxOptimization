@@ -9332,3 +9332,203 @@ pub fn goose_optimization_algorithm(
     evaluations,
   }
 }
+
+// ===== Powell: Powell's Conjugate Direction Method (1964) =====
+
+///|
+pub struct PowellConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_powell_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> PowellConfig {
+  PowellConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Powell's conjugate direction method (1964), the classic derivative-free
+/// direct search: line searches along a set of directions, then the net move of
+/// the sweep becomes a new conjugate direction.  This implementation is fully
+/// deterministic (the step schedule does not depend on the evaluation budget),
+/// starts from the best of a random sample, and keeps historical-best tracking.
+pub fn powell_conjugate_direction_method(
+  config : PowellConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let base_step = range * 0.05
+  let min_step = range * 1.0e-9
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  let dirs : Array[Array[Double]] = []
+  for i in 0..<dim {
+    let u : Array[Double] = []
+    for _d in 0..<dim {
+      u.push(0.0)
+    }
+    u[i] = 1.0
+    dirs.push(u)
+  }
+  let mut step = base_step
+
+  while evaluations < max_evals {
+    let start_pt : Array[Double] = []
+    for d in 0..<dim {
+      start_pt.push(best_pos[d])
+    }
+    let start_val = best_val
+    let deltas : Array[Double] = []
+    for i in 0..<dim {
+      if evaluations >= max_evals {
+        break
+      }
+      let mut guard_cnt = 0
+      while evaluations < max_evals && guard_cnt < 32 {
+        guard_cnt = guard_cnt + 1
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let pos = best_pos[d] + step * dirs[i][d]
+          cand.push(max(bounds.min, min(bounds.max, pos)))
+        }
+        let cv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        if cv < best_val {
+          best_val = cv
+          best_pos = cand
+          step = step * 1.8
+        } else {
+          let cand2 : Array[Double] = []
+          for d in 0..<dim {
+            let pos = best_pos[d] - step * dirs[i][d]
+            cand2.push(max(bounds.min, min(bounds.max, pos)))
+          }
+          let cv2 = evaluate(f, cand2)
+          evaluations = evaluations + 1
+          if cv2 < best_val {
+            best_val = cv2
+            best_pos = cand2
+            step = step * 1.8
+          } else {
+            step = step * 0.5
+          }
+        }
+        if step < min_step {
+          break
+        }
+      }
+      deltas.push(start_val - best_val)
+    }
+    if evaluations >= max_evals {
+      break
+    }
+    // conjugate direction: the net move of the whole sweep
+    let dirv : Array[Double] = []
+    let mut norm = 0.0
+    for d in 0..<dim {
+      let diff = best_pos[d] - start_pt[d]
+      dirv.push(diff)
+      norm = norm + diff * diff
+    }
+    norm = norm.sqrt()
+    if norm > 1.0e-12 {
+      let mut guard_cnt = 0
+      while evaluations < max_evals && guard_cnt < 32 {
+        guard_cnt = guard_cnt + 1
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let pos = best_pos[d] + step * dirv[d] / norm
+          cand.push(max(bounds.min, min(bounds.max, pos)))
+        }
+        let cv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        if cv < best_val {
+          best_val = cv
+          best_pos = cand
+          step = step * 1.8
+        } else {
+          let cand2 : Array[Double] = []
+          for d in 0..<dim {
+            let pos = best_pos[d] - step * dirv[d] / norm
+            cand2.push(max(bounds.min, min(bounds.max, pos)))
+          }
+          let cv2 = evaluate(f, cand2)
+          evaluations = evaluations + 1
+          if cv2 < best_val {
+            best_val = cv2
+            best_pos = cand2
+            step = step * 1.8
+          } else {
+            step = step * 0.5
+          }
+        }
+        if step < min_step {
+          break
+        }
+      }
+      let delta_dir = start_val - best_val
+      // replace the least productive direction with the conjugate one
+      let mut min_i = 0
+      for i in 1..<deltas.length() {
+        if deltas[i] < deltas[min_i] {
+          min_i = i
+        }
+      }
+      if delta_dir > deltas[min_i] {
+        let u : Array[Double] = []
+        for d in 0..<dim {
+          u.push(dirv[d] / norm)
+        }
+        dirs[min_i] = u
+      }
+    }
+    // stagnation: the whole sweep made no progress - restart from a fresh
+    // random point (historical best is preserved) and reset the step
+    let round_gain = start_val - best_val
+    if round_gain <= 0.0 {
+      let fresh = random_solution(dim, bounds, current_rng)
+      let fv = evaluate(f, fresh)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = fresh
+      }
+      step = base_step
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

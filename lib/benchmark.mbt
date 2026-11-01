@@ -1070,6 +1070,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       goose_optimization_algorithm(make_goose_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "Powell",
+    run: (e, d, b, r, f) => {
+      powell_conjugate_direction_method(make_powell_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
