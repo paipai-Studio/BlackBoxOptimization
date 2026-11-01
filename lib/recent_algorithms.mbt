@@ -4934,3 +4934,119 @@ pub fn beluga_whale_optimization(
     evaluations,
   }
 }
+
+// ===== GBO: Gradient-Based Optimizer (2020) =====
+
+///|
+pub struct GBOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_gbo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> GBOConfig {
+  GBOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Gradient-Based Optimizer (2020): each individual is steered by a
+/// gradient-search rule (GSR) built from the directional difference between
+/// the incumbent best and worst members, with an occasional local escaping
+/// operator (LEO) that samples around the best.  The GSR step size shrinks with
+/// the budget fraction so larger budgets refine instead of re-randomising.
+/// Greedy acceptance and historical-best tracking are added.
+pub fn gradient_based_optimizer(
+  config : GBOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let eps = 1.0e-8
+  let range = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let delta = 2.0 * (1.0 - iter)
+    let order = sort_indices(values)
+    let xbest = pop[order[0]]
+    let xworst = pop[order[order.length() - 1]]
+    let leo_prob = 0.1 * (1.0 - iter)
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let mu1 = 2.0 * delta * RNG::next(current_rng) - delta
+      let mu2 = 2.0 * delta * RNG::next(current_rng) - delta
+      let use_leo = RNG::next(current_rng) < leo_prob
+      let new_pos : Array[Double] = []
+      for d in 0..<dim {
+        let denom = xworst[d] - xbest[d]
+        let denom_safe = if abs_val(denom) < eps {
+          if denom < 0.0 {
+            -eps
+          } else {
+            eps
+          }
+        } else {
+          denom
+        }
+        let pos = if use_leo {
+          // local escaping: sample around the incumbent best
+          best_pos[d] +
+          (2.0 * RNG::next(current_rng) - 1.0) * delta * range * 0.1
+        } else {
+          // gradient-search rule
+          let dx = 2.0 * RNG::next(current_rng) * abs_val(xbest[d] - xworst[d])
+          pop[i][d] -
+          mu1 * (2.0 * dx * pop[i][d]) / denom_safe +
+          mu2 * (xbest[d] - pop[i][d])
+        }
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      if val < values[i] {
+        pop[i] = new_pos
+        values[i] = val
+        if val < best_val {
+          best_val = val
+          best_pos = new_pos
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

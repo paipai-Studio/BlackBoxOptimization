@@ -828,6 +828,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       beluga_whale_optimization(make_bwo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "GBO",
+    run: (e, d, b, r, f) => {
+      gradient_based_optimizer(make_gbo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
