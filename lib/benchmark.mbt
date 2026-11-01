@@ -1088,6 +1088,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       spotted_hyena_optimizer(make_sho_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "ROA",
+    run: (e, d, b, r, f) => {
+      remora_optimization_algorithm(make_roa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

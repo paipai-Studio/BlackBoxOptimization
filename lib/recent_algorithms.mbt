@@ -9772,3 +9772,105 @@ pub fn spotted_hyena_optimizer(
     evaluations,
   }
 }
+
+// ===== ROA: Remora Optimization Algorithm (2021) =====
+
+///|
+pub struct ROAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_roa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ROAConfig {
+  ROAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Remora Optimization Algorithm (2021): remoras either attach to the host
+/// (best) and feed in its shrinking neighbourhood, swim with the host by
+/// blending attraction to it with a peer difference, or forage alone with a
+/// shrinking local walk.  Greedy acceptance and historical-best tracking are
+/// added.
+pub fn remora_optimization_algorithm(
+  config : ROAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    let order = sort_indices(values)
+    let x_best = pop[order[0]]
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let behavior = RNG::next(current_rng)
+      let peer = pop[(RNG::next(current_rng) * n.to_double()).to_int() % n]
+      let candidate : Array[Double] = []
+      for d in 0..<dim {
+        let pos = if behavior < 0.4 {
+          // attach: feed in the host's shrinking neighbourhood
+          x_best[d] + rb * range * 0.15 * (2.0 * RNG::next(current_rng) - 1.0)
+        } else if behavior < 0.7 {
+          // swim with the host: attraction to the best plus a peer difference
+          pop[i][d] +
+          RNG::next(current_rng) * (x_best[d] - pop[i][d]) +
+          RNG::next(current_rng) * rb * (peer[d] - pop[i][d])
+        } else {
+          // forage alone: shrinking local walk
+          pop[i][d] + rb * range * 0.2 * (2.0 * RNG::next(current_rng) - 1.0)
+        }
+        candidate.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let cv = evaluate(f, candidate)
+      evaluations = evaluations + 1
+      if cv < values[i] {
+        pop[i] = candidate
+        values[i] = cv
+        if cv < best_val {
+          best_val = cv
+          best_pos = candidate
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
