@@ -6111,3 +6111,119 @@ pub fn fire_hawk_optimizer(
     evaluations,
   }
 }
+
+// ===== RIME: Rime Optimization Algorithm (2023) =====
+
+///|
+pub struct RIMEConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_rime_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> RIMEConfig {
+  RIMEConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Rime Optimization Algorithm (2023): a soft-rime search grows crystals around
+/// the incumbent best with a decaying amplitude, while a hard-rime piercing
+/// step fuses agents directly with the best, gated by a normalised rime factor.
+/// Greedy acceptance and historical-best tracking are added.
+pub fn rime_optimization_algorithm(
+  config : RIMEConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let beta = 5.0
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let p_soft = 1.0 - iter
+    let order = sort_indices(values)
+    let x_best = pop[order[0]]
+    let dist : Array[Double] = []
+    let mut total = 0.0
+    for i in 0..<n {
+      let mut s = 0.0
+      for d in 0..<dim {
+        s = s + abs_val(pop[i][d] - x_best[d])
+      }
+      dist.push(s)
+      total = total + s
+    }
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let theta = PI * RNG::next(current_rng) / 10.0
+      let fr = if total < 1.0e-12 {
+        1.0 / n.to_double()
+      } else {
+        dist[i] / total
+      }
+      let sigma = range * 0.1 * (1.0 - iter) * (0.5 + fr)
+      let candidate : Array[Double] = []
+      for d in 0..<dim {
+        let pos = if r2 < p_soft {
+          // soft-rime: crystal growth around the best with a decaying amplitude
+          x_best[d] +
+          r1 * cos_approx(theta) * beta * range * 0.05 * (1.0 - iter)
+        } else {
+          // hard-rime: shrinking local search around the best
+          x_best[d] +
+          sigma * box_muller(RNG::next(current_rng), RNG::next(current_rng))
+        }
+        candidate.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let cv = evaluate(f, candidate)
+      evaluations = evaluations + 1
+      if cv < values[i] {
+        pop[i] = candidate
+        values[i] = cv
+        if cv < best_val {
+          best_val = cv
+          best_pos = candidate
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

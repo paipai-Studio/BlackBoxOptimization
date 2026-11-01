@@ -886,6 +886,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       fire_hawk_optimizer(make_fho_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "RIME",
+    run: (e, d, b, r, f) => {
+      rime_optimization_algorithm(make_rime_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
