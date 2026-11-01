@@ -960,6 +960,10 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       artificial_rabbits_optimization(make_aro_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "FOX",
+    run: (e, d, b, r, f) => fox_optimizer(make_fox_config(e, d, b, 25), f, r),
+  })
   entries
 }
 

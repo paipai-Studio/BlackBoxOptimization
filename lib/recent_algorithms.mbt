@@ -7460,3 +7460,108 @@ pub fn artificial_rabbits_optimization(
     evaluations,
   }
 }
+
+// ===== FOX: Fox Optimizer (2023) =====
+
+///|
+pub struct FOXConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_fox_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> FOXConfig {
+  FOXConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Fox Optimizer (2023): a fox estimates the distance to its prey and either
+/// explores with a decaying jump toward the best or pounces into a shrinking
+/// neighbourhood of it.  Greedy acceptance and historical-best tracking are
+/// added.
+pub fn fox_optimizer(
+  config : FOXConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    let a = 2.0 * rb
+    let order = sort_indices(values)
+    let x_best = pop[order[0]]
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let mut dist2 = 0.0
+      for d in 0..<dim {
+        let diff = pop[i][d] - x_best[d]
+        dist2 = dist2 + diff * diff
+      }
+      let dist = dist2.sqrt()
+      let candidate : Array[Double] = []
+      for d in 0..<dim {
+        let r = RNG::next(current_rng)
+        let pos = if r > 0.5 {
+          // exploration: decaying jump toward the best
+          pop[i][d] + a * RNG::next(current_rng) * (x_best[d] - pop[i][d])
+        } else if dist > 1.0 {
+          // pounce into the prey's vicinity
+          x_best[d] + (2.0 * RNG::next(current_rng) - 1.0) * range * 0.1 * rb
+        } else {
+          // close prey: fine local refinement
+          x_best[d] + (2.0 * RNG::next(current_rng) - 1.0) * range * 0.05 * rb
+        }
+        candidate.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let cv = evaluate(f, candidate)
+      evaluations = evaluations + 1
+      if cv < values[i] {
+        pop[i] = candidate
+        values[i] = cv
+        if cv < best_val {
+          best_val = cv
+          best_pos = candidate
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
