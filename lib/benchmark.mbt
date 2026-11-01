@@ -1030,6 +1030,16 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       mexican_axolotl_optimization(make_mao_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "UMDA",
+    run: (e, d, b, r, f) => {
+      univariate_marginal_distribution_algorithm(
+        make_umda_config(e, d, b, 25),
+        f,
+        r,
+      )
+    },
+  })
   entries
 }
 

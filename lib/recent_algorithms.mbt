@@ -8656,3 +8656,111 @@ pub fn mexican_axolotl_optimization(
     evaluations,
   }
 }
+
+// ===== UMDA: Univariate Marginal Distribution Algorithm (1996) =====
+
+///|
+pub struct UMDAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_umda_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> UMDAConfig {
+  UMDAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Univariate Marginal Distribution Algorithm (1996), continuous variant: a
+/// Gaussian model (per-dimension mean and standard deviation) is sampled each
+/// generation, then re-estimated from the best half of the sample.  A variance
+/// floor prevents collapse and historical-best tracking is added.
+pub fn univariate_marginal_distribution_algorithm(
+  config : UMDAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let floor = range * 1.0e-4
+
+  let mean : Array[Double] = []
+  let sigma : Array[Double] = []
+  for _d in 0..<dim {
+    mean.push((bounds.min + bounds.max) * 0.5)
+    sigma.push(range * 0.3)
+  }
+  let mut best_pos : Array[Double] = []
+  for _d in 0..<dim {
+    best_pos.push(bounds.min)
+  }
+  let mut best_val = 1.0e308
+  let mut evaluations = 0
+
+  while evaluations < max_evals {
+    let pop : Array[Array[Double]] = []
+    let values : Array[Double] = []
+    for _i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let sol : Array[Double] = []
+      for d in 0..<dim {
+        let sample = mean[d] +
+          sigma[d] * box_muller(RNG::next(current_rng), RNG::next(current_rng))
+        sol.push(max(bounds.min, min(bounds.max, sample)))
+      }
+      let v = evaluate(f, sol)
+      evaluations = evaluations + 1
+      pop.push(sol)
+      values.push(v)
+      if v < best_val {
+        best_val = v
+        best_pos = sol
+      }
+    }
+    let m = pop.length()
+    if m == 0 {
+      break
+    }
+    let order = sort_indices(values)
+    let n_keep = if m / 2 < 1 { 1 } else { m / 2 }
+    for d in 0..<dim {
+      let mut s = 0.0
+      for k in 0..<n_keep {
+        s = s + pop[order[k]][d]
+      }
+      let mu = s / n_keep.to_double()
+      let mut v2 = 0.0
+      for k in 0..<n_keep {
+        let diff = pop[order[k]][d] - mu
+        v2 = v2 + diff * diff
+      }
+      let sd = (v2 / n_keep.to_double()).sqrt()
+      mean[d] = mu
+      sigma[d] = if sd < floor { floor } else { sd }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
