@@ -79,6 +79,7 @@ pub fn firefly_algorithm(
   let mut evaluations = pop_size
 
   while evaluations < max_evals {
+    let evals_before = evaluations
     let iter = evaluations.to_double() / max_evals.to_double()
     let alpha_t = alpha * (1.0 - iter)
     for i in 0..<pop_size {
@@ -114,6 +115,27 @@ pub fn firefly_algorithm(
           if evaluations >= max_evals {
             break
           }
+        }
+      }
+    }
+
+    // Fixed-point guard: if every firefly has identical brightness the inner
+    // comparison never fires, so `evaluations` stops advancing and the outer
+    // loop spins forever (observed on Schwefel).  This never occurs in normal
+    // operation; re-seed the swarm to escape the deadlock.
+    if evaluations == evals_before {
+      for i in 0..<pop_size {
+        if evaluations >= max_evals {
+          break
+        }
+        let sol = random_solution(dim, bounds, current_rng)
+        fireflies[i] = sol
+        let v = evaluate(f, sol)
+        evaluations = evaluations + 1
+        brightness[i] = v
+        if v < best_value {
+          best_value = v
+          best_idx = i
         }
       }
     }
