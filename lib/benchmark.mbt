@@ -1012,6 +1012,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       capuchin_search_algorithm(make_capsa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SWO",
+    run: (e, d, b, r, f) => {
+      spider_wasp_optimizer(make_swo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
