@@ -856,6 +856,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       artificial_bee_colony(make_abc_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "EM",
+    run: (e, d, b, r, f) => {
+      electromagnetism_like_mechanism(make_em_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

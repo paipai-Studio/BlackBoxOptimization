@@ -5558,3 +5558,129 @@ pub fn artificial_bee_colony(
     evaluations,
   }
 }
+
+// ===== EM: Electromagnetism-like Mechanism (2003) =====
+
+///|
+pub struct EMConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_em_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> EMConfig {
+  EMConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Electromagnetism-like Mechanism (2003): each particle carries a charge that
+/// grows with its relative fitness, so it is attracted toward better particles
+/// and repelled from worse ones.  The step along the resultant force is
+/// randomised and shrinks with the budget fraction.  Greedy acceptance and
+/// historical-best tracking are added.
+pub fn electromagnetism_like_mechanism(
+  config : EMConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let order = sort_indices(values)
+    let best_v = values[order[0]]
+    let worst_v = values[order[order.length() - 1]]
+    let denom = worst_v - best_v
+    let charges : Array[Double] = []
+    for i in 0..<n {
+      let q = if denom < 1.0e-12 { 1.0 } else { (worst_v - values[i]) / denom }
+      charges.push(q + 1.0e-6)
+    }
+    let radius = range * 0.2 * (0.1 + 0.9 * (1.0 - iter))
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let force : Array[Double] = []
+      for _d in 0..<dim {
+        force.push(0.0)
+      }
+      for j in 0..<n {
+        if j != i {
+          let mut dist2 = 0.0
+          for d in 0..<dim {
+            let diff = pop[j][d] - pop[i][d]
+            dist2 = dist2 + diff * diff
+          }
+          let dist = dist2.sqrt()
+          if dist > 1.0e-12 {
+            let sign = if values[j] < values[i] { 1.0 } else { -1.0 }
+            let coeff = sign * charges[j] / dist
+            for d in 0..<dim {
+              force[d] = force[d] + coeff * (pop[j][d] - pop[i][d])
+            }
+          }
+        }
+      }
+      let mut fnorm2 = 0.0
+      for d in 0..<dim {
+        fnorm2 = fnorm2 + force[d] * force[d]
+      }
+      let fnorm = fnorm2.sqrt()
+      let candidate : Array[Double] = []
+      for d in 0..<dim {
+        let pos = if fnorm > 1.0e-12 {
+          pop[i][d] + RNG::next(current_rng) * radius * force[d] / fnorm
+        } else {
+          pop[i][d] + (2.0 * RNG::next(current_rng) - 1.0) * radius * 0.1
+        }
+        candidate.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let cv = evaluate(f, candidate)
+      evaluations = evaluations + 1
+      if cv < values[i] {
+        pop[i] = candidate
+        values[i] = cv
+        if cv < best_val {
+          best_val = cv
+          best_pos = candidate
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
