@@ -2870,3 +2870,31 @@ test "SO improves with more evaluations" {
 
   assert_true(result2.best_value <= result1.best_value)
 }
+
+///|
+test "MGO produces valid result" {
+  let config = @lib.make_mgo_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.mountain_gazelle_optimizer(
+    config, @lib.sphere_function, rng,
+  )
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "MGO improves with more evaluations" {
+  let config1 = @lib.make_mgo_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.mountain_gazelle_optimizer(
+    config1, @lib.sphere_function, rng1,
+  )
+
+  let config2 = @lib.make_mgo_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.mountain_gazelle_optimizer(
+    config2, @lib.sphere_function, rng2,
+  )
+
+  assert_true(result2.best_value <= result1.best_value)
+}
