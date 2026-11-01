@@ -3408,3 +3408,124 @@ pub fn golden_eagle_optimizer(
     evaluations,
   }
 }
+
+// ===== Runge Kutta Optimizer (RUN, 2021) =====
+
+///|
+pub struct RUNConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_run_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> RUNConfig {
+  RUNConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Runge Kutta Optimizer (2021): the update is the classic RK4 weighted average
+/// of four slope estimates, here formed from two guide individuals - a randomly
+/// chosen peer (exploration) and the incumbent best (exploitation) - with the
+/// guide switched at random each step.  Greedy acceptance and historical-best
+/// tracking are added on top of the standard design.
+pub fn runge_kutta_optimizer(
+  config : RUNConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+
+  let individuals : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    individuals.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = individuals[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  let range = bounds.max - bounds.min
+
+  while evaluations < max_evals {
+    let tau = evaluations.to_double() / max_evals.to_double()
+    // Exploration probability fades so larger budgets converge on the best
+    let p_explore = 1.0 - 0.9 * tau
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+
+      // Pick the two guide individuals
+      let raw_a = (RNG::next(current_rng) * n.to_double()).floor().to_int()
+      let idx_a = if raw_a >= n { n - 1 } else { raw_a }
+      let raw_b = (RNG::next(current_rng) * n.to_double()).floor().to_int()
+      let idx_b = if raw_b >= n { n - 1 } else { raw_b }
+      let r_switch = RNG::next(current_rng)
+      let guide_a : Array[Double] = if r_switch < p_explore {
+        individuals[idx_a]
+      } else {
+        best_pos
+      }
+      let guide_b : Array[Double] = individuals[idx_b]
+
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+
+      let new_pos : Array[Double] = []
+      for d in 0..<dim {
+        let k1 = r1 * (guide_a[d] - individuals[i][d])
+        let k2 = r2 * (guide_b[d] - individuals[i][d])
+        let k3 = r3 * (guide_a[d] - individuals[i][d])
+        let k4 = r4 * (guide_b[d] - individuals[i][d])
+        let dx = (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0
+        // Fading jitter keeps the swarm from freezing once it homogenizes
+        let jitter = (RNG::next(current_rng) - 0.5) *
+          2.0 *
+          range *
+          0.1 *
+          (1.0 - tau)
+        let pos = individuals[i][d] + dx + jitter
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+
+      // Greedy acceptance keeps the swarm from being randomized
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      if new_val < values[i] {
+        individuals[i] = new_pos
+        values[i] = new_val
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
