@@ -68,17 +68,24 @@ pub fn moth_search_algorithm(
           // Lévy flight towards best
           moths[i][d] + 2.0 * g1 * (best_pos[d] - moths[i][d])
         } else {
-          // Spiral search (convergent factor decreases)
+          // Spiral search (convergent factor decays quadratically so larger
+          // budgets also leave the exploration regime in time)
           moths[i][d] +
-          (2.0 * r3 - 1.0) * (bounds.max - bounds.min) * (1.0 - iter)
+          (2.0 * r3 - 1.0) *
+          (bounds.max - bounds.min) *
+          ((1.0 - iter) * (1.0 - iter))
         }
         new_pos.push(max(bounds.min, min(bounds.max, pos)))
       }
 
-      moths[i] = new_pos
+      // Greedy acceptance: discarding worse moves keeps the swarm from being
+      // randomized by the wide spiral steps (it stalled in high dimensions).
       let new_val = evaluate(f, new_pos)
       evaluations = evaluations + 1
-      values[i] = new_val
+      if new_val < values[i] {
+        moths[i] = new_pos
+        values[i] = new_val
+      }
 
       if new_val < best_val {
         best_val = new_val
