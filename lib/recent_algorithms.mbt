@@ -3117,6 +3117,9 @@ pub fn reptile_search_algorithm(
         let eta = best_pos[d] - reptiles[i][d]
         let rr = (best_pos[d] - reptiles[ridx][d]) * r1 * shrink
         let beta = 1.0 + (best_pos[d] - avg_pos[d]) * r2
+        // The later two phases multiply eta by a factor that vanishes as the
+        // run progresses, so the reptile converges onto the best instead of
+        // oscillating around it (which froze RSA on wide-range functions).
         let pos = if iter < 0.25 {
           // High walking (encircling, most exploratory)
           best_pos[d] - eta * beta - rr
@@ -3125,10 +3128,10 @@ pub fn reptile_search_algorithm(
           best_pos[d] + eta * beta - rr
         } else if iter < 0.75 {
           // Hunting
-          best_pos[d] * (1.0 - iter) + eta * beta
+          best_pos[d] + eta * beta * (1.0 - iter) * 4.0
         } else {
-          // Hunting cooperation
-          best_pos[d] + eta * beta * 0.5 - rr
+          // Hunting cooperation (converges onto the best)
+          best_pos[d] + eta * (1.0 - iter) * 4.0
         }
         new_pos.push(max(bounds.min, min(bounds.max, pos)))
       }

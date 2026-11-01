@@ -1,10 +1,10 @@
 # BlackBoxOptimization
 
-基于 MoonBit 实现的黑盒优化算法框架，支持 75 种经典优化算法，提供统一的接口和基准测试框架。
+基于 MoonBit 实现的黑盒优化算法框架，支持 80 种经典优化算法，提供统一的接口和基准测试框架。
 
 ## 算法分类
 
-本框架实现了 **75 种**黑盒优化算法，按设计灵感和机制分为以下类别：
+本框架实现了 **80 种**黑盒优化算法，按设计灵感和机制分为以下类别：
 
 ### 🔍 单点搜索算法
 最简单的优化策略，从单个初始解出发，通过迭代改进逐步逼近最优值。
@@ -110,6 +110,9 @@
 | 黑猩猩优化算法 | ChOA | 模拟黑猩猩狩猎的驱动-追逐-竞争行为 |
 | 蒲公英优化器 | DO | 模拟蒲公英种子风力传播的上升-下降搜索 |
 | 斑马优化算法 | ZOA | 模拟斑马群体探索-开发机制 |
+| 蝠鲼觅食优化 | MRFO | 链式/螺旋/翻滚三种觅食机制 (2020) |
+| 饥饿游戏搜索 | HGS | 饥饿权重驱动的自适应搜索 (2021) |
+| 爬行动物搜索算法 | RSA | 包围/狩猎/协调多阶段搜索 (2022) |
 
 > **通用群体智能参数**: 大部分算法默认 `population_size = 25`。下表列出各算法的特有参数。
 
@@ -139,7 +142,7 @@
 | WCA | `num_rivers` | 4 |
 | MFO | `spiral_constant` | 1.0 |
 | WOA | `spiral_constant` | 1.0 |
-| 其余算法 (GWO, SCA, ALO, HHO, SalpSA, AEO, SOS, GBPSO, MSA, PFA, CPA, BCO, FFOA, FWA, PIO, HBA, POA, TSA, GJO, GOA, SOA, GTO, SMA, AO, ChOA, DO, ZOA) | 仅需 `population_size` | 25 |
+| 其余算法 (GWO, SCA, ALO, HHO, SalpSA, AEO, SOS, GBPSO, MSA, PFA, CPA, BCO, FFOA, FWA, PIO, HBA, POA, TSA, GJO, GOA, SOA, GTO, SMA, AO, ChOA, DO, ZOA, MRFO, HGS, RSA) | 仅需 `population_size` | 25 |
 
 ### 📐 确定性直接搜索
 无需梯度信息，通过几何模式进行直接搜索，适合不可导函数。
@@ -160,10 +163,12 @@
 | 算法 | 简称 | 说明 |
 |------|------|------|
 | 协方差矩阵自适应进化策略 | CMA-ES | 协方差矩阵自适应调整，适合病态问题 |
+| (μ+λ) 进化策略 | ES | μ 父代产生 λ 高斯变异子代，择优存活 |
 
 | 算法 | 关键参数 | 推荐值 |
 |------|----------|--------|
 | CMA-ES | `sigma` (初始标准差), `lambda` (种群大小), `mu` (父代数量) | 0.5, 20, 10 |
+| ES | `mu` (父代数量), `lambda` (子代数量), `sigma_init` (初始步长) | 30, 100, 0.3 |
 
 ### 📊 估计分布算法
 基于概率分布估计的迭代优化方法。
@@ -172,11 +177,13 @@
 |------|------|------|
 | 交叉熵方法 | CEM | 基于高斯分布的迭代估计 |
 | 随机分形搜索 | SFS | 基于分形发现和学习两阶段搜索 |
+| 基于群体的增量学习 | PBIL | 连续分布估计与精英统计更新 |
 
 | 算法 | 关键参数 | 推荐值 |
 |------|----------|--------|
 | CEM | `sample_size`, `elite_fraction`, `smoothing` | 100, 0.1, 0.7 |
 | SFS | `population_size`, `discovery_iterations`, `learning_iterations` | 25, 3, 2 |
+| PBIL | `sample_size`, `elite_size`, `learning_rate` | 100, 10, 0.3 |
 
 ### ⚛️ 物理启发算法
 基于物理定律和自然现象的搜索机制。
