@@ -734,6 +734,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       manta_ray_foraging_optimization(make_mrfo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "HGS",
+    run: (e, d, b, r, f) => {
+      hunger_games_search(make_hgs_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

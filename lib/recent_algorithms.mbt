@@ -2905,3 +2905,131 @@ pub fn manta_ray_foraging_optimization(
     evaluations,
   }
 }
+
+// ===== Hunger Games Search (HGS) =====
+
+///|
+pub struct HGSConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_hgs_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> HGSConfig {
+  HGSConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Hunger Games Search (2021): movement is driven by a per-individual hunger
+/// weight (adapted from the ranking), a contraction factor R that shrinks
+/// with time, and a hunger effect E = sech(|f_i - gbest|).
+pub fn hunger_games_search(
+  config : HGSConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  let individuals : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  let hunger : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    individuals.push(sol)
+    values.push(evaluate(f, sol))
+    hunger.push(0.0)
+  }
+
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = individuals[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+    let shrink = 2.0 * (1.0 - iter)
+
+    // Hunger accumulates except for the current best, which resets to zero
+    let order = sort_indices(values)
+    for i in 0..<n {
+      if values[i] == values[order[0]] {
+        hunger[i] = 0.0
+      } else {
+        hunger[i] = hunger[i] + 1.0
+      }
+    }
+    let mut sum_hunger = 0.0
+    for i in 0..<n {
+      sum_hunger = sum_hunger + hunger[i]
+    }
+    let sum_denom = if sum_hunger > 0.0 { sum_hunger } else { 1.0 }
+
+    for i in 0..<n {
+      if evaluations >= config.max_evaluations {
+        break
+      }
+      let r_w = RNG::next(current_rng)
+      let w_core = if hunger[i] <= 0.0 {
+        1.0
+      } else {
+        (1.0 - hunger[i] / sum_denom) * r_w
+      }
+      let r_r = RNG::next(current_rng)
+      let contraction = 2.0 * shrink * r_r - shrink
+      let diff = abs_val(values[i] - best_val)
+      let e_val = 2.0 / (exp_approx(diff) + exp_approx(-diff))
+
+      let new_pos : Array[Double] = []
+      for d in 0..<dim {
+        let r1 = RNG::next(current_rng)
+        let pos = if r1 < 0.5 {
+          // Hunger-driven pull toward the best with a fading perturbation
+          let g1 = RNG::next(current_rng)
+          let g2 = RNG::next(current_rng)
+          let gauss = box_muller(g1, g2)
+          individuals[i][d] +
+          (w_core + contraction) * (best_pos[d] - individuals[i][d]) +
+          e_val * gauss * range * 0.05 * (1.0 - iter)
+        } else {
+          // Pull toward the best plus a hunger-weight pull from a peer
+          let j = (RNG::next(current_rng) * n.to_double()).to_int() % n
+          individuals[i][d] +
+          w_core * (best_pos[d] - individuals[i][d]) +
+          contraction * (individuals[j][d] - individuals[i][d])
+        }
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+
+      individuals[i] = new_pos
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      values[i] = new_val
+      if new_val < best_val {
+        best_val = new_val
+        best_pos = new_pos
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
