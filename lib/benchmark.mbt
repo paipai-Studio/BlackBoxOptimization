@@ -1006,6 +1006,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       forensic_based_investigation(make_fbi_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "CapSA",
+    run: (e, d, b, r, f) => {
+      capuchin_search_algorithm(make_capsa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
