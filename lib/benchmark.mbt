@@ -1064,6 +1064,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       bald_eagle_search(make_bes_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "GOOSE",
+    run: (e, d, b, r, f) => {
+      goose_optimization_algorithm(make_goose_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
