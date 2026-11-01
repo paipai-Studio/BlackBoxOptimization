@@ -289,6 +289,16 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
     },
   })
   entries.push(AlgoEntry::{
+    name: "PBIL",
+    run: (e, d, b, r, f) => {
+      population_based_incremental_learning(
+        make_pbil_config(e, d, b, 100, 10, 0.3),
+        f,
+        r,
+      )
+    },
+  })
+  entries.push(AlgoEntry::{
     name: "Nelder-Mead",
     run: (e, d, b, r, f) => {
       nelder_mead(make_nm_config(e, d, b, 1.0, 2.0, 0.5, 0.5), f, r)

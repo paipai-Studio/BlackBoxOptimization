@@ -1059,3 +1059,135 @@ pub fn evolution_strategy(
     evaluations,
   }
 }
+
+// ===== Population-Based Incremental Learning (PBIL) =====
+
+///|
+pub struct PBILConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  sample_size : Int32
+  elite_size : Int32
+  learning_rate : Double
+}
+
+///|
+pub fn make_pbil_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  sample_sz : Int32,
+  elite_sz : Int32,
+  lr : Double,
+) -> PBILConfig {
+  PBILConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    sample_size: sample_sz,
+    elite_size: elite_sz,
+    learning_rate: lr,
+  }
+}
+
+///|
+/// Continuous PBIL (estimation-of-distribution): keeps a per-dimension mean
+/// and standard deviation, samples a population from that distribution, then
+/// moves the parameters toward the elite sample's mean/std. The distribution
+/// narrows as the population converges, with a small floor to keep exploring.
+pub fn population_based_incremental_learning(
+  config : PBILConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.sample_size
+  let m = max_int(1, min_int(config.elite_size, n))
+  let lr = config.learning_rate
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  let mean : Array[Double] = []
+  let sigma : Array[Double] = []
+  for _d in 0..<dim {
+    mean.push((bounds.min + bounds.max) * 0.5)
+    sigma.push(range * 0.25)
+  }
+
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e308
+
+  while evaluations < config.max_evaluations {
+    // Sample a population from the current distribution
+    let pop : Array[Array[Double]] = []
+    let pop_values : Array[Double] = []
+    for _i in 0..<n {
+      if evaluations >= config.max_evaluations {
+        break
+      }
+      let sol : Array[Double] = []
+      for d in 0..<dim {
+        let g1 = RNG::next(current_rng)
+        let g2 = RNG::next(current_rng)
+        let gauss = box_muller(g1, g2)
+        let pos = mean[d] + sigma[d] * gauss
+        sol.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let v = evaluate(f, sol)
+      evaluations = evaluations + 1
+      pop.push(sol)
+      pop_values.push(v)
+      if v < best_val {
+        best_val = v
+        best_pos = sol
+      }
+    }
+
+    if pop.length() == 0 {
+      break
+    }
+
+    // Move mean/sigma toward the elite sample statistics
+    let order = sort_indices(pop_values)
+    let keep = min_int(m, pop.length())
+    let elite_mean : Array[Double] = []
+    let elite_var : Array[Double] = []
+    for _d in 0..<dim {
+      elite_mean.push(0.0)
+      elite_var.push(0.0)
+    }
+    for i in 0..<keep {
+      let idx = order[i]
+      for d in 0..<dim {
+        elite_mean[d] = elite_mean[d] + pop[idx][d]
+      }
+    }
+    for d in 0..<dim {
+      elite_mean[d] = elite_mean[d] / keep.to_double()
+    }
+    for i in 0..<keep {
+      let idx = order[i]
+      for d in 0..<dim {
+        let diff = pop[idx][d] - elite_mean[d]
+        elite_var[d] = elite_var[d] + diff * diff
+      }
+    }
+    for d in 0..<dim {
+      let sd = (elite_var[d] / keep.to_double()).sqrt()
+      mean[d] = (1.0 - lr) * mean[d] + lr * elite_mean[d]
+      sigma[d] = (1.0 - lr) * sigma[d] + lr * sd
+      if sigma[d] < range * 0.0005 {
+        sigma[d] = range * 0.0005
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

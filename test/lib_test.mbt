@@ -2055,3 +2055,52 @@ test "ES improves with more evaluations" {
 
   assert_true(result2.best_value <= result1.best_value)
 }
+
+///|
+test "PBIL produces valid result" {
+  let config = @lib.make_pbil_config(
+    500,
+    3,
+    @lib.make_bounds(-5.0, 5.0),
+    100,
+    10,
+    0.3,
+  )
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.population_based_incremental_learning(
+    config, @lib.sphere_function, rng,
+  )
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "PBIL improves with more evaluations" {
+  let config1 = @lib.make_pbil_config(
+    100,
+    3,
+    @lib.make_bounds(-5.0, 5.0),
+    100,
+    10,
+    0.3,
+  )
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.population_based_incremental_learning(
+    config1, @lib.sphere_function, rng1,
+  )
+
+  let config2 = @lib.make_pbil_config(
+    5000,
+    3,
+    @lib.make_bounds(-5.0, 5.0),
+    100,
+    10,
+    0.3,
+  )
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.population_based_incremental_learning(
+    config2, @lib.sphere_function, rng2,
+  )
+
+  assert_true(result2.best_value <= result1.best_value)
+}
