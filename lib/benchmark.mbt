@@ -1000,6 +1000,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       yellow_saddle_goatfish_algorithm(make_ysga_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "FBI",
+    run: (e, d, b, r, f) => {
+      forensic_based_investigation(make_fbi_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
