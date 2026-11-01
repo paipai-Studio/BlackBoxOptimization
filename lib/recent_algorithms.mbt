@@ -5169,3 +5169,105 @@ pub fn growth_optimizer(
     evaluations,
   }
 }
+
+// ===== WaOA: Walrus Optimizer (2023) =====
+
+///|
+pub struct WaOAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_waoa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> WaOAConfig {
+  WaOAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Walrus Optimizer (2023): each walrus picks one of three behaviours per
+/// generation - migrating toward a peer, feeding around the incumbent best, or
+/// escaping a predator with a shrinking step.  The exploration amplitudes decay
+/// with the budget fraction so larger budgets settle into local refinement.
+/// Greedy acceptance and historical-best tracking are added.
+pub fn walrus_optimizer(
+  config : WaOAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let safety = 1.0 - iter
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let r = (RNG::next(current_rng) * n.to_double()).to_int() % n
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let new_pos : Array[Double] = []
+      for d in 0..<dim {
+        let r3 = RNG::next(current_rng)
+        let i_factor = 1.0 + r3
+        let pos = if r1 < 0.33 {
+          // migration: leap toward a peer
+          pop[i][d] + r2 * safety * (pop[r][d] - i_factor * pop[i][d])
+        } else if r1 < 0.66 {
+          // feeding: approach the incumbent best
+          pop[i][d] +
+          r2 * (best_pos[d] - pop[i][d]) +
+          r3 * safety * (pop[r][d] - pop[i][d])
+        } else {
+          // escaping a predator: withdraw with a shrinking step
+          pop[i][d] - r2 * safety * (pop[r][d] - pop[i][d])
+        }
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      if val < values[i] {
+        pop[i] = new_pos
+        values[i] = val
+        if val < best_val {
+          best_val = val
+          best_pos = new_pos
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

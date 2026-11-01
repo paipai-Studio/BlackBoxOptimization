@@ -838,6 +838,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
     name: "GO",
     run: (e, d, b, r, f) => growth_optimizer(make_go_config(e, d, b, 25), f, r),
   })
+  entries.push(AlgoEntry::{
+    name: "WaOA",
+    run: (e, d, b, r, f) => {
+      walrus_optimizer(make_waoa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
