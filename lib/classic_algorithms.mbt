@@ -943,3 +943,119 @@ pub fn nelder_mead(
     evaluations,
   }
 }
+
+// ===== Evolution Strategy (mu+lambda)-ES =====
+
+///|
+pub struct ESConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  mu : Int32
+  lambda : Int32
+  sigma_init : Double
+}
+
+///|
+pub fn make_es_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  mu_val : Int32,
+  lambda_val : Int32,
+  sigma_val : Double,
+) -> ESConfig {
+  ESConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    mu: mu_val,
+    lambda: lambda_val,
+    sigma_init: sigma_val,
+  }
+}
+
+///|
+/// (mu + lambda) Evolution Strategy: mu parents generate lambda offspring by
+/// Gaussian mutation, then the best mu individuals survive. The mutation
+/// strength sigma shrinks over the run so the search refines late.
+pub fn evolution_strategy(
+  config : ESConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let mu = config.mu
+  let lambda = config.lambda
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  let parents : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<mu {
+    let sol = random_solution(dim, bounds, current_rng)
+    parents.push(sol)
+    values.push(evaluate(f, sol))
+  }
+
+  let mut evaluations = mu
+  let sorted0 = sort_indices(values)
+  let mut best_pos : Array[Double] = parents[sorted0[0]]
+  let mut best_val = values[sorted0[0]]
+
+  while evaluations < config.max_evaluations {
+    let iter = evaluations.to_double() / config.max_evaluations.to_double()
+    let step = config.sigma_init * range * (1.0 - 0.95 * iter)
+
+    // sigma-scaled Gaussian mutation of randomly chosen parents
+    let offspring : Array[Array[Double]] = []
+    let child_values : Array[Double] = []
+    for _l in 0..<lambda {
+      if evaluations >= config.max_evaluations {
+        break
+      }
+      let pi = (RNG::next(current_rng) * mu.to_double()).to_int() % mu
+      let child : Array[Double] = []
+      for d in 0..<dim {
+        let g1 = RNG::next(current_rng)
+        let g2 = RNG::next(current_rng)
+        let gauss = box_muller(g1, g2)
+        let pos = parents[pi][d] + gauss * step
+        child.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let cv = evaluate(f, child)
+      evaluations = evaluations + 1
+      offspring.push(child)
+      child_values.push(cv)
+      if cv < best_val {
+        best_val = cv
+        best_pos = child
+      }
+    }
+
+    // (mu + lambda) selection: keep the best mu from parents plus offspring
+    let pool : Array[Array[Double]] = []
+    let pool_values : Array[Double] = []
+    for i in 0..<parents.length() {
+      pool.push(parents[i])
+      pool_values.push(values[i])
+    }
+    for i in 0..<offspring.length() {
+      pool.push(offspring[i])
+      pool_values.push(child_values[i])
+    }
+    let order = sort_indices(pool_values)
+    let keep = min_int(mu, pool.length())
+    for i in 0..<keep {
+      parents[i] = pool[order[i]]
+      values[i] = pool_values[order[i]]
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

@@ -283,6 +283,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
     },
   })
   entries.push(AlgoEntry::{
+    name: "ES",
+    run: (e, d, b, r, f) => {
+      evolution_strategy(make_es_config(e, d, b, 30, 100, 0.3), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
     name: "Nelder-Mead",
     run: (e, d, b, r, f) => {
       nelder_mead(make_nm_config(e, d, b, 1.0, 2.0, 0.5, 0.5), f, r)
