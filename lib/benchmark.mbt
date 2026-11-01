@@ -994,6 +994,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       golden_sine_algorithm(make_golden_sa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "YSGA",
+    run: (e, d, b, r, f) => {
+      yellow_saddle_goatfish_algorithm(make_ysga_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
