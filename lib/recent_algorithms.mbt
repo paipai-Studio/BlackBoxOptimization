@@ -1586,8 +1586,7 @@ pub fn tuna_swarm_optimization(
 
   while evaluations < config.max_evaluations {
     let iter = evaluations.to_double() / config.max_evaluations.to_double()
-    let a = 2.0 - 2.0 * iter
-    let aa = a * (2.0 * 0.5 - 1.0)
+    let aa = 2.0 - 2.0 * iter
 
     for i in 0..<n {
       if evaluations >= config.max_evaluations {
@@ -2398,13 +2397,15 @@ pub fn slime_mould_algorithm(
   let sorted_idx = sort_indices(values)
   let mut best_pos : Array[Double] = slime[sorted_idx[0]]
   let mut best_val = values[sorted_idx[0]]
-  let mut _worst_val = values[sorted_idx[n - 1]]
+
+  // Standard SMA: rare uniform restarts (z ~ 0.03) plus best-guided
+  // exploitation with a decaying noise term. The previous version had two
+  // identical "move toward best" branches and a z reset to [0.5, 1] every
+  // generation, so the population homogenized and froze on local optima.
+  let z = 0.03
 
   while evaluations < config.max_evaluations {
     let iter = evaluations.to_double() / config.max_evaluations.to_double()
-    let z1 = RNG::next(current_rng)
-    let z2 = RNG::next(current_rng)
-    let mut z = z1 + z2 * (0.02 + 0.25 * iter)
 
     for i in 0..<n {
       if evaluations >= config.max_evaluations {
@@ -2417,11 +2418,17 @@ pub fn slime_mould_algorithm(
       let new_pos : Array[Double] = []
       for d in 0..<dim {
         let pos = if r1 < z {
-          let a = slime[i][d] + r2 * (best_pos[d] - slime[i][d])
-          a
+          // Rare random restart within bounds
+          let rr = RNG::next(current_rng)
+          bounds.min + rr * (bounds.max - bounds.min)
         } else {
-          let b = slime[i][d] - r3 * (slime[i][d] - best_pos[d])
-          b
+          // Exploitation: converge toward best, noise fades out by mid-run
+          slime[i][d] +
+          r3 * (best_pos[d] - slime[i][d]) +
+          (r2 - 0.5) *
+          (bounds.max - bounds.min) *
+          0.05 *
+          max(0.0, 1.0 - 2.0 * iter)
         }
         new_pos.push(max(bounds.min, min(bounds.max, pos)))
       }
@@ -2436,9 +2443,6 @@ pub fn slime_mould_algorithm(
         }
       }
     }
-    // update z
-    let zr = RNG::next(current_rng)
-    z = 1.0 - zr * 0.5
   }
   OptimizationResult::{
     best_solution: best_pos,

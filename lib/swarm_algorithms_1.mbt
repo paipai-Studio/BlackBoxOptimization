@@ -1962,7 +1962,10 @@ pub fn moth_flame_optimization(
         let t = r_t * 2.0 - 1.0
         let flame_pos = flames[flame_idx_sorted][d]
         let dist = abs_val(flame_pos - moths[moth_idx][d])
-        let pos = dist * exp_approx(b * t) * cos_approx(2.0 * PI * t) +
+        let pos = dist *
+          exp_approx(b * t) *
+          cos_approx(2.0 * PI * t) *
+          (1.0 - 0.5 * iter) +
           flame_pos
         new_pos.push(max(bounds.min, min(bounds.max, pos)))
       }
