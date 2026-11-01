@@ -5381,3 +5381,180 @@ pub fn clonal_selection_algorithm(
     evaluations,
   }
 }
+
+// ===== ABC: Artificial Bee Colony (2007) =====
+
+///|
+pub struct ABCConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_abc_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ABCConfig {
+  ABCConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Artificial Bee Colony (2007), continuous variant: employed and onlooker bees
+/// probe neighbours v_j = x_j + phi*(x_j - x_k,j) and greedily accept them,
+/// while a scout re-seeds any solution whose improvement trial count exceeds
+/// the limit.  Onlooker selection is rank-weighted.  Historical-best tracking
+/// is added.
+pub fn artificial_bee_colony(
+  config : ABCConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let n_employed = if n / 2 < 1 { 1 } else { n / 2 }
+  let limit = n_employed
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  let trials : Array[Int32] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+    trials.push(0)
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    // employed bees: each probes a neighbour of its own solution
+    for i in 0..<n_employed {
+      if evaluations >= max_evals {
+        break
+      }
+      let mut k = (RNG::next(current_rng) * n.to_double()).to_int() % n
+      if k == i {
+        k = (k + 1) % n
+      }
+      let j = (RNG::next(current_rng) * dim.to_double()).to_int() % dim
+      let phi = 2.0 * RNG::next(current_rng) - 1.0
+      let pos = pop[i][j] + phi * (pop[i][j] - pop[k][j])
+      let candidate : Array[Double] = []
+      for d in 0..<dim {
+        candidate.push(
+          if d == j {
+            max(bounds.min, min(bounds.max, pos))
+          } else {
+            pop[i][d]
+          },
+        )
+      }
+      let cv = evaluate(f, candidate)
+      evaluations = evaluations + 1
+      if cv < values[i] {
+        pop[i] = candidate
+        values[i] = cv
+        trials[i] = 0
+        if cv < best_val {
+          best_val = cv
+          best_pos = candidate
+        }
+      } else {
+        trials[i] = trials[i] + 1
+      }
+    }
+    // onlooker bees: rank-weighted roulette selection, then neighbour probe
+    let order = sort_indices(values)
+    let min_v = values[order[0]]
+    let weights : Array[Double] = []
+    let mut total = 0.0
+    for i in 0..<n {
+      let w = 1.0 / (values[i] - min_v + 1.0)
+      weights.push(w)
+      total = total + w
+    }
+    let n_onlookers = n - n_employed
+    for _o in 0..<n_onlookers {
+      if evaluations >= max_evals {
+        break
+      }
+      let mut pick = RNG::next(current_rng) * total
+      let mut sel = 0
+      for i in 0..<n {
+        pick = pick - weights[i]
+        if pick <= 0.0 {
+          sel = i
+          break
+        }
+      }
+      let mut k = (RNG::next(current_rng) * n.to_double()).to_int() % n
+      if k == sel {
+        k = (k + 1) % n
+      }
+      let j = (RNG::next(current_rng) * dim.to_double()).to_int() % dim
+      let phi = 2.0 * RNG::next(current_rng) - 1.0
+      let pos = pop[sel][j] + phi * (pop[sel][j] - pop[k][j])
+      let candidate : Array[Double] = []
+      for d in 0..<dim {
+        candidate.push(
+          if d == j {
+            max(bounds.min, min(bounds.max, pos))
+          } else {
+            pop[sel][d]
+          },
+        )
+      }
+      let cv = evaluate(f, candidate)
+      evaluations = evaluations + 1
+      if cv < values[sel] {
+        pop[sel] = candidate
+        values[sel] = cv
+        trials[sel] = 0
+        if cv < best_val {
+          best_val = cv
+          best_pos = candidate
+        }
+      } else {
+        trials[sel] = trials[sel] + 1
+      }
+    }
+    // scout bees: re-seed exhausted solutions
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      if trials[i] > limit {
+        let fresh = random_solution(dim, bounds, current_rng)
+        let fv = evaluate(f, fresh)
+        evaluations = evaluations + 1
+        pop[i] = fresh
+        values[i] = fv
+        trials[i] = 0
+        if fv < best_val {
+          best_val = fv
+          best_pos = fresh
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

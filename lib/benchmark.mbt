@@ -850,6 +850,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       clonal_selection_algorithm(make_clonalg_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "ABC",
+    run: (e, d, b, r, f) => {
+      artificial_bee_colony(make_abc_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
