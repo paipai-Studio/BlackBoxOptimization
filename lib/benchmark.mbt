@@ -1046,6 +1046,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       compact_genetic_algorithm(make_cga_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "CA",
+    run: (e, d, b, r, f) => {
+      cultural_algorithm(make_ca_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

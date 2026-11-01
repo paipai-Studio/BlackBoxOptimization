@@ -8878,3 +8878,104 @@ pub fn compact_genetic_algorithm(
     evaluations,
   }
 }
+
+// ===== CA: Cultural Algorithm (1994) =====
+
+///|
+pub struct CAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ca_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CAConfig {
+  CAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Cultural Algorithm (1994), continuous variant: a population space evolves
+/// under the guidance of a belief space whose situational knowledge is the best
+/// individual and whose normative knowledge is a shrinking interval around it.
+/// Individuals either sample that interval or are attracted to the best.
+/// Greedy acceptance and historical-best tracking are added.
+pub fn cultural_algorithm(
+  config : CAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    let order = sort_indices(values)
+    let x_best = pop[order[0]]
+    let half = range * 0.3 * rb
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let behavior = RNG::next(current_rng)
+      let candidate : Array[Double] = []
+      for d in 0..<dim {
+        let pos = if behavior < 0.5 {
+          // normative knowledge: sample the shrinking belief interval
+          let lo = max(bounds.min, x_best[d] - half)
+          let hi = min(bounds.max, x_best[d] + half)
+          lo + RNG::next(current_rng) * (hi - lo)
+        } else {
+          // situational knowledge: move toward the best individual
+          pop[i][d] +
+          RNG::next(current_rng) * (x_best[d] - pop[i][d]) +
+          rb * range * 0.05 * (2.0 * RNG::next(current_rng) - 1.0)
+        }
+        candidate.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let cv = evaluate(f, candidate)
+      evaluations = evaluations + 1
+      if cv < values[i] {
+        pop[i] = candidate
+        values[i] = cv
+        if cv < best_val {
+          best_val = cv
+          best_pos = candidate
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
