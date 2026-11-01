@@ -140,6 +140,9 @@ pub fn pathfinder_algorithm(
   }
 
   let mut evaluations = n
+  let init_sorted = sort_indices(values)
+  let mut global_best_pos : Array[Double] = animals[init_sorted[0]]
+  let mut global_best_val : Double = values[init_sorted[0]]
 
   while evaluations < config.max_evaluations {
     let iter = evaluations.to_double() / config.max_evaluations.to_double()
@@ -173,6 +176,11 @@ pub fn pathfinder_algorithm(
       best_pos = pf_new
     }
 
+    if pf_val < global_best_val {
+      global_best_val = pf_val
+      global_best_pos = pf_new
+    }
+
     // Update followers (move towards pathfinder with noise)
     for i in 1..<n {
       if evaluations >= config.max_evaluations {
@@ -199,13 +207,17 @@ pub fn pathfinder_algorithm(
         best_val = new_val
         best_pos = new_pos
       }
+
+      if new_val < global_best_val {
+        global_best_val = new_val
+        global_best_pos = new_pos
+      }
     }
   }
 
-  let final_idx = sort_indices(values)
   OptimizationResult::{
-    best_solution: animals[final_idx[0]],
-    best_value: values[final_idx[0]],
+    best_solution: global_best_pos,
+    best_value: global_best_val,
     evaluations,
   }
 }
@@ -259,6 +271,8 @@ pub fn colony_predation_algorithm(
   let mut sorted_idx = sort_indices(values)
   let mut best_pos : Array[Double] = tigers[sorted_idx[0]]
   let mut best_val = values[sorted_idx[0]]
+  let mut global_best_pos : Array[Double] = best_pos
+  let mut global_best_val : Double = best_val
 
   while evaluations < config.max_evaluations {
     let iter = evaluations.to_double() / config.max_evaluations.to_double()
@@ -300,12 +314,16 @@ pub fn colony_predation_algorithm(
         best_val = new_val
         best_pos = new_pos
       }
+      if new_val < global_best_val {
+        global_best_val = new_val
+        global_best_pos = new_pos
+      }
     }
   }
 
   OptimizationResult::{
-    best_solution: best_pos,
-    best_value: best_val,
+    best_solution: global_best_pos,
+    best_value: global_best_val,
     evaluations,
   }
 }
@@ -359,6 +377,8 @@ pub fn bacteria_colony_optimization(
   let mut sorted_idx = sort_indices(values)
   let mut best_pos : Array[Double] = bacteria[sorted_idx[0]]
   let mut best_val = values[sorted_idx[0]]
+  let mut global_best_pos : Array[Double] = best_pos
+  let mut global_best_val : Double = best_val
 
   while evaluations < config.max_evaluations {
     let iter = evaluations.to_double() / config.max_evaluations.to_double()
@@ -393,12 +413,16 @@ pub fn bacteria_colony_optimization(
         best_val = new_val
         best_pos = new_pos
       }
+      if new_val < global_best_val {
+        global_best_val = new_val
+        global_best_pos = new_pos
+      }
     }
   }
 
   OptimizationResult::{
-    best_solution: best_pos,
-    best_value: best_val,
+    best_solution: global_best_pos,
+    best_value: global_best_val,
     evaluations,
   }
 }
@@ -460,6 +484,8 @@ pub fn flying_fox_optimization(
   let mut sorted_idx = sort_indices(values)
   let mut best_pos : Array[Double] = foxes[sorted_idx[0]]
   let mut best_val = values[sorted_idx[0]]
+  let mut global_best_pos : Array[Double] = best_pos
+  let mut global_best_val : Double = best_val
 
   while evaluations < config.max_evaluations {
     let iter = evaluations.to_double() / config.max_evaluations.to_double()
@@ -495,12 +521,16 @@ pub fn flying_fox_optimization(
         best_val = new_val
         best_pos = new_pos
       }
+      if new_val < global_best_val {
+        global_best_val = new_val
+        global_best_pos = new_pos
+      }
     }
   }
 
   OptimizationResult::{
-    best_solution: best_pos,
-    best_value: best_val,
+    best_solution: global_best_pos,
+    best_value: global_best_val,
     evaluations,
   }
 }
@@ -2617,7 +2647,7 @@ pub fn dandelion_optimizer(
 
   while evaluations < config.max_evaluations {
     let iter = evaluations.to_double() / config.max_evaluations.to_double()
-    let r1 = RNG::next(current_rng)
+    let _r1 = RNG::next(current_rng)
     let r2 = RNG::next(current_rng)
     let r3 = RNG::next(current_rng)
     let _r4 = RNG::next(current_rng)
@@ -2628,13 +2658,21 @@ pub fn dandelion_optimizer(
       }
       let new_pos : Array[Double] = []
       for d in 0..<dim {
-        let pos = if r1 < 0.5 {
-          // ascent stage
-          let step = (bounds.max - bounds.min) * (0.1 - 0.2 * iter)
-          dandelions[i][d] + r2 * step * (best_pos[d] - dandelions[i][d]).abs()
+        // Two-phase: seeds drift randomly while ascending (first half), then
+        // descend onto the incumbent best (second half, with a small fading
+        // perturbation for diversity). The previous form used .abs() so the
+        // drift was always positive and its step went negative after iter>0.5.
+        let pos = if iter < 0.5 {
+          dandelions[i][d] +
+          (r2 - 0.5) *
+          2.0 *
+          (bounds.max - bounds.min) *
+          0.15 *
+          (1.0 - 2.0 * iter)
         } else {
-          // descent stage
-          dandelions[i][d] + r3 * (best_pos[d] - dandelions[i][d])
+          dandelions[i][d] +
+          r3 * (best_pos[d] - dandelions[i][d]) +
+          (r2 - 0.5) * 2.0 * (bounds.max - bounds.min) * 0.02 * (1.0 - iter)
         }
         new_pos.push(max(bounds.min, min(bounds.max, pos)))
       }

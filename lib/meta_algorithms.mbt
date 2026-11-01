@@ -1028,17 +1028,13 @@ pub fn wind_driven_optimization(
   }
 
   let mut evaluations = n
-  let mut sorted_idx = sort_indices(values)
+  let sorted_idx = sort_indices(values)
   let mut best_pos : Array[Double] = particles[sorted_idx[0]]
   let mut best_val = values[sorted_idx[0]]
 
   while evaluations < config.max_evaluations {
     let iter = evaluations.to_double() / config.max_evaluations.to_double()
     let eta = 1.0 - iter
-
-    sorted_idx = sort_indices(values)
-    best_pos = particles[sorted_idx[0]]
-    best_val = values[sorted_idx[0]]
 
     for i in 0..<n {
       if evaluations >= config.max_evaluations {
@@ -1132,6 +1128,8 @@ pub fn jaya_optimization(
   let mut sorted_idx = sort_indices(values)
   let mut best_pos : Array[Double] = population[sorted_idx[0]]
   let mut best_val = values[sorted_idx[0]]
+  let mut global_best_pos : Array[Double] = best_pos
+  let mut global_best_val : Double = best_val
   let mut worst_pos : Array[Double] = population[sorted_idx[n - 1]]
   let mut _worst_val = values[sorted_idx[n - 1]]
 
@@ -1170,13 +1168,17 @@ pub fn jaya_optimization(
           best_val = new_val
           best_pos = new_pos
         }
+        if new_val < global_best_val {
+          global_best_val = new_val
+          global_best_pos = new_pos
+        }
       }
     }
   }
 
   OptimizationResult::{
-    best_solution: best_pos,
-    best_value: best_val,
+    best_solution: global_best_pos,
+    best_value: global_best_val,
     evaluations,
   }
 }
