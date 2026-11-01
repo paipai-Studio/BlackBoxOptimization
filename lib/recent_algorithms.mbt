@@ -7662,3 +7662,101 @@ pub fn dwarf_mongoose_optimization(
     evaluations,
   }
 }
+
+// ===== RSO: Rat Swarm Optimizer (2021) =====
+
+///|
+pub struct RSOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_rso_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> RSOConfig {
+  RSOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Rat Swarm Optimizer (2021): rats either chase a prey by pouncing toward the
+/// best or fight over it with a shrinking Gaussian local search around the
+/// best.  Greedy acceptance and historical-best tracking are added.
+pub fn rat_swarm_optimizer(
+  config : RSOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    let order = sort_indices(values)
+    let x_best = pop[order[0]]
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let chasing = RNG::next(current_rng) < 0.5
+      let candidate : Array[Double] = []
+      for d in 0..<dim {
+        let pos = if chasing {
+          // chasing: convex pounce toward the best
+          pop[i][d] + RNG::next(current_rng) * (x_best[d] - pop[i][d])
+        } else {
+          // fighting: shrinking Gaussian local search around the best
+          x_best[d] +
+          rb *
+          range *
+          0.1 *
+          box_muller(RNG::next(current_rng), RNG::next(current_rng))
+        }
+        candidate.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let cv = evaluate(f, candidate)
+      evaluations = evaluations + 1
+      if cv < values[i] {
+        pop[i] = candidate
+        values[i] = cv
+        if cv < best_val {
+          best_val = cv
+          best_pos = candidate
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

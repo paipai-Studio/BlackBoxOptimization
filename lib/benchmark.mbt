@@ -970,6 +970,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       dwarf_mongoose_optimization(make_dmo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "RSO",
+    run: (e, d, b, r, f) => {
+      rat_swarm_optimizer(make_rso_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
