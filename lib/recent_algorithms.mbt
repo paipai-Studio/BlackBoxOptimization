@@ -7353,3 +7353,110 @@ pub fn black_winged_kite_algorithm(
     evaluations,
   }
 }
+
+// ===== ARO: Artificial Rabbits Optimization (2022) =====
+
+///|
+pub struct AROConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_aro_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> AROConfig {
+  AROConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Artificial Rabbits Optimization (2022): an energy factor that decays with the
+/// budget fraction selects detour foraging (toward the best and a random rabbit
+/// with a Gaussian disturbance), while low energy triggers random hiding (a
+/// shrinking Gaussian local search around the best).  Greedy acceptance and
+/// historical-best tracking are added.
+pub fn artificial_rabbits_optimization(
+  config : AROConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    let energy = 4.0 * rb
+    let order = sort_indices(values)
+    let x_best = pop[order[0]]
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let j = (RNG::next(current_rng) * n.to_double()).to_int() % n
+      let candidate : Array[Double] = []
+      for d in 0..<dim {
+        let pos = if energy > 1.0 {
+          // detour foraging: explore toward the best and a random rabbit
+          pop[i][d] +
+          RNG::next(current_rng) * (x_best[d] - pop[i][d]) +
+          RNG::next(current_rng) * rb * (pop[j][d] - pop[i][d]) +
+          rb *
+          range *
+          0.05 *
+          box_muller(RNG::next(current_rng), RNG::next(current_rng))
+        } else {
+          // random hiding: shrinking Gaussian local search around the best
+          x_best[d] +
+          rb *
+          range *
+          0.1 *
+          box_muller(RNG::next(current_rng), RNG::next(current_rng))
+        }
+        candidate.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let cv = evaluate(f, candidate)
+      evaluations = evaluations + 1
+      if cv < values[i] {
+        pop[i] = candidate
+        values[i] = cv
+        if cv < best_val {
+          best_val = cv
+          best_pos = candidate
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

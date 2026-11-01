@@ -954,6 +954,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       black_winged_kite_algorithm(make_bka_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "ARO",
+    run: (e, d, b, r, f) => {
+      artificial_rabbits_optimization(make_aro_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

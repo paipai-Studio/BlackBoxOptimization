@@ -150,6 +150,7 @@
 | 猎人-猎物优化 | HPO | 猎人/猎物两角色 + 平均位置驱动 (2022) |
 | 人工蜂鸟算法 | AHA | 引导/领地/迁徙三种觅食 + 访问表 (2021) |
 | 黑翅鸢算法 | BKA | 攻击 + 迁徙两行为 (2023) |
+| 人工兔优化 | ARO | 绕道觅食/随机隐藏 + 能量收缩 (2022) |
 
 > **通用群体智能参数**: 大部分算法默认 `population_size = 25`。下表列出各算法的特有参数。
 
@@ -179,7 +180,7 @@
 | WCA | `num_rivers` | 4 |
 | MFO | `spiral_constant` | 1.0 |
 | WOA | `spiral_constant` | 1.0 |
-| 其余算法 (GWO, SCA, ALO, HHO, SalpSA, AEO, SOS, GBPSO, MSA, PFA, CPA, BCO, FFOA, FWA, PIO, HBA, POA, TSA, GJO, GOA, SOA, GTO, SMA, AO, ChOA, DO, ZOA, MRFO, HGS, RSA, MPA, GEO, AVOA, WSO, COA, OOA, TDO, PDO, NGO, BWO, GBO, GO, WaOA, CLONALG, ABC, EM, DBO, TSO, KOA, FHO, RIME, INFO, SO, MGO, CHIO, PO, SCSO, SABO, HPO, AHA, BKA) | 仅需 `population_size` | 25 |
+| 其余算法 (GWO, SCA, ALO, HHO, SalpSA, AEO, SOS, GBPSO, MSA, PFA, CPA, BCO, FFOA, FWA, PIO, HBA, POA, TSA, GJO, GOA, SOA, GTO, SMA, AO, ChOA, DO, ZOA, MRFO, HGS, RSA, MPA, GEO, AVOA, WSO, COA, OOA, TDO, PDO, NGO, BWO, GBO, GO, WaOA, CLONALG, ABC, EM, DBO, TSO, KOA, FHO, RIME, INFO, SO, MGO, CHIO, PO, SCSO, SABO, HPO, AHA, BKA, ARO) | 仅需 `population_size` | 25 |
 
 ### 📐 确定性直接搜索
 无需梯度信息，通过几何模式进行直接搜索，适合不可导函数。
