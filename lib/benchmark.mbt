@@ -988,6 +988,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       electric_eel_foraging_optimization(make_eefo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "Golden-SA",
+    run: (e, d, b, r, f) => {
+      golden_sine_algorithm(make_golden_sa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
