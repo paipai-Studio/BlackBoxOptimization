@@ -880,6 +880,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       kookaburra_optimization_algorithm(make_koa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "FHO",
+    run: (e, d, b, r, f) => {
+      fire_hawk_optimizer(make_fho_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
