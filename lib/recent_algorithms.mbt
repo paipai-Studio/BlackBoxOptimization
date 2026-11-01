@@ -5133,22 +5133,17 @@ pub fn growth_optimizer(
           best_pos = learned
         }
       }
-      // reflection phase: decaying projection beyond the best plus a local jitter
+      // reflection phase: shrinking Gaussian local search around the best
       if evaluations >= max_evals {
         break
       }
-      let r3 = RNG::next(current_rng)
-      let r4 = RNG::next(current_rng)
+      let sigma = (bounds.max - bounds.min) * 0.1 * reflect_scale
       let reflected : Array[Double] = []
       for d in 0..<dim {
-        let pos = best_pos[d] +
-          reflect_scale *
-          (r3 * (best_pos[d] - pop[i][d]) - r4 * (pop[r][d] - pop[i][d])) +
-          (2.0 * RNG::next(current_rng) - 1.0) *
-          (bounds.max - bounds.min) *
-          0.01 *
-          reflect_scale
-        reflected.push(max(bounds.min, min(bounds.max, pos)))
+        let gauss = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+        reflected.push(
+          max(bounds.min, min(bounds.max, best_pos[d] + sigma * gauss)),
+        )
       }
       let rv = evaluate(f, reflected)
       evaluations = evaluations + 1
