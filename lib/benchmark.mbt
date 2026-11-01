@@ -924,6 +924,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       political_optimizer(make_po_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SCSO",
+    run: (e, d, b, r, f) => {
+      sand_cat_swarm_optimization(make_scso_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

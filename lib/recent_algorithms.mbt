@@ -6825,3 +6825,104 @@ pub fn political_optimizer(
     evaluations,
   }
 }
+
+// ===== SCSO: Sand Cat Swarm Optimization (2020) =====
+
+///|
+pub struct SCSOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_scso_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SCSOConfig {
+  SCSOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Sand Cat Swarm Optimization (2020): a linearly decaying sensitivity range R
+/// makes each cat either search for prey (move toward a random cat) or attack
+/// it (attract toward the best with a shrinking jitter).  Greedy acceptance and
+/// historical-best tracking are added.
+pub fn sand_cat_swarm_optimization(
+  config : SCSOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    let r_g = 2.0 * rb
+    let order = sort_indices(values)
+    let x_best = pop[order[0]]
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let r = r_g * RNG::next(current_rng)
+      let rr = 2.0 * r_g * RNG::next(current_rng) - r_g
+      let k = (RNG::next(current_rng) * n.to_double()).to_int() % n
+      let attacking = abs_val(rr) <= 1.0
+      let candidate : Array[Double] = []
+      for d in 0..<dim {
+        let pos = if attacking {
+          // attack prey: attract to the best with a shrinking jitter
+          pop[i][d] +
+          RNG::next(current_rng) * (x_best[d] - pop[i][d]) +
+          (2.0 * RNG::next(current_rng) - 1.0) * range * 0.1 * rb
+        } else {
+          // search for prey: move toward a random cat
+          pop[i][d] + r * (pop[k][d] - pop[i][d])
+        }
+        candidate.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let cv = evaluate(f, candidate)
+      evaluations = evaluations + 1
+      if cv < values[i] {
+        pop[i] = candidate
+        values[i] = cv
+        if cv < best_val {
+          best_val = cv
+          best_pos = candidate
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
