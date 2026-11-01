@@ -33,6 +33,107 @@ pub fn rosenbrock_function(x : Array[Double]) -> Double {
   sum
 }
 
+///|
+pub fn ackley_function(x : Array[Double]) -> Double {
+  let n : Double = x.length().to_double()
+  let mut sum_sq = 0.0
+  let mut sum_cos = 0.0
+  for i in 0..<x.length() {
+    let xi = x[i]
+    sum_sq = sum_sq + xi * xi
+    sum_cos = sum_cos + cos_approx(2.0 * PI * xi)
+  }
+  -20.0 * exp_approx(-0.2 * (sum_sq / n).sqrt()) -
+  exp_approx(sum_cos / n) +
+  20.0 +
+  2.718281828459045
+}
+
+///|
+pub fn griewank_function(x : Array[Double]) -> Double {
+  let mut sum_sq = 0.0
+  let mut product = 1.0
+  for i in 0..<x.length() {
+    let xi = x[i]
+    sum_sq = sum_sq + xi * xi
+    product = product * cos_approx(xi / (i + 1).to_double().sqrt())
+  }
+  sum_sq / 4000.0 - product + 1.0
+}
+
+///|
+pub fn schwefel_function(x : Array[Double]) -> Double {
+  let n : Double = x.length().to_double()
+  let mut sum = 0.0
+  for i in 0..<x.length() {
+    let xi = x[i]
+    sum = sum + xi * sin_approx(abs_val(xi).sqrt())
+  }
+  418.9829 * n - sum
+}
+
+///|
+pub fn levy_function(x : Array[Double]) -> Double {
+  let n = x.length()
+  let w : Array[Double] = []
+  for i in 0..<n {
+    w.push(1.0 + (x[i] - 1.0) / 4.0)
+  }
+  let head = sin_approx(PI * w[0]) * sin_approx(PI * w[0])
+  let mut sum = head
+  for i in 0..<(n - 1) {
+    let wi = w[i]
+    let s = sin_approx(PI * wi + 1.0)
+    sum = sum + (wi - 1.0) * (wi - 1.0) * (1.0 + 10.0 * s * s)
+  }
+  let wn = w[n - 1]
+  let tail_s = sin_approx(2.0 * PI * wn)
+  sum + (wn - 1.0) * (wn - 1.0) * (1.0 + tail_s * tail_s)
+}
+
+///|
+pub fn michalewicz_function(x : Array[Double]) -> Double {
+  let m = 10
+  let mut sum = 0.0
+  for i in 0..<x.length() {
+    let xi = x[i]
+    let base = sin_approx((i + 1).to_double() * xi * xi / PI)
+    let mut power = 1.0
+    for _k in 0..<m {
+      power = power * base * base
+    }
+    sum = sum + sin_approx(xi) * power
+  }
+  -sum
+}
+
+///|
+pub fn zakharov_function(x : Array[Double]) -> Double {
+  let mut sum_sq = 0.0
+  let mut sum_ix = 0.0
+  for i in 0..<x.length() {
+    let xi = x[i]
+    sum_sq = sum_sq + xi * xi
+    sum_ix = sum_ix + 0.5 * (i + 1).to_double() * xi
+  }
+  sum_sq + sum_ix * sum_ix + sum_ix * sum_ix * sum_ix * sum_ix
+}
+
+///|
+pub fn booth_function(x : Array[Double]) -> Double {
+  let x1 = x[0]
+  let x2 = x[1]
+  (x1 + 2.0 * x2 - 7.0) * (x1 + 2.0 * x2 - 7.0) +
+  (2.0 * x1 + x2 - 5.0) * (2.0 * x1 + x2 - 5.0)
+}
+
+///|
+pub fn matyas_function(x : Array[Double]) -> Double {
+  let x1 = x[0]
+  let x2 = x[1]
+  0.26 * (x1 * x1 + x2 * x2) - 0.48 * x1 * x2
+}
+
 // ===== 基准测试框架 =====
 
 ///|

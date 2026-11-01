@@ -2528,31 +2528,50 @@ pub fn chimp_optimization_algorithm(
       if evaluations >= config.max_evaluations {
         break
       }
-      let new_pos : Array[Double] = []
-      for d in 0..<dim {
-        let pos = if iter < 0.5 {
-          // exploration
-          if r5 < 0.5 {
-            // driving chimp
-            let rd1 = RNG::next(current_rng)
-            let rd2 = RNG::next(current_rng)
-            let pos_a = best_pos[d] + rd1 * (best_pos[d] - chimps[i][d])
-            let pos_b = best_pos[d] + rd2 * (best_pos[d] - chimps[i][d])
-            if evaluate(f, [pos_a]) < evaluate(f, [pos_b]) {
-              pos_a
-            } else {
-              pos_b
-            }
-          } else {
+      let new_pos : Array[Double] = if iter < 0.5 && r5 < 0.5 {
+        // Driving: evaluate two full candidate solutions, keep the better one.
+        // (The previous 1-d eval crashed on functions accessing x[1] and
+        // skipped the evaluation budget.)
+        let cand_a : Array[Double] = []
+        let cand_b : Array[Double] = []
+        for d in 0..<dim {
+          let rd1 = RNG::next(current_rng)
+          let rd2 = RNG::next(current_rng)
+          cand_a.push(
+            max(
+              bounds.min,
+              min(bounds.max, best_pos[d] + rd1 * (best_pos[d] - chimps[i][d])),
+            ),
+          )
+          cand_b.push(
+            max(
+              bounds.min,
+              min(bounds.max, best_pos[d] + rd2 * (best_pos[d] - chimps[i][d])),
+            ),
+          )
+        }
+        let val_a = evaluate(f, cand_a)
+        let val_b = evaluate(f, cand_b)
+        evaluations = evaluations + 2
+        if val_a < val_b {
+          cand_a
+        } else {
+          cand_b
+        }
+      } else {
+        let arr : Array[Double] = []
+        for d in 0..<dim {
+          let pos = if iter < 0.5 {
             // chasing chimp
             let rc1 = RNG::next(current_rng)
             chimps[i][d] + rc1 * (best_pos[d] - chimps[i][d])
+          } else {
+            // exploitation
+            chimps[i][d] + r7 * (best_pos[d] - chimps[i][d])
           }
-        } else {
-          // exploitation
-          chimps[i][d] + r7 * (best_pos[d] - chimps[i][d])
+          arr.push(max(bounds.min, min(bounds.max, pos)))
         }
-        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+        arr
       }
       let new_val = evaluate(f, new_pos)
       evaluations = evaluations + 1

@@ -119,6 +119,79 @@ pub fn make_bounds(min : Double, max : Double) -> Bounds {
 }
 
 ///|
+/// Per-dimension bounds for problems with mixed-scale variables
+/// (e.g. x_0 in [-100,100] while x_1 in [-1,1]).
+pub struct MultiBounds {
+  mins : Array[Double]
+  maxs : Array[Double]
+}
+
+///|
+pub fn make_multi_bounds(
+  mins : Array[Double],
+  maxs : Array[Double],
+) -> MultiBounds {
+  MultiBounds::{ mins, maxs, }
+}
+
+///|
+/// Build uniform per-dimension bounds from a single Bounds object.
+pub fn MultiBounds::from_bounds(dim : Int32, bounds : Bounds) -> MultiBounds {
+  let mins : Array[Double] = []
+  let maxs : Array[Double] = []
+  for _i in 0..<dim {
+    mins.push(bounds.min)
+    maxs.push(bounds.max)
+  }
+  MultiBounds::{ mins, maxs, }
+}
+
+///|
+pub fn MultiBounds::dimension(self : MultiBounds) -> Int32 {
+  min_int(self.mins.length(), self.maxs.length())
+}
+
+///|
+pub fn MultiBounds::get_min(self : MultiBounds, d : Int32) -> Double {
+  self.mins[d]
+}
+
+///|
+pub fn MultiBounds::get_max(self : MultiBounds, d : Int32) -> Double {
+  self.maxs[d]
+}
+
+///|
+/// Clamp a vector against the per-dimension bounds.
+pub fn MultiBounds::clamp(
+  self : MultiBounds,
+  x : Array[Double],
+) -> Array[Double] {
+  let n = min_int(self.mins.length(), x.length())
+  let out : Array[Double] = []
+  for d in 0..<n {
+    out.push(max(self.mins[d], min(self.maxs[d], x[d])))
+  }
+  out
+}
+
+///|
+/// Random solution within per-dimension bounds.
+pub fn random_solution_mb(
+  dim : Int32,
+  mb : MultiBounds,
+  rng : RNG,
+) -> Array[Double] {
+  let n = min_int(dim, mb.mins.length())
+  let solution : Array[Double] = []
+  for i in 0..<n {
+    let r = RNG::next(rng)
+    solution.push(mb.mins[i] + r * (mb.maxs[i] - mb.mins[i]))
+  }
+  solution
+}
+
+///|
 pub struct OptimizationResult {
   best_solution : Array[Double]
   best_value : Double

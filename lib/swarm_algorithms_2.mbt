@@ -1672,13 +1672,18 @@ pub fn gravitational_search_algorithm(
       for _d in 0..<dim {
         force.push(0.0)
       }
+      // Pre-compute pairwise distances once (was recomputed per dimension)
+      let dists : Array[Double] = []
+      for j in 0..<n {
+        dists.push(euclidean_distance(agents[i], agents[j]))
+      }
       for d in 0..<dim {
         let mut f_d = 0.0
         for j in 0..<n {
           if j == i {
             continue
           }
-          let dist = euclidean_distance(agents[i], agents[j])
+          let dist = dists[j]
           if dist < 1.0e-10 {
             continue
           }
@@ -1703,10 +1708,14 @@ pub fn gravitational_search_algorithm(
         new_pos.push(max(bounds.min, min(bounds.max, pos)))
       }
 
-      agents[i] = new_pos
+      let old_val = values[i]
       let new_val = evaluate(f, new_pos)
-      values[i] = new_val
       evaluations = evaluations + 1
+      // Elitist acceptance: discard moves that worsened the agent
+      if new_val < old_val {
+        agents[i] = new_pos
+        values[i] = new_val
+      }
 
       if new_val < best_val {
         best_val = new_val

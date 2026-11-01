@@ -618,14 +618,38 @@ let wca_result = @lib.water_cycle_algorithm(wca_config, f, rng)
 ### 内置测试函数
 
 ```moonbit
-// Sphere 函数: f(x) = sum(x_i^2)，最优值: 0
+// Sphere 函数: f(x) = sum(x_i^2)，[-5,5]，最优值: 0
 let f1 = @lib.sphere_function
 
-// Rastrigin 函数: f(x) = 10n + sum(x_i^2 - 10*cos(2*pi*x_i))，最优值: 0
+// Rastrigin 函数: f(x) = 10n + sum(x_i^2 - 10*cos(2*pi*x_i))，[-5.12,5.12]，最优值: 0
 let f2 = @lib.rastrigin_function
 
-// Rosenbrock 函数: f(x) = sum(100*(x_{i+1} - x_i^2)^2 + (1 - x_i)^2)，最优值: 0
+// Rosenbrock 函数: f(x) = sum(100*(x_{i+1} - x_i^2)^2 + (1 - x_i)^2)，[-5,5]，最优值: 0
 let f3 = @lib.rosenbrock_function
+
+// Ackley 函数，[-32.768,32.768]，最优值: 0
+let f4 = @lib.ackley_function
+
+// Griewank 函数，[-600,600]，最优值: 0
+let f5 = @lib.griewank_function
+
+// Schwefel 函数: 418.9829*n - sum(x_i*sin(sqrt(|x_i|)))，[-500,500]，最优值: 0
+let f6 = @lib.schwefel_function
+
+// Levy 函数，[-10,10]，最优值: 0
+let f7 = @lib.levy_function
+
+// Michalewicz 函数 (m=10)，[0,pi]，5维最优值: -4.687658
+let f8 = @lib.michalewicz_function
+
+// Zakharov 函数，[-10,10]，最优值: 0
+let f9 = @lib.zakharov_function
+
+// Booth 函数 (2维: 仅使用 x_0, x_1)，[-10,10]，最优值: 0（在 (1,3)）
+let f10 = @lib.booth_function
+
+// Matyas 函数 (2维: 仅使用 x_0, x_1)，[-10,10]，最优值: 0
+let f11 = @lib.matyas_function
 ```
 
 ### 基准测试

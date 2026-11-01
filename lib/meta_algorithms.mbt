@@ -591,17 +591,36 @@ pub fn biogeography_based_optimization(
       for d in 0..<dim {
         let r = RNG::next(current_rng)
         if r < immigrate_rates[i] {
-          // Try to immigrate from another habitat
-          let _r2 = RNG::next(current_rng)
-          let mut found_emigrant = -1
+          // Roulette-wheel emigrant selection weighted by emigration rate
+          // (the previous first-match scan almost always picked rank 0)
+          let mut total_rate = 0.0
           for j in 0..<n {
             if j == i {
               continue
             }
-            let r3 = RNG::next(current_rng)
-            if r3 < emigrate_rates[j] {
-              found_emigrant = j
-              break
+            total_rate = total_rate + emigrate_rates[j]
+          }
+          let mut found_emigrant = -1
+          if total_rate > 1.0e-12 {
+            let pick = RNG::next(current_rng) * total_rate
+            let mut cum = 0.0
+            for j in 0..<n {
+              if j == i {
+                continue
+              }
+              cum = cum + emigrate_rates[j]
+              if pick <= cum {
+                found_emigrant = j
+                break
+              }
+            }
+          }
+          if found_emigrant < 0 {
+            for j in 0..<n {
+              if j != i {
+                found_emigrant = j
+                break
+              }
             }
           }
           if found_emigrant >= 0 {
