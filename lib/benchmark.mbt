@@ -810,6 +810,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       tasmanian_devil_optimization(make_tdo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "PDO",
+    run: (e, d, b, r, f) => {
+      prairie_dog_optimization(make_pdo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

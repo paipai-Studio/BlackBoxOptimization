@@ -4621,3 +4621,106 @@ pub fn tasmanian_devil_optimization(
     evaluations,
   }
 }
+
+// ===== PDO: Prairie Dog Optimization (2022) =====
+
+///|
+pub struct PDOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_pdo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> PDOConfig {
+  PDOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Prairie Dog Optimization (2022): four behavioural phases selected by the
+/// budget fraction - foraging toward a random peer, burrowing toward the
+/// incumbent best, then two increasingly local searches around the best.  Each
+/// phase keeps a shrinking random component so larger budgets converge.  Greedy
+/// acceptance and historical-best tracking are added.
+pub fn prairie_dog_optimization(
+  config : PDOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  let dogs : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    dogs.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = dogs[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let peer_idx = (RNG::next(current_rng) * n.to_double()).to_int() % n
+      let peer = dogs[peer_idx]
+      let r1 = RNG::next(current_rng)
+      let i_factor = if RNG::next(current_rng) < 0.5 { 1.0 } else { 2.0 }
+      let new_pos : Array[Double] = []
+      for d in 0..<dim {
+        let rnd = RNG::next(current_rng)
+        let pos = if iter < 0.25 {
+          // Phase 1: foraging - move toward a random peer
+          dogs[i][d] + r1 * (peer[d] - i_factor * dogs[i][d])
+        } else if iter < 0.5 {
+          // Phase 2: burrowing - move toward the incumbent best
+          dogs[i][d] + r1 * (best_pos[d] - i_factor * dogs[i][d])
+        } else if iter < 0.75 {
+          // Phase 3: alarm - wider random search around the best
+          best_pos[d] + (2.0 * rnd - 1.0) * range * 0.2 * (1.0 - iter)
+        } else {
+          // Phase 4: peaceful - fine search around the best
+          best_pos[d] + (2.0 * rnd - 1.0) * range * 0.05 * (1.0 - iter)
+        }
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      if val < values[i] {
+        dogs[i] = new_pos
+        values[i] = val
+        if val < best_val {
+          best_val = val
+          best_pos = new_pos
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
