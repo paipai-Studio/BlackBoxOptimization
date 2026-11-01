@@ -942,6 +942,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       hunter_prey_optimizer(make_hpo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "AHA",
+    run: (e, d, b, r, f) => {
+      artificial_hummingbird_algorithm(make_aha_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

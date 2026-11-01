@@ -7144,3 +7144,111 @@ pub fn hunter_prey_optimizer(
     evaluations,
   }
 }
+
+// ===== AHA: Artificial Hummingbird Algorithm (2021) =====
+
+///|
+pub struct AHAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_aha_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> AHAConfig {
+  AHAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Artificial Hummingbird Algorithm (2021): birds either perform guided
+/// foraging toward the best with a random flight direction, territorial
+/// foraging around their own position with a shrinking amplitude, or a rare
+/// migration repositioning.  Greedy acceptance and historical-best tracking are
+/// added.
+pub fn artificial_hummingbird_algorithm(
+  config : AHAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    let order = sort_indices(values)
+    let x_best = pop[order[0]]
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let behavior = RNG::next(current_rng)
+      let candidate : Array[Double] = []
+      if behavior < 0.6 {
+        // guided foraging: fly toward the best with a random flight direction
+        for d in 0..<dim {
+          let dir = if RNG::next(current_rng) < 0.5 { 1.0 } else { -1.0 }
+          let pos = pop[i][d] +
+            dir * RNG::next(current_rng) * (x_best[d] - pop[i][d])
+          candidate.push(max(bounds.min, min(bounds.max, pos)))
+        }
+      } else if behavior < 0.98 {
+        // territorial foraging: shrinking local search around itself
+        for d in 0..<dim {
+          let pos = pop[i][d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * range * 0.1 * rb
+          candidate.push(max(bounds.min, min(bounds.max, pos)))
+        }
+      } else {
+        // migration: rare random repositioning
+        for _d in 0..<dim {
+          let pos = bounds.min + RNG::next(current_rng) * range
+          candidate.push(max(bounds.min, min(bounds.max, pos)))
+        }
+      }
+      let cv = evaluate(f, candidate)
+      evaluations = evaluations + 1
+      if cv < values[i] {
+        pop[i] = candidate
+        values[i] = cv
+        if cv < best_val {
+          best_val = cv
+          best_pos = candidate
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
