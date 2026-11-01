@@ -5271,3 +5271,118 @@ pub fn walrus_optimizer(
     evaluations,
   }
 }
+
+// ===== CLONALG: Clonal Selection Algorithm (2002) =====
+
+///|
+pub struct CLONALGConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_clonalg_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CLONALGConfig {
+  CLONALGConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Clonal Selection Algorithm (2002), continuous variant: the best half of the
+/// antibody population is selected, each selected antibody is cloned in
+/// proportion to its affinity, and clones are mutated with a Gaussian step
+/// whose amplitude grows with poorer rank and decays with the budget fraction.
+/// A tiny fading jitter prevents late-phase freezing, and receptor editing
+/// injects a random antibody each generation.  Greedy acceptance and
+/// historical-best tracking are added.
+pub fn clonal_selection_algorithm(
+  config : CLONALGConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let n_select = if n / 2 < 1 { 1 } else { n / 2 }
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let order = sort_indices(values)
+    for k in 0..<n_select {
+      if evaluations >= max_evals {
+        break
+      }
+      let idx = order[k]
+      let rank_frac = k.to_double() / n_select.to_double()
+      let sigma = range * (0.001 + 0.3 * (1.0 - iter)) * (0.1 + rank_frac)
+      let n_clones = 1 + (n_select - k) / 4
+      for _c in 0..<n_clones {
+        if evaluations >= max_evals {
+          break
+        }
+        let clone : Array[Double] = []
+        for d in 0..<dim {
+          let gauss = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+          let pos = pop[idx][d] + sigma * gauss
+          clone.push(max(bounds.min, min(bounds.max, pos)))
+        }
+        let cv = evaluate(f, clone)
+        evaluations = evaluations + 1
+        if cv < values[idx] {
+          pop[idx] = clone
+          values[idx] = cv
+          if cv < best_val {
+            best_val = cv
+            best_pos = clone
+          }
+        }
+      }
+    }
+    // receptor editing: inject a random antibody over the worst member
+    if evaluations < max_evals {
+      let worst_idx = order[order.length() - 1]
+      let fresh = random_solution(dim, bounds, current_rng)
+      let fv = evaluate(f, fresh)
+      evaluations = evaluations + 1
+      if fv < values[worst_idx] {
+        pop[worst_idx] = fresh
+        values[worst_idx] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = fresh
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

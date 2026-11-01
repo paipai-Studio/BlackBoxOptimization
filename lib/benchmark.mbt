@@ -844,6 +844,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       walrus_optimizer(make_waoa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "CLONALG",
+    run: (e, d, b, r, f) => {
+      clonal_selection_algorithm(make_clonalg_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
