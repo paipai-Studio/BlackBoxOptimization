@@ -3617,13 +3617,11 @@ pub fn african_vultures_optimization(
           } else {
             guide[d] - f_hunger + (2.0 * rnd - 1.0) * range
           }
-        } else {
           // Exploitation: close in on the reference vulture
-          if r4 < 0.5 {
-            vultures[i][d] + af * (guide[d] - vultures[i][d])
-          } else {
-            guide[d] + (1.0 - af) * (2.0 * rnd - 1.0) * range * 0.1
-          }
+        } else if r4 < 0.5 {
+          vultures[i][d] + af * (guide[d] - vultures[i][d])
+        } else {
+          guide[d] + (1.0 - af) * (2.0 * rnd - 1.0) * range * 0.1
         }
         new_pos.push(max(bounds.min, min(bounds.max, pos)))
       }
@@ -3864,8 +3862,7 @@ pub fn coati_optimization_algorithm(
         for d in 0..<dim {
           let lb_local = (bounds.min - coatis[i][d]) / t
           let ub_local = (bounds.max - coatis[i][d]) / t
-          let pos = coatis[i][d] +
-            r2 * (lb_local + r3 * (ub_local - lb_local))
+          let pos = coatis[i][d] + r2 * (lb_local + r3 * (ub_local - lb_local))
           new2.push(max(bounds.min, min(bounds.max, pos)))
         }
         let v2 = evaluate(f, new2)
