@@ -9124,3 +9124,110 @@ pub fn coyote_optimization_algorithm(
     evaluations,
   }
 }
+
+// ===== BES: Bald Eagle Search (2019) =====
+
+///|
+pub struct BESConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bes_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BESConfig {
+  BESConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Bald Eagle Search (2019): eagles select a space near the best using the
+/// swarm mean, search with a shrinking local step, or swoop by attraction to
+/// the best.  Greedy acceptance and historical-best tracking are added.
+pub fn bald_eagle_search(
+  config : BESConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    let order = sort_indices(values)
+    let x_best = pop[order[0]]
+    let mean : Array[Double] = []
+    for d in 0..<dim {
+      let mut s = 0.0
+      for j in 0..<n {
+        s = s + pop[j][d]
+      }
+      mean.push(s / n.to_double())
+    }
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let phase = RNG::next(current_rng)
+      let candidate : Array[Double] = []
+      for d in 0..<dim {
+        let pos = if phase < 0.4 {
+          // select: choose a space near the best using the swarm mean
+          x_best[d] + 1.5 * RNG::next(current_rng) * (mean[d] - pop[i][d])
+        } else if phase < 0.7 {
+          // search: shrinking local step around itself
+          pop[i][d] + rb * range * 0.25 * (2.0 * RNG::next(current_rng) - 1.0)
+        } else {
+          // swoop: attraction toward the best
+          pop[i][d] +
+          RNG::next(current_rng) * (x_best[d] - pop[i][d]) +
+          rb * range * 0.05 * (2.0 * RNG::next(current_rng) - 1.0)
+        }
+        candidate.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let cv = evaluate(f, candidate)
+      evaluations = evaluations + 1
+      if cv < values[i] {
+        pop[i] = candidate
+        values[i] = cv
+        if cv < best_val {
+          best_val = cv
+          best_pos = candidate
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

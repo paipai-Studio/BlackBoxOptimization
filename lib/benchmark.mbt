@@ -1058,6 +1058,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       coyote_optimization_algorithm(make_coy_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "BES",
+    run: (e, d, b, r, f) => {
+      bald_eagle_search(make_bes_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

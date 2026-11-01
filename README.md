@@ -167,6 +167,7 @@
 | 紧凑遗传算法 | cGA | 双样本竞赛更新概率模型 (1999) |
 | 文化算法 | CA | 群体空间 + 信念空间双重进化 (1994) |
 | 郊狼优化算法 | COY | 群体成长 + 出生/死亡 + 倾向性 (2018) |
+| 秃鹰搜索算法 | BES | 选择/搜索/俯冲三阶段 (2019) |
 
 > **通用群体智能参数**: 大部分算法默认 `population_size = 25`。下表列出各算法的特有参数。
 
@@ -196,7 +197,7 @@
 | WCA | `num_rivers` | 4 |
 | MFO | `spiral_constant` | 1.0 |
 | WOA | `spiral_constant` | 1.0 |
-| 其余算法 (GWO, SCA, ALO, HHO, SalpSA, AEO, SOS, GBPSO, MSA, PFA, CPA, BCO, FFOA, FWA, PIO, HBA, POA, TSA, GJO, GOA, SOA, GTO, SMA, AO, ChOA, DO, ZOA, MRFO, HGS, RSA, MPA, GEO, AVOA, WSO, COA, OOA, TDO, PDO, NGO, BWO, GBO, GO, WaOA, CLONALG, ABC, EM, DBO, TSO, KOA, FHO, RIME, INFO, SO, MGO, CHIO, PO, SCSO, SABO, HPO, AHA, BKA, ARO, FOX, DMO, RSO, EVO, EEFO, Golden-SA, YSGA, FBI, CapSA, SWO, GAO, MAO, UMDA, cGA, CA, COY) | 仅需 `population_size` | 25 |
+| 其余算法 (GWO, SCA, ALO, HHO, SalpSA, AEO, SOS, GBPSO, MSA, PFA, CPA, BCO, FFOA, FWA, PIO, HBA, POA, TSA, GJO, GOA, SOA, GTO, SMA, AO, ChOA, DO, ZOA, MRFO, HGS, RSA, MPA, GEO, AVOA, WSO, COA, OOA, TDO, PDO, NGO, BWO, GBO, GO, WaOA, CLONALG, ABC, EM, DBO, TSO, KOA, FHO, RIME, INFO, SO, MGO, CHIO, PO, SCSO, SABO, HPO, AHA, BKA, ARO, FOX, DMO, RSO, EVO, EEFO, Golden-SA, YSGA, FBI, CapSA, SWO, GAO, MAO, UMDA, cGA, CA, COY, BES) | 仅需 `population_size` | 25 |
 
 ### 📐 确定性直接搜索
 无需梯度信息，通过几何模式进行直接搜索，适合不可导函数。
