@@ -4241,3 +4241,136 @@ pub fn shade_algorithm(
     evaluations,
   }
 }
+
+// ===== EP: Evolutionary Programming (self-adaptive meta-EP) =====
+
+///|
+pub struct EPConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ep_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> EPConfig {
+  EPConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Evolutionary Programming with self-adaptive (meta-EP) mutation: every
+/// individual carries a step size that is itself mutated by log-normal noise
+/// before the position mutation, and (mu+mu) selection keeps the best parents
+/// and children.  Adds historical-best tracking.
+pub fn evolutionary_programming(
+  config : EPConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let pop_size = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  let dd = dim.to_double()
+  let tau_prime = 1.0 / (2.0 * dd).sqrt()
+  let tau = 1.0 / (2.0 * dd.sqrt()).sqrt()
+
+  let mut population : Array[Array[Double]] = []
+  let mut fitness : Array[Double] = []
+  let mut sigma : Array[Double] = []
+  for _i in 0..<pop_size {
+    let sol = random_solution(dim, bounds, current_rng)
+    population.push(sol)
+    fitness.push(evaluate(f, sol))
+    sigma.push(range * 0.2)
+  }
+  let mut evaluations = pop_size
+  let sorted0 = sort_indices(fitness)
+  let mut best_pos : Array[Double] = population[sorted0[0]]
+  let mut best_val = fitness[sorted0[0]]
+
+  while evaluations < max_evals {
+    let children : Array[Array[Double]] = []
+    let child_fit : Array[Double] = []
+    let child_sigma : Array[Double] = []
+
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      // Self-adapt the step size (log-normal mutation)
+      let g1 = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+      let g2 = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+      let mut sig = sigma[i] * exp_approx(tau_prime * g1 + tau * g2)
+      if sig > range {
+        sig = range
+      }
+      if sig < 1.0e-12 {
+        sig = 1.0e-12
+      }
+      // Mutate the position
+      let trial : Array[Double] = []
+      for j in 0..<dim {
+        let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+        let pos = population[i][j] + sig * g
+        trial.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let val = evaluate(f, trial)
+      evaluations = evaluations + 1
+      children.push(trial)
+      child_fit.push(val)
+      child_sigma.push(sig)
+      if val < best_val {
+        best_val = val
+        best_pos = trial
+      }
+    }
+
+    // (mu + mu) selection over parents and children
+    let all_x : Array[Array[Double]] = []
+    let all_f : Array[Double] = []
+    let all_s : Array[Double] = []
+    for i in 0..<pop_size {
+      all_x.push(population[i])
+      all_f.push(fitness[i])
+      all_s.push(sigma[i])
+    }
+    for k in 0..<children.length() {
+      all_x.push(children[k])
+      all_f.push(child_fit[k])
+      all_s.push(child_sigma[k])
+    }
+    let order = sort_indices(all_f)
+    let next_pop : Array[Array[Double]] = []
+    let next_fit : Array[Double] = []
+    let next_sig : Array[Double] = []
+    for r in 0..<pop_size {
+      let idx = order[r]
+      next_pop.push(all_x[idx])
+      next_fit.push(all_f[idx])
+      next_sig.push(all_s[idx])
+    }
+    population = next_pop
+    fitness = next_fit
+    sigma = next_sig
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

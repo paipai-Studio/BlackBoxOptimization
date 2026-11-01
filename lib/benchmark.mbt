@@ -792,6 +792,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       shade_algorithm(make_shade_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "EP",
+    run: (e, d, b, r, f) => {
+      evolutionary_programming(make_ep_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
