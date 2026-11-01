@@ -1024,6 +1024,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       green_anaconda_optimization(make_gao_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "MAO",
+    run: (e, d, b, r, f) => {
+      mexican_axolotl_optimization(make_mao_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
