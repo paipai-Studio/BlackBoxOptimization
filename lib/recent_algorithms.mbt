@@ -3285,3 +3285,126 @@ pub fn marine_predators_algorithm(
     evaluations,
   }
 }
+
+// ===== Golden Eagle Optimizer (GEO, 2021) =====
+
+///|
+pub struct GEOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_geo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> GEOConfig {
+  GEOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Golden Eagle Optimizer (2021): each eagle balances an attack move toward the
+/// best (attack propensity A grows with time) against a cruise move along a
+/// random direction orthogonal to the attack vector (cruise propensity
+/// C = 1 - A shrinks).  Late in the run the cruise term vanishes, so the
+/// population converges onto the incumbent best.
+pub fn golden_eagle_optimizer(
+  config : GEOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+
+  let eagles : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    eagles.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = eagles[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let tau = evaluations.to_double() / max_evals.to_double()
+    let attack = tau
+    let cruise = 1.0 - tau
+
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+
+      // Attack vector (toward the best) and its squared norm
+      let mut sq = 0.0
+      for d in 0..<dim {
+        let diff = best_pos[d] - eagles[i][d]
+        sq = sq + diff * diff
+      }
+      let norm_a = sq.sqrt()
+
+      // Random cruise vector, orthogonalized against the attack vector
+      let rc : Array[Double] = []
+      for _d in 0..<dim {
+        rc.push(RNG::next(current_rng) * 2.0 - 1.0)
+      }
+      let mut dot = 0.0
+      for d in 0..<dim {
+        dot = dot + rc[d] * (best_pos[d] - eagles[i][d])
+      }
+      let proj = dot / max(sq, 1.0e-12)
+      let cruise_vec : Array[Double] = []
+      let mut nc = 0.0
+      for d in 0..<dim {
+        let c = rc[d] - proj * (best_pos[d] - eagles[i][d])
+        cruise_vec.push(c)
+        nc = nc + c * c
+      }
+      nc = nc.sqrt()
+
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let new_pos : Array[Double] = []
+      for d in 0..<dim {
+        let cd = if nc > 1.0e-12 { cruise_vec[d] / nc } else { 0.0 }
+        let pos = eagles[i][d] +
+          r1 * attack * (best_pos[d] - eagles[i][d]) +
+          r2 * cruise * cd * norm_a
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+
+      // Greedy acceptance keeps the swarm from being randomized
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      if new_val < values[i] {
+        eagles[i] = new_pos
+        values[i] = new_val
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

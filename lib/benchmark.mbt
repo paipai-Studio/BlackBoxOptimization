@@ -752,6 +752,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       marine_predators_algorithm(make_mpa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "GEO",
+    run: (e, d, b, r, f) => {
+      golden_eagle_optimizer(make_geo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
