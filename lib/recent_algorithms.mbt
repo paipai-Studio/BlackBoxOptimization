@@ -6696,3 +6696,129 @@ pub fn coronavirus_herd_immunity_optimization(
     evaluations,
   }
 }
+
+// ===== PO: Political Optimizer (2020) =====
+
+///|
+pub struct POConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_po_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> POConfig {
+  POConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Political Optimizer (2020): the population is split into parties, each with a
+/// leader.  During the election campaign every member is attracted to its own
+/// party leader, the global best, and another party's leader, with amplitudes
+/// that decay with the budget fraction.  Greedy acceptance and historical-best
+/// tracking are added.
+pub fn political_optimizer(
+  config : POConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let n_parties = if n / 4 < 2 { 1 } else { 4 }
+  let mpp = if n / n_parties < 1 { 1 } else { n / n_parties }
+  let np_minus = if n_parties > 1 { n_parties - 1 } else { 1 }
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    let order = sort_indices(values)
+    let x_best = pop[order[0]]
+    let leaders : Array[Int32] = []
+    for p in 0..<n_parties {
+      let mut best_member = -1
+      let mut best_member_val = 1.0e308
+      let mut i = p * mpp
+      while i < n && i < (p + 1) * mpp {
+        if values[i] < best_member_val {
+          best_member_val = values[i]
+          best_member = i
+        }
+        i = i + 1
+      }
+      if best_member < 0 {
+        best_member = 0
+      }
+      leaders.push(best_member)
+    }
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let p = if i / mpp < n_parties { i / mpp } else { n_parties - 1 }
+      let leader = pop[leaders[p]]
+      let other_p = (
+          p +
+          1 +
+          (RNG::next(current_rng) * np_minus.to_double()).to_int() % np_minus
+        ) %
+        n_parties
+      let other = pop[leaders[other_p]]
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let candidate : Array[Double] = []
+      for d in 0..<dim {
+        let pos = pop[i][d] +
+          rb *
+          (
+            r1 * (leader[d] - pop[i][d]) +
+            r2 * (x_best[d] - pop[i][d]) +
+            r3 * (other[d] - pop[i][d])
+          )
+        candidate.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let cv = evaluate(f, candidate)
+      evaluations = evaluations + 1
+      if cv < values[i] {
+        pop[i] = candidate
+        values[i] = cv
+        if cv < best_val {
+          best_val = cv
+          best_pos = candidate
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

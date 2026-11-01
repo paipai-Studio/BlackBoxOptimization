@@ -918,6 +918,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       )
     },
   })
+  entries.push(AlgoEntry::{
+    name: "PO",
+    run: (e, d, b, r, f) => {
+      political_optimizer(make_po_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
