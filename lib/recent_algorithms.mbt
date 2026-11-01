@@ -6227,3 +6227,100 @@ pub fn rime_optimization_algorithm(
     evaluations,
   }
 }
+
+// ===== INFO: weIghted meaN oF vectOrs (2022) =====
+
+///|
+pub struct INFOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_info_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> INFOConfig {
+  INFOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// weIghted meaN oF vectOrs (INFO, 2022): agents move toward a weighted mean of
+/// the incumbent best, a randomly chosen better vector and the worst vector,
+/// with a random scale that shrinks with the budget fraction.  Greedy
+/// acceptance and historical-best tracking are added.
+pub fn info_optimization_algorithm(
+  config : INFOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let n_better = if n / 2 < 1 { 1 } else { n / 2 }
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    let order = sort_indices(values)
+    let x_best = pop[order[0]]
+    let x_worst = pop[order[order.length() - 1]]
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let better_idx = order[(RNG::next(current_rng) * n_better.to_double()).to_int() %
+        n_better]
+      let x_better = pop[better_idx]
+      let scale = 2.0 * RNG::next(current_rng)
+      let candidate : Array[Double] = []
+      for d in 0..<dim {
+        let mean = 0.5 * x_best[d] + 0.3 * x_better[d] + 0.2 * x_worst[d]
+        let pos = pop[i][d] +
+          scale * rb * (mean - pop[i][d]) +
+          (2.0 * RNG::next(current_rng) - 1.0) * range * 0.1 * rb
+        candidate.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let cv = evaluate(f, candidate)
+      evaluations = evaluations + 1
+      if cv < values[i] {
+        pop[i] = candidate
+        values[i] = cv
+        if cv < best_val {
+          best_val = cv
+          best_pos = candidate
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

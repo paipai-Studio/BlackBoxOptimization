@@ -892,6 +892,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       rime_optimization_algorithm(make_rime_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "INFO",
+    run: (e, d, b, r, f) => {
+      info_optimization_algorithm(make_info_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
