@@ -1,16 +1,22 @@
-
 name = "IvanAXu/BlackBoxOptimization"
 
 version = "0.1.0"
 
 readme = "README.md"
 
-repository = ""
+repository = "https://github.com/IvanAXu/BlackBoxOptimization"
 
 license = "Apache-2.0"
 
-keywords = [ ]
+keywords = [
+  "moonbit",
+  "optimization",
+  "black-box-optimization",
+  "metaheuristics",
+  "swarm-intelligence",
+  "evolutionary-computation",
+]
 
 preferred_target = "wasm-gc"
 
-description = ""
+description = "A black-box optimization framework in MoonBit with 75+ metaheuristic algorithms"
