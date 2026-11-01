@@ -1812,7 +1812,8 @@ pub fn grasshopper_optimization_algorithm(
 
   while evaluations < config.max_evaluations {
     let iter = evaluations.to_double() / config.max_evaluations.to_double()
-    let c = 1.0 - iter
+    // Social influence decays quadratically so large budgets also converge
+    let c = (1.0 - iter) * (1.0 - iter)
 
     for i in 0..<n {
       if evaluations >= config.max_evaluations {
