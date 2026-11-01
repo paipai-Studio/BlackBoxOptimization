@@ -964,6 +964,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
     name: "FOX",
     run: (e, d, b, r, f) => fox_optimizer(make_fox_config(e, d, b, 25), f, r),
   })
+  entries.push(AlgoEntry::{
+    name: "DMO",
+    run: (e, d, b, r, f) => {
+      dwarf_mongoose_optimization(make_dmo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
