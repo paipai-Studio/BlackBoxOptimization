@@ -982,6 +982,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       egyptian_vulture_optimization(make_evo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "EEFO",
+    run: (e, d, b, r, f) => {
+      electric_eel_foraging_optimization(make_eefo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
