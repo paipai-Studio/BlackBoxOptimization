@@ -7031,3 +7031,116 @@ pub fn subtraction_average_based_optimizer(
     evaluations,
   }
 }
+
+// ===== HPO: Hunter-Prey Optimizer (2022) =====
+
+///|
+pub struct HPOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_hpo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> HPOConfig {
+  HPOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Hunter-Prey Optimizer (2022): each agent acts either as a hunter, drawn by a
+/// decaying balance factor toward the swarm mean and the best, or as prey doing
+/// a shrinking Gaussian local search around the best.  Greedy acceptance and
+/// historical-best tracking are added.
+pub fn hunter_prey_optimizer(
+  config : HPOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    let z = 2.0 * rb
+    let order = sort_indices(values)
+    let x_best = pop[order[0]]
+    let mean : Array[Double] = []
+    for d in 0..<dim {
+      let mut s = 0.0
+      for j in 0..<n {
+        s = s + pop[j][d]
+      }
+      mean.push(s / n.to_double())
+    }
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let hunter = RNG::next(current_rng) < 0.5
+      let candidate : Array[Double] = []
+      for d in 0..<dim {
+        let pos = if hunter {
+          // hunter: drawn toward the swarm mean and the best
+          pop[i][d] +
+          z *
+          (
+            RNG::next(current_rng) * (mean[d] - pop[i][d]) +
+            RNG::next(current_rng) * (x_best[d] - pop[i][d])
+          )
+        } else {
+          // prey: shrinking local search around the best
+          x_best[d] +
+          rb *
+          range *
+          0.15 *
+          box_muller(RNG::next(current_rng), RNG::next(current_rng))
+        }
+        candidate.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let cv = evaluate(f, candidate)
+      evaluations = evaluations + 1
+      if cv < values[i] {
+        pop[i] = candidate
+        values[i] = cv
+        if cv < best_val {
+          best_val = cv
+          best_pos = candidate
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

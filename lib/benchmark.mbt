@@ -936,6 +936,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       subtraction_average_based_optimizer(make_sabo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "HPO",
+    run: (e, d, b, r, f) => {
+      hunter_prey_optimizer(make_hpo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
