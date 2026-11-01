@@ -3760,3 +3760,131 @@ pub fn white_shark_optimizer(
     evaluations,
   }
 }
+
+// ===== Coati Optimization Algorithm (COA, 2023) =====
+
+///|
+pub struct COAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_coa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> COAConfig {
+  COAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Coati Optimization Algorithm (2023): the swarm hunts iguanas in two
+/// sub-groups - half climb a tree after a randomly chosen iguana while the
+/// others wait for one to fall to a random ground point - then every coati
+/// performs a local escape move whose radius shrinks with the generation count.
+/// Adds greedy acceptance and historical-best tracking.
+pub fn coati_optimization_algorithm(
+  config : COAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let half = n / 2
+
+  let coatis : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    coatis.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = coatis[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+
+      // Phase 1: hunt the iguana
+      let raw = (RNG::next(current_rng) * n.to_double()).floor().to_int()
+      let idx = if raw >= n { n - 1 } else { raw }
+      let iguana = coatis[idx]
+      let r = RNG::next(current_rng)
+      let i_factor = if RNG::next(current_rng) < 0.5 { 1.0 } else { 2.0 }
+
+      let new1 : Array[Double] = []
+      for d in 0..<dim {
+        let pos = if i < half {
+          // Climb the tree and attack the iguana
+          coatis[i][d] + r * (iguana[d] - i_factor * coatis[i][d])
+        } else {
+          // The iguana falls to a random position on the ground
+          let g = bounds.min + RNG::next(current_rng) * range
+          coatis[i][d] + r * (g - i_factor * coatis[i][d])
+        }
+        new1.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      if evaluations < max_evals {
+        let v1 = evaluate(f, new1)
+        evaluations = evaluations + 1
+        if v1 < values[i] {
+          coatis[i] = new1
+          values[i] = v1
+          if v1 < best_val {
+            best_val = v1
+            best_pos = new1
+          }
+        }
+      }
+
+      // Phase 2: escape from a predator, with a shrinking local radius
+      if evaluations < max_evals {
+        let t = max(evaluations.to_double() / n.to_double(), 1.0)
+        let r2 = RNG::next(current_rng)
+        let r3 = RNG::next(current_rng)
+        let new2 : Array[Double] = []
+        for d in 0..<dim {
+          let lb_local = (bounds.min - coatis[i][d]) / t
+          let ub_local = (bounds.max - coatis[i][d]) / t
+          let pos = coatis[i][d] +
+            r2 * (lb_local + r3 * (ub_local - lb_local))
+          new2.push(max(bounds.min, min(bounds.max, pos)))
+        }
+        let v2 = evaluate(f, new2)
+        evaluations = evaluations + 1
+        if v2 < values[i] {
+          coatis[i] = new2
+          values[i] = v2
+          if v2 < best_val {
+            best_val = v2
+            best_pos = new2
+          }
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
