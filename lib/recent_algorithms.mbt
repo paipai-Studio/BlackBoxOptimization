@@ -2659,10 +2659,6 @@ pub fn dandelion_optimizer(
 
   while evaluations < config.max_evaluations {
     let iter = evaluations.to_double() / config.max_evaluations.to_double()
-    let _r1 = RNG::next(current_rng)
-    let r2 = RNG::next(current_rng)
-    let r3 = RNG::next(current_rng)
-    let _r4 = RNG::next(current_rng)
 
     for i in 0..<n {
       if evaluations >= config.max_evaluations {
@@ -2674,6 +2670,11 @@ pub fn dandelion_optimizer(
         // descend onto the incumbent best (second half, with a small fading
         // perturbation for diversity). The previous form used .abs() so the
         // drift was always positive and its step went negative after iter>0.5.
+        // r2/r3 are drawn per component; sharing a single pair across the whole
+        // population and every dimension made the seeds move rigidly together
+        // and starved the search of diversity.
+        let r2 = RNG::next(current_rng)
+        let r3 = RNG::next(current_rng)
         let pos = if iter < 0.5 {
           dandelions[i][d] +
           (r2 - 0.5) *
