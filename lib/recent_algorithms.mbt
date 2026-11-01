@@ -3529,3 +3529,122 @@ pub fn runge_kutta_optimizer(
     evaluations,
   }
 }
+
+// ===== African Vultures Optimization Algorithm (AVOA, 2021) =====
+
+///|
+pub struct AVOAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_avoa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> AVOAConfig {
+  AVOAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// African Vultures Optimization Algorithm (2021): a hunger factor F, which
+/// fades with the budget, switches each vulture between exploration (|F| >= 1,
+/// wide moves around a reference vulture) and exploitation (|F| < 1, moves that
+/// close in on the reference).  The reference vulture is either the current best
+/// or the runner-up, chosen at random.  Adds greedy acceptance and
+/// historical-best tracking.
+pub fn african_vultures_optimization(
+  config : AVOAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  let vultures : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    vultures.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = vultures[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let tau = evaluations.to_double() / max_evals.to_double()
+    // Current best and runner-up act as the two reference vultures
+    let order = sort_indices(values)
+    let cur_best = vultures[order[0]]
+    let second_best = vultures[order[1]]
+
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      // Hunger factor: fades with the budget so late phases exploit
+      let z = 2.0 * r2 - 1.0
+      let f_hunger = (2.0 * r1 + 1.0) * z * (1.0 - tau)
+      let af = abs_val(f_hunger)
+      let guide : Array[Double] = if r3 < 0.5 { cur_best } else { second_best }
+
+      let new_pos : Array[Double] = []
+      for d in 0..<dim {
+        let rnd = RNG::next(current_rng)
+        let pos = if af >= 1.0 {
+          // Exploration: wide moves around the reference vulture
+          if r4 < 0.5 {
+            guide[d] - f_hunger * (guide[d] - vultures[i][d])
+          } else {
+            guide[d] - f_hunger + (2.0 * rnd - 1.0) * range
+          }
+        } else {
+          // Exploitation: close in on the reference vulture
+          if r4 < 0.5 {
+            vultures[i][d] + af * (guide[d] - vultures[i][d])
+          } else {
+            guide[d] + (1.0 - af) * (2.0 * rnd - 1.0) * range * 0.1
+          }
+        }
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+
+      // Greedy acceptance keeps the swarm from being randomized
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      if new_val < values[i] {
+        vultures[i] = new_pos
+        values[i] = new_val
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

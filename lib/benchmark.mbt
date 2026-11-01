@@ -764,6 +764,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       runge_kutta_optimizer(make_run_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "AVOA",
+    run: (e, d, b, r, f) => {
+      african_vultures_optimization(make_avoa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
