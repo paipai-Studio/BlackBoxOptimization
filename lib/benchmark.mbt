@@ -862,6 +862,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       electromagnetism_like_mechanism(make_em_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "DBO",
+    run: (e, d, b, r, f) => {
+      dung_beetle_optimizer(make_dbo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

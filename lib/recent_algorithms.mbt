@@ -5684,3 +5684,131 @@ pub fn electromagnetism_like_mechanism(
     evaluations,
   }
 }
+
+// ===== DBO: Dung Beetle Optimizer (2022) =====
+
+///|
+pub struct DBOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_dbo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> DBOConfig {
+  DBOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Dung Beetle Optimizer (2022): the swarm is split into ball-rolling, brooding,
+/// foraging and stealing beetles.  Rollers follow a sun-guided direction with
+/// occasional obstacle dances, brooders sample inside a shrinking boundary
+/// around the best, foragers refine toward the best, and thieves rush the best.
+/// All amplitudes decay with the budget fraction.  Greedy acceptance and
+/// historical-best tracking are added.
+pub fn dung_beetle_optimizer(
+  config : DBOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let roll_end = n * 2 / 10
+  let brood_end = n * 4 / 10
+  let forage_end = n * 7 / 10
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let prev : Array[Array[Double]] = []
+  for i in 0..<n {
+    prev.push(pop[i])
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    let order = sort_indices(values)
+    let x_best = pop[order[0]]
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let old = pop[i]
+      let candidate : Array[Double] = []
+      if i < roll_end {
+        let dir = if RNG::next(current_rng) < 0.5 { 1.0 } else { -1.0 }
+        let dance = RNG::next(current_rng) < 0.1
+        for d in 0..<dim {
+          let pos = if dance {
+            old[d] + (2.0 * RNG::next(current_rng) - 1.0) * range * 0.1 * rb
+          } else {
+            old[d] +
+            dir * 0.1 * rb * (old[d] - prev[i][d]) +
+            0.3 * (2.0 * RNG::next(current_rng) - 1.0) * range * 0.05 * rb
+          }
+          candidate.push(max(bounds.min, min(bounds.max, pos)))
+        }
+      } else if i < brood_end {
+        let half = range * 0.5 * rb
+        for d in 0..<dim {
+          let pos = x_best[d] + (2.0 * RNG::next(current_rng) - 1.0) * half
+          candidate.push(max(bounds.min, min(bounds.max, pos)))
+        }
+      } else if i < forage_end {
+        for d in 0..<dim {
+          let pos = old[d] +
+            RNG::next(current_rng) * (x_best[d] - old[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * range * 0.2 * rb
+          candidate.push(max(bounds.min, min(bounds.max, pos)))
+        }
+      } else {
+        for d in 0..<dim {
+          let pos = x_best[d] +
+            0.5 * (2.0 * RNG::next(current_rng) - 1.0) * range * 0.1 * rb
+          candidate.push(max(bounds.min, min(bounds.max, pos)))
+        }
+      }
+      let cv = evaluate(f, candidate)
+      evaluations = evaluations + 1
+      if cv < values[i] {
+        pop[i] = candidate
+        values[i] = cv
+        if cv < best_val {
+          best_val = cv
+          best_pos = candidate
+        }
+      }
+      prev[i] = old
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
