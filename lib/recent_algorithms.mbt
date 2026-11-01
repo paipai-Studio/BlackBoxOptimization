@@ -8979,3 +8979,148 @@ pub fn cultural_algorithm(
     evaluations,
   }
 }
+
+// ===== COY: Coyote Optimization Algorithm (2018) =====
+
+///|
+pub struct COYConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_coy_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> COYConfig {
+  COYConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Coyote Optimization Algorithm (2018): the population lives in packs; each
+/// coyote grows toward its pack's alpha (best) and social tendency (pack mean),
+/// and a pup born from two parents may replace the pack's worst member.  Greedy
+/// acceptance and historical-best tracking are added.
+pub fn coyote_optimization_algorithm(
+  config : COYConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let n_packs = if n / 5 < 1 { 1 } else { n / 5 }
+  let pack_size = if n / n_packs < 1 { 1 } else { n / n_packs }
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    for p in 0..<n_packs {
+      let start = p * pack_size
+      if start >= n {
+        break
+      }
+      let end0 = start + pack_size
+      let end = if end0 < n { end0 } else { n }
+      let mut alpha = start
+      let mut a_val = values[start]
+      for c in (start + 1)..<end {
+        if values[c] < a_val {
+          a_val = values[c]
+          alpha = c
+        }
+      }
+      let tendency : Array[Double] = []
+      for d in 0..<dim {
+        let mut s = 0.0
+        for c in start..<end {
+          s = s + pop[c][d]
+        }
+        tendency.push(s / (end - start).to_double())
+      }
+      for c in start..<end {
+        if evaluations >= max_evals {
+          break
+        }
+        let r1 = RNG::next(current_rng)
+        let r2 = RNG::next(current_rng)
+        let candidate : Array[Double] = []
+        for d in 0..<dim {
+          let pos = pop[c][d] +
+            r1 * (pop[alpha][d] - pop[c][d]) +
+            r2 * rb * (tendency[d] - pop[c][d]) +
+            rb * range * 0.03 * (2.0 * RNG::next(current_rng) - 1.0)
+          candidate.push(max(bounds.min, min(bounds.max, pos)))
+        }
+        let cv = evaluate(f, candidate)
+        evaluations = evaluations + 1
+        if cv < values[c] {
+          pop[c] = candidate
+          values[c] = cv
+          if cv < best_val {
+            best_val = cv
+            best_pos = candidate
+          }
+        }
+      }
+      if evaluations < max_evals {
+        let mate = start +
+          (RNG::next(current_rng) * (end - start).to_double()).to_int() %
+          (end - start)
+        let pup : Array[Double] = []
+        for d in 0..<dim {
+          let pos = pop[alpha][d] +
+            RNG::next(current_rng) * (pop[mate][d] - pop[alpha][d]) +
+            rb * range * 0.1 * (2.0 * RNG::next(current_rng) - 1.0)
+          pup.push(max(bounds.min, min(bounds.max, pos)))
+        }
+        let pv = evaluate(f, pup)
+        evaluations = evaluations + 1
+        let mut worst = start
+        for c in start..<end {
+          if values[c] > values[worst] {
+            worst = c
+          }
+        }
+        if pv < values[worst] {
+          pop[worst] = pup
+          values[worst] = pv
+          if pv < best_val {
+            best_val = pv
+            best_pos = pup
+          }
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

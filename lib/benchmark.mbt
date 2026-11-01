@@ -1052,6 +1052,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       cultural_algorithm(make_ca_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "COY",
+    run: (e, d, b, r, f) => {
+      coyote_optimization_algorithm(make_coy_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
