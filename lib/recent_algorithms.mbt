@@ -3160,3 +3160,128 @@ pub fn reptile_search_algorithm(
     evaluations,
   }
 }
+
+// ===== Marine Predators Algorithm (MPA, 2020) =====
+
+///|
+pub struct MPAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_mpa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> MPAConfig {
+  MPAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Levy flight step (beta = 1.5), shared by the MPA foraging phases.
+fn mpa_levy(rng : RNG) -> Double {
+  let g1 = box_muller(RNG::next(rng), RNG::next(rng))
+  let g2 = box_muller(RNG::next(rng), RNG::next(rng))
+  0.05 * g1 / pow_approx(max(abs_val(g2), 1.0e-10), 1.0 / 1.5)
+}
+
+///|
+/// Marine Predators Algorithm (2020): a top-predator "Elite" guides the prey
+/// through three velocity regimes - Brownian exploration while the predator is
+/// much faster than the prey, then a Levy/Brownian mix, then pure Levy
+/// exploitation as the prey slows down.  The damping factor CF makes the last
+/// phase decay to zero, so larger budgets still converge.
+pub fn marine_predators_algorithm(
+  config : MPAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+
+  let prey : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    prey.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = prey[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+  let half = n / 2
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    // Damping factor for the exploitation phase (fades to zero as iter -> 1)
+    let cf = pow_approx(1.0 - iter, 2.0 * iter)
+
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let new_pos : Array[Double] = []
+      if iter < 1.0 / 3.0 {
+        // Phase 1: Brownian motion, predator faster than prey
+        for d in 0..<dim {
+          let rb = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+          let pos = prey[i][d] + 0.5 * rb * (best_pos[d] - rb * prey[i][d])
+          new_pos.push(max(bounds.min, min(bounds.max, pos)))
+        }
+      } else if iter < 2.0 / 3.0 {
+        if i < half {
+          // Phase 2a: prey uses Levy flight
+          for d in 0..<dim {
+            let rl = mpa_levy(current_rng)
+            let pos = prey[i][d] + 0.5 * rl * (best_pos[d] - rl * prey[i][d])
+            new_pos.push(max(bounds.min, min(bounds.max, pos)))
+          }
+        } else {
+          // Phase 2b: predator uses Brownian motion
+          for d in 0..<dim {
+            let rb = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+            let pos = best_pos[d] + 0.5 * cf * (rb * best_pos[d] - prey[i][d])
+            new_pos.push(max(bounds.min, min(bounds.max, pos)))
+          }
+        }
+      } else {
+        // Phase 3: predator uses Levy flight as the prey slows down
+        for d in 0..<dim {
+          let rl = mpa_levy(current_rng)
+          let pos = best_pos[d] + 0.5 * cf * (rl * best_pos[d] - prey[i][d])
+          new_pos.push(max(bounds.min, min(bounds.max, pos)))
+        }
+      }
+      let new_val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      // Greedy acceptance keeps the prey from being randomized by the moves.
+      if new_val < values[i] {
+        prey[i] = new_pos
+        values[i] = new_val
+        if new_val < best_val {
+          best_val = new_val
+          best_pos = new_pos
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

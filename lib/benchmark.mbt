@@ -746,6 +746,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       reptile_search_algorithm(make_rsa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "MPA",
+    run: (e, d, b, r, f) => {
+      marine_predators_algorithm(make_mpa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
