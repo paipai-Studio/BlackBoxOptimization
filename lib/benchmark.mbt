@@ -822,6 +822,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       northern_goshawk_optimization(make_ngo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "BWO",
+    run: (e, d, b, r, f) => {
+      beluga_whale_optimization(make_bwo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

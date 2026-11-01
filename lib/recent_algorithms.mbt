@@ -4834,3 +4834,103 @@ pub fn northern_goshawk_optimization(
     evaluations,
   }
 }
+
+// ===== BWO: Beluga Whale Optimization (2022) =====
+
+///|
+pub struct BWOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bwo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BWOConfig {
+  BWOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Beluga Whale Optimization (2022): swimmers explore via a pairwise dive with
+/// a sinusoidal weighting, feeders exploit around the incumbent best, and the
+/// whale-fall probability decays with the budget fraction so that larger
+/// budgets settle into local refinement.  Greedy acceptance and historical-best
+/// tracking are added.
+pub fn beluga_whale_optimization(
+  config : BWOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+
+  let whales : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    whales.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = whales[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let fall_prob = 0.1 * (1.0 - iter)
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let r = (RNG::next(current_rng) * n.to_double()).to_int() % n
+      let r1 = RNG::next(current_rng)
+      let new_pos : Array[Double] = []
+      for d in 0..<dim {
+        let r2 = RNG::next(current_rng)
+        let r3 = RNG::next(current_rng)
+        let curr = whales[i][d]
+        let pos = if r1 < fall_prob {
+          // whale fall: drift toward the best with a random recoil
+          curr + r2 * (best_pos[d] - curr) - r3 * (whales[r][d] - curr)
+        } else if r1 < 0.5 {
+          // exploration: swim toward a peer with sinusoidal weighting
+          curr + (whales[r][d] - curr) * (1.0 + r2) * sin_approx(TWO_PI * r3)
+        } else {
+          // exploitation: feed around the incumbent best
+          best_pos[d] + r2 * (best_pos[d] - curr) + r3 * (whales[r][d] - curr)
+        }
+        new_pos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let val = evaluate(f, new_pos)
+      evaluations = evaluations + 1
+      if val < values[i] {
+        whales[i] = new_pos
+        values[i] = val
+        if val < best_val {
+          best_val = val
+          best_pos = new_pos
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
