@@ -1528,10 +1528,15 @@ pub fn bat_algorithm(
   }
 
   let mut loudness = config.loudness
-  let mut pulse_rate = config.pulse_rate
   let _bound_range = bounds.max - bounds.min
 
   while evaluations < config.max_evaluations {
+    // Standard bat pulse rate r(t) = r0 * (1 - exp(-gamma*t)): it asymptotes
+    // to r0 instead of creeping past 1.  The old "+0.01 on every new global
+    // best" eventually made r_pulse > pulse_rate impossible, permanently
+    // disabling the local-search branch and freezing the swarm.
+    let t = evaluations.to_double() / n_bats.to_double()
+    let pulse_rate = config.pulse_rate * (1.0 - exp_approx(-0.9 * t))
     for i in 0..<n_bats {
       if evaluations >= config.max_evaluations {
         break
@@ -1583,9 +1588,9 @@ pub fn bat_algorithm(
         best_val = new_val
         best_pos = new_pos
 
-        // Update loudness and pulse rate
-        loudness = loudness * 0.9
-        pulse_rate = pulse_rate + 0.01
+        // Loudness fades as the swarm converges, but never to zero: a small
+        // floor keeps late local searches productive on larger budgets.
+        loudness = max(loudness * 0.9, config.loudness * 0.05)
       }
     }
   }
