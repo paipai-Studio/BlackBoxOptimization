@@ -1040,6 +1040,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       )
     },
   })
+  entries.push(AlgoEntry::{
+    name: "cGA",
+    run: (e, d, b, r, f) => {
+      compact_genetic_algorithm(make_cga_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

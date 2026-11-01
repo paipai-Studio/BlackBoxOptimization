@@ -8764,3 +8764,117 @@ pub fn univariate_marginal_distribution_algorithm(
     evaluations,
   }
 }
+
+// ===== cGA: Compact Genetic Algorithm (1999) =====
+
+///|
+pub struct CGAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_cga_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CGAConfig {
+  CGAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Compact Genetic Algorithm (1999), continuous analogue: a Gaussian model is
+/// updated by a tournament of two samples, moving the mean toward the winner
+/// with rate 1/N while the spread shrinks, so the model concentrates near the
+/// optimum.  Historical-best tracking is added.
+pub fn compact_genetic_algorithm(
+  config : CGAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let floor = range * 1.0e-5
+
+  let mean : Array[Double] = []
+  let sigma : Array[Double] = []
+  for _d in 0..<dim {
+    mean.push((bounds.min + bounds.max) * 0.5)
+    sigma.push(range * 0.3)
+  }
+  let mut best_pos : Array[Double] = []
+  for _d in 0..<dim {
+    best_pos.push(bounds.min)
+  }
+  let mut best_val = 1.0e308
+  let mut evaluations = 0
+
+  while evaluations < max_evals {
+    let pop : Array[Array[Double]] = []
+    let vals : Array[Double] = []
+    for _i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let sol : Array[Double] = []
+      for d in 0..<dim {
+        let sample = mean[d] +
+          sigma[d] * box_muller(RNG::next(current_rng), RNG::next(current_rng))
+        sol.push(max(bounds.min, min(bounds.max, sample)))
+      }
+      let v = evaluate(f, sol)
+      evaluations = evaluations + 1
+      pop.push(sol)
+      vals.push(v)
+      if v < best_val {
+        best_val = v
+        best_pos = sol
+      }
+    }
+    let m = pop.length()
+    if m < 2 {
+      break
+    }
+    let n_pairs = m / 2
+    let winners : Array[Array[Double]] = []
+    for k in 0..<n_pairs {
+      let i = k * 2
+      let j = i + 1
+      let winner = if vals[i] <= vals[j] { pop[i] } else { pop[j] }
+      winners.push(winner)
+    }
+    for d in 0..<dim {
+      let mut wm = 0.0
+      for k in 0..<n_pairs {
+        wm = wm + winners[k][d]
+      }
+      wm = wm / n_pairs.to_double()
+      let mut wv = 0.0
+      for k in 0..<n_pairs {
+        let diff = winners[k][d] - wm
+        wv = wv + diff * diff
+      }
+      let sd = (wv / n_pairs.to_double()).sqrt()
+      mean[d] = wm
+      sigma[d] = if sd < floor { floor } else { sd }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
