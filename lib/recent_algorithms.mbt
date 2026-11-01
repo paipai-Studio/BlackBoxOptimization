@@ -3886,3 +3886,134 @@ pub fn coati_optimization_algorithm(
     evaluations,
   }
 }
+
+// ===== jDE: Self-adaptive Differential Evolution (2006) =====
+
+///|
+pub struct JDEConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_jde_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> JDEConfig {
+  JDEConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// jDE (Brest et al., 2006): differential evolution in which every individual
+/// carries its own scale factor F and crossover rate CR.  Before each trial the
+/// parameters are occasionally re-sampled (probabilities tau1/tau2); the adapted
+/// values are kept only if the trial succeeds and otherwise discarded - this
+/// self-adaptation is what made jDE a landmark algorithm.
+pub fn jde_algorithm(
+  config : JDEConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let pop_size = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let tau1 = 0.1
+  let tau2 = 0.1
+  let f_lower = 0.1
+  let f_upper = 0.9
+
+  let population : Array[Array[Double]] = []
+  let fitness : Array[Double] = []
+  let f_scale : Array[Double] = []
+  let c_rate : Array[Double] = []
+  for _i in 0..<pop_size {
+    let sol = random_solution(dim, bounds, current_rng)
+    population.push(sol)
+    fitness.push(evaluate(f, sol))
+    f_scale.push(0.5)
+    c_rate.push(0.9)
+  }
+  let mut evaluations = pop_size
+  let sorted_idx = sort_indices(fitness)
+  let mut best_pos : Array[Double] = population[sorted_idx[0]]
+  let mut best_val = fitness[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    for target in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+
+      // Self-adapt the control parameters
+      let mut f_i = f_scale[target]
+      let mut cr_i = c_rate[target]
+      if RNG::next(current_rng) < tau1 {
+        f_i = f_lower + RNG::next(current_rng) * (f_upper - f_lower)
+      }
+      if RNG::next(current_rng) < tau2 {
+        cr_i = RNG::next(current_rng)
+      }
+
+      // Three distinct random indices different from `target`
+      let mut a = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      while a == target {
+        a = (RNG::next(current_rng) * pop_size.to_double()).to_int() % pop_size
+      }
+      let mut b = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      while b == target || b == a {
+        b = (RNG::next(current_rng) * pop_size.to_double()).to_int() % pop_size
+      }
+      let mut c = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      while c == target || c == a || c == b {
+        c = (RNG::next(current_rng) * pop_size.to_double()).to_int() % pop_size
+      }
+
+      // DE/rand/1/bin trial
+      let trial : Array[Double] = []
+      for j in 0..<dim {
+        let mutant = population[a][j] +
+          f_i * (population[b][j] - population[c][j])
+        let clamped = max(bounds.min, min(bounds.max, mutant))
+        if RNG::next(current_rng) < cr_i {
+          trial.push(clamped)
+        } else {
+          trial.push(population[target][j])
+        }
+      }
+
+      let trial_fit = evaluate(f, trial)
+      evaluations = evaluations + 1
+      if trial_fit < fitness[target] {
+        population[target] = trial
+        fitness[target] = trial_fit
+        // Keep the adapted parameters on success, discard them on failure
+        f_scale[target] = f_i
+        c_rate[target] = cr_i
+        if trial_fit < best_val {
+          best_val = trial_fit
+          best_pos = trial
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

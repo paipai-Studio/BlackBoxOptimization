@@ -782,6 +782,10 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       coati_optimization_algorithm(make_coa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "jDE",
+    run: (e, d, b, r, f) => jde_algorithm(make_jde_config(e, d, b, 25), f, r),
+  })
   entries
 }
 
