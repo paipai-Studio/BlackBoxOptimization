@@ -1186,6 +1186,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       quantum_behaved_pso(make_qpso_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SaDE",
+    run: (e, d, b, r, f) => {
+      self_adaptive_de(make_sade_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

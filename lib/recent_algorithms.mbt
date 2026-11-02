@@ -12023,3 +12023,216 @@ pub fn quantum_behaved_pso(
     evaluations,
   }
 }
+
+// ===== SaDE: Self-adaptive Differential Evolution (2009) =====
+
+///|
+pub struct SaDEConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_sade_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SaDEConfig {
+  SaDEConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Self-adaptive Differential Evolution (Qin & Suganthan 2009): four
+/// mutation strategies (rand/1, rand-to-best/2, rand/2,
+/// current-to-rand/1) compete through selection probabilities adapted
+/// from their success counts over a learning period; F is drawn
+/// per-trial around 0.5 and CR around a running mean of successful
+/// values.  Binary crossover with greedy selection and per-dimension
+/// sampling follow the established house rules.
+pub fn self_adaptive_de(
+  config : SaDEConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 6 {
+    6
+  } else {
+    config.population_size
+  }
+  let lp = 50
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  let probs : Array[Double] = [0.25, 0.25, 0.25, 0.25]
+  let successes : Array[Int32] = [0, 0, 0, 0]
+  let cr_success_sum : Array[Double] = [0.0, 0.0, 0.0, 0.0]
+  let mut cr_mean = 0.5
+
+  while evaluations < max_evals {
+    let mut gen_success = 0
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      // strategy selection by adapted probabilities
+      let pick = RNG::next(current_rng)
+      let mut acc = 0.0
+      let mut st = 3
+      for s in 0..<4 {
+        acc = acc + probs[s]
+        if pick <= acc {
+          st = s
+          break
+        }
+      }
+      // distinct random indices
+      let r1 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let mut r2 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let mut r3 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let mut r4 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let mut r5 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      while r2 == r1 {
+        r2 = (RNG::next(current_rng) * pop_size.to_double()).to_int() % pop_size
+      }
+      while r3 == r1 || r3 == r2 {
+        r3 = (RNG::next(current_rng) * pop_size.to_double()).to_int() % pop_size
+      }
+      while r4 == r1 || r4 == r2 || r4 == r3 {
+        r4 = (RNG::next(current_rng) * pop_size.to_double()).to_int() % pop_size
+      }
+      while r5 == r1 || r5 == r2 || r5 == r3 || r5 == r4 {
+        r5 = (RNG::next(current_rng) * pop_size.to_double()).to_int() % pop_size
+      }
+      // per-trial F and CR
+      let fg = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+      let mut fv_f = 0.5 + 0.3 * fg
+      if fv_f < 0.1 {
+        fv_f = 0.1
+      }
+      if fv_f > 0.9 {
+        fv_f = 0.9
+      }
+      let cg = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+      let mut cr_v = cr_mean + 0.1 * cg
+      if cr_v < 0.0 {
+        cr_v = 0.0
+      }
+      if cr_v > 1.0 {
+        cr_v = 1.0
+      }
+      // mutation by strategy
+      let mut_trial : Array[Double] = []
+      for d in 0..<dim {
+        let v = match st {
+          0 => pop[r1][d] + fv_f * (pop[r2][d] - pop[r3][d])
+          1 =>
+            pop[r1][d] +
+            fv_f * (best_pos[d] - pop[r1][d]) +
+            fv_f * (pop[r2][d] - pop[r3][d]) +
+            fv_f * (pop[r4][d] - pop[r5][d])
+          2 =>
+            pop[r1][d] +
+            fv_f * (pop[r2][d] - pop[r3][d]) +
+            fv_f * (pop[r4][d] - pop[r5][d])
+          _ =>
+            pop[i][d] +
+            fv_f * (pop[r1][d] - pop[i][d]) +
+            fv_f * (pop[r2][d] - pop[r3][d])
+        }
+        mut_trial.push(v)
+      }
+      // binary crossover
+      let trial : Array[Double] = []
+      for d in 0..<dim {
+        let use_mut = RNG::next(current_rng) < cr_v ||
+          d == (RNG::next(current_rng) * dim.to_double()).to_int() % dim
+        trial.push(
+          if use_mut {
+            max(bounds.min, min(bounds.max, mut_trial[d]))
+          } else {
+            pop[i][d]
+          },
+        )
+      }
+      let fv_trial = evaluate(f, trial)
+      evaluations = evaluations + 1
+      if fv_trial < vals[i] {
+        pop[i] = trial
+        vals[i] = fv_trial
+        successes[st] = successes[st] + 1
+        cr_success_sum[st] = cr_success_sum[st] + cr_v
+        gen_success = gen_success + 1
+        if fv_trial < best_val {
+          best_val = fv_trial
+          best_pos = trial
+        }
+      }
+    }
+    // learning-period update: adapted probabilities + CR running mean
+    let mut total = 0
+    for s in 0..<4 {
+      total = total + successes[s]
+    }
+    if gen_success > 0 {
+      let mut cr_sum = 0.0
+      let mut cr_cnt = 0.0
+      for s in 0..<4 {
+        cr_sum = cr_sum + cr_success_sum[s]
+        cr_cnt = cr_cnt + successes[s].to_double()
+      }
+      if cr_cnt > 0.0 {
+        cr_mean = cr_sum / cr_cnt
+      }
+    }
+    if total >= pop_size * lp / 25 {
+      for s in 0..<4 {
+        probs[s] = (successes[s].to_double() + 1.0e-6) /
+          (total.to_double() + 4.0e-6)
+      }
+      for s in 0..<4 {
+        successes[s] = 0
+        cr_success_sum[s] = 0.0
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
