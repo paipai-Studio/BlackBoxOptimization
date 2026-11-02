@@ -1374,6 +1374,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       crystal_structure_algorithm(make_crystal_structure_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "NOA",
+    run: (e, d, b, r, f) => {
+      nutcracker_optimization_algorithm(make_noa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
