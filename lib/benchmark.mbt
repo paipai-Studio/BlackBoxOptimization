@@ -908,6 +908,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
     name: "LPSO",
     run: (e, d, b, r, f) => local_best_pso(make_lpso_config(e, d, b, 25), f, r),
   })
+  entries.push(AlgoEntry::{
+    name: "WWO",
+    run: (e, d, b, r, f) => {
+      water_wave_optimization(make_wwo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

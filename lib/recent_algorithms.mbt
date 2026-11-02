@@ -10296,3 +10296,113 @@ pub fn local_best_pso(
 
   OptimizationResult::{ best_solution: gbest, best_value: gval, evaluations, }
 }
+
+// ===== WWO: Water Wave Optimization (2015) =====
+
+///|
+pub struct WWOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_wwo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> WWOConfig {
+  WWOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Water Wave Optimization (2015), adapted to the continuous black-box setting:
+/// each wave either propagates with a wavelength that shrinks with the budget
+/// fraction, refracts towards the midpoint with the incumbent best wave, or
+/// breaks into fine ripples around itself.  Greedy acceptance and
+/// historical-best tracking are added.
+pub fn water_wave_optimization(
+  config : WWOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let values : Array[Double] = []
+  for _i in 0..<n {
+    let sol = random_solution(dim, bounds, current_rng)
+    pop.push(sol)
+    values.push(evaluate(f, sol))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(values)
+  let mut best_pos : Array[Double] = pop[sorted_idx[0]]
+  let mut best_val = values[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    let lambda = range * 0.3 * rb
+    let order = sort_indices(values)
+    let x_best = pop[order[0]]
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      let behavior = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let pos = if behavior < 0.45 {
+          // propagation: move with the current wavelength
+          pop[i][d] +
+          RNG::next(current_rng) * lambda * (2.0 * RNG::next(current_rng) - 1.0)
+        } else if behavior < 0.75 {
+          // refraction: collapse towards the midpoint with the best wave
+          let mid = (pop[i][d] + x_best[d]) * 0.5
+          mid +
+          RNG::next(current_rng) *
+          lambda *
+          0.2 *
+          (2.0 * RNG::next(current_rng) - 1.0)
+        } else {
+          // breaking: fine ripples around the wave itself
+          pop[i][d] +
+          RNG::next(current_rng) *
+          lambda *
+          0.1 *
+          (2.0 * RNG::next(current_rng) - 1.0)
+        }
+        cand.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let cv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if cv < values[i] {
+        pop[i] = cand
+        values[i] = cv
+        if cv < best_val {
+          best_val = cv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
