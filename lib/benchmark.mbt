@@ -1470,6 +1470,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       iterated_local_search(make_ils_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SCE",
+    run: (e, d, b, r, f) => {
+      shuffled_complex_evolution(make_sce_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
