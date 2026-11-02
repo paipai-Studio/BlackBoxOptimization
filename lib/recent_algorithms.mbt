@@ -14692,3 +14692,214 @@ pub fn simultaneous_perturbation_spa(
     evaluations,
   }
 }
+
+// ===== DIRECT: Dividing Rectangles (1993) =====
+
+///|
+pub struct DIRECTConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_direct_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> DIRECTConfig {
+  DIRECTConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// DIRECT (Jones, Perttunen & Stuckman 1993), streamlined variant: a set
+/// of hyperrectangles is repeatedly split along its longest side.  Each
+/// round selects the two best-valued and the two widest rectangles
+/// (a tractable stand-in for the convex-hull lower bound of the paper),
+/// samples both trisection endpoints of each selected rectangle and
+/// replaces it by the three sub-rectangles.  Fully deterministic apart
+/// from the random initial centre, so the trajectory is prefix-stable;
+/// historical-best tracking is added.
+pub fn dividing_rectangles(
+  config : DIRECTConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  // rectangle = (center, half-widths, value, min-half-width)
+  let rects_c : Array[Array[Double]] = []
+  let rects_h : Array[Array[Double]] = []
+  let rects_v : Array[Double] = []
+  let rects_w : Array[Double] = []
+
+  let c0 : Array[Double] = []
+  let h0 : Array[Double] = []
+  for _d in 0..<dim {
+    c0.push((bounds.min + bounds.max) / 2.0)
+    h0.push(range / 2.0)
+  }
+  // random initial centre keeps repeated runs diverse
+  let x0 = random_solution(dim, bounds, current_rng)
+  for d in 0..<dim {
+    c0[d] = x0[d]
+  }
+  let v0 = evaluate(f, x0)
+  let mut evaluations = 1
+  rects_c.push(c0)
+  rects_h.push(h0)
+  rects_v.push(v0)
+  rects_w.push(range / 2.0)
+  let mut best_pos : Array[Double] = x0
+  let mut best_val = v0
+
+  while evaluations < max_evals {
+    // pick up to 2 best-valued + 2 widest rectangles (dedup by index)
+    let pick : Array[Int32] = []
+    let try_add = fn(i : Int32) { if !pick.contains(i) { pick.push(i) } }
+    // best-valued / widest picks via two linear scans each (the
+    // full selection sort was O(n^2) per round over a rectangle set
+    // that grows into the thousands and stalled the scan)
+    let n_rects = rects_v.length()
+    for _pass in 0..<2 {
+      let mut best_i : Int32 = -1
+      for i in 0..<n_rects {
+        if pick.contains(i) {
+          continue
+        }
+        if best_i == -1 || rects_v[i] < rects_v[best_i] {
+          best_i = i
+        }
+      }
+      if best_i != -1 {
+        try_add(best_i)
+      }
+    }
+    for _pass in 0..<2 {
+      let mut wide_i : Int32 = -1
+      for i in 0..<n_rects {
+        if pick.contains(i) {
+          continue
+        }
+        if wide_i == -1 || rects_w[i] > rects_w[wide_i] {
+          wide_i = i
+        }
+      }
+      if wide_i != -1 {
+        try_add(wide_i)
+      }
+    }
+    // split each selected rectangle
+    for sel in 0..<pick.length() {
+      if evaluations >= max_evals {
+        break
+      }
+      let i = pick[sel]
+      let c = rects_c[i]
+      let h = rects_h[i]
+      // longest dimension(s)
+      let mut wmax = h[0]
+      for d in 1..<dim {
+        if h[d] > wmax {
+          wmax = h[d]
+        }
+      }
+      let ndiv = range * 1.0e-12
+      // sample the two trisection endpoints along every longest dimension
+      // (only the first longest dimension is split per the paper's rule;
+      // ties are broken by the lowest index for determinism)
+      let mut m = 0
+      for d in 1..<dim {
+        if h[d] > h[m] + ndiv {
+          m = d
+        }
+      }
+      let p1 : Array[Double] = []
+      let p2 : Array[Double] = []
+      for d in 0..<dim {
+        p1.push(c[d])
+        p2.push(c[d])
+      }
+      p1[m] = c[m] - h[m]
+      p2[m] = c[m] + h[m]
+      let v1 = evaluate(f, p1)
+      evaluations = evaluations + 1
+      let v2 = if evaluations < max_evals {
+        let vv = evaluate(f, p2)
+        evaluations = evaluations + 1
+        vv
+      } else {
+        v1
+      }
+      if v1 < best_val {
+        best_val = v1
+        best_pos = p1
+      }
+      if v2 < best_val {
+        best_val = v2
+        best_pos = p2
+      }
+      // trisect: three sub-rectangles replace the parent
+      let hn : Array[Double] = []
+      for d in 0..<dim {
+        hn.push(if d == m { h[d] / 3.0 } else { h[d] })
+      }
+      // middle rectangle keeps the centre
+      rects_c.push(c)
+      rects_h.push(hn)
+      rects_v.push(if v1 < v2 { v1 } else { v2 })
+      let mut wn = hn[0]
+      for d in 1..<dim {
+        if hn[d] < wn {
+          wn = hn[d]
+        }
+      }
+      rects_w.push(wn)
+      // left rectangle
+      let cl : Array[Double] = []
+      for d in 0..<dim {
+        cl.push(if d == m { c[d] - 2.0 * h[d] / 3.0 } else { c[d] })
+      }
+      rects_c.push(cl)
+      rects_h.push(hn)
+      rects_v.push(v1)
+      rects_w.push(wn)
+      // right rectangle
+      let cr : Array[Double] = []
+      for d in 0..<dim {
+        cr.push(if d == m { c[d] + 2.0 * h[d] / 3.0 } else { c[d] })
+      }
+      rects_c.push(cr)
+      rects_h.push(hn)
+      rects_v.push(v2)
+      rects_w.push(wn)
+      // retire the parent (swap with the tail and pop)
+      let last = rects_c.length() - 1
+      rects_c[i] = rects_c[last]
+      rects_h[i] = rects_h[last]
+      rects_v[i] = rects_v[last]
+      rects_w[i] = rects_w[last]
+      let _ = rects_c.pop()
+      let _ = rects_h.pop()
+      let _ = rects_v.pop()
+      let _ = rects_w.pop()
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

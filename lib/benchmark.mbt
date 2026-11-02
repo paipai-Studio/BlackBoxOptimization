@@ -1274,6 +1274,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       simultaneous_perturbation_spa(make_spsa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "DIRECT",
+    run: (e, d, b, r, f) => {
+      dividing_rectangles(make_direct_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
