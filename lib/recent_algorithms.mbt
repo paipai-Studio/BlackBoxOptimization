@@ -10709,3 +10709,227 @@ pub fn variable_neighborhood_search(
     evaluations,
   }
 }
+
+// ===== Rosenbrock: Rotating Coordinate Search (1960) =====
+
+///|
+pub struct RosenbrockConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_rosenbrock_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> RosenbrockConfig {
+  RosenbrockConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn ros_l2norm(v : Array[Double]) -> Double {
+  let mut s = 0.0
+  for d in 0..<v.length() {
+    s = s + v[d] * v[d]
+  }
+  s.sqrt()
+}
+
+///|
+fn ros_dot(a : Array[Double], b : Array[Double]) -> Double {
+  let mut s = 0.0
+  for d in 0..<a.length() {
+    s = s + a[d] * b[d]
+  }
+  s
+}
+
+///|
+/// Rosenbrock's rotating coordinate search (1960): classic deterministic
+/// direct search.  Each stage probes both directions along every axis with
+/// an adaptive step (success grows it, failure shrinks it).  After a stage
+/// with any success the direction frame is rotated via Gram-Schmidt using
+/// the accumulated displacement.  Stalled stages shrink all steps; a stage
+/// that yields zero improvement with tiny steps triggers a conservative
+/// random restart (best kept).  Step schedule is budget-independent so the
+/// trajectory is prefix-stable and budget-monotone.
+pub fn rosenbrock_method(
+  config : RosenbrockConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let s0 = range * 0.2
+  let alpha = 2.0
+  let beta = 0.5
+  let s_min = range * 1.0e-7
+
+  let mut x = random_solution(dim, bounds, current_rng)
+  let mut fx = evaluate(f, x)
+  let mut evaluations = 1
+  let mut best_pos : Array[Double] = x
+  let mut best_val = fx
+
+  let dirs : Array[Array[Double]] = []
+  for i in 0..<dim {
+    let v : Array[Double] = []
+    for d in 0..<dim {
+      v.push(if d == i { 1.0 } else { 0.0 })
+    }
+    dirs.push(v)
+  }
+  let steps : Array[Double] = []
+  for _i in 0..<dim {
+    steps.push(s0)
+  }
+
+  let mut stall_rounds = 0
+
+  while evaluations < max_evals {
+    let mut improved_any = false
+    let disp : Array[Double] = []
+    for _d in 0..<dim {
+      disp.push(0.0)
+    }
+
+    for i in 0..<dim {
+      if evaluations >= max_evals {
+        break
+      }
+      let di = dirs[i]
+      let s = steps[i]
+      let pos1 : Array[Double] = []
+      for d in 0..<dim {
+        pos1.push(max(bounds.min, min(bounds.max, x[d] + s * di[d])))
+      }
+      let fv1 = evaluate(f, pos1)
+      evaluations = evaluations + 1
+      if fv1 < fx {
+        for d in 0..<dim {
+          disp[d] = disp[d] + s * di[d]
+        }
+        x = pos1
+        fx = fv1
+        steps[i] = alpha * s
+        improved_any = true
+      } else if evaluations < max_evals {
+        let pos2 : Array[Double] = []
+        for d in 0..<dim {
+          pos2.push(max(bounds.min, min(bounds.max, x[d] - s * di[d])))
+        }
+        let fv2 = evaluate(f, pos2)
+        evaluations = evaluations + 1
+        if fv2 < fx {
+          for d in 0..<dim {
+            disp[d] = disp[d] - s * di[d]
+          }
+          x = pos2
+          fx = fv2
+          steps[i] = alpha * s
+          improved_any = true
+        } else {
+          steps[i] = beta * s
+        }
+      }
+      if fx < best_val {
+        best_val = fx
+        best_pos = x
+      }
+    }
+
+    if improved_any {
+      stall_rounds = 0
+      // rotate the direction frame: primary direction is the accumulated
+      // successful displacement, the rest come from Gram-Schmidt over the
+      // previous frame
+      let norm = ros_l2norm(disp)
+      if norm > 1.0e-12 * range {
+        let out : Array[Array[Double]] = []
+        let v0 : Array[Double] = []
+        for d in 0..<dim {
+          v0.push(disp[d] / norm)
+        }
+        out.push(v0)
+        for i in 0..<dim {
+          if out.length() >= dim {
+            break
+          }
+          let v : Array[Double] = []
+          for d in 0..<dim {
+            v.push(dirs[i][d])
+          }
+          for u in out {
+            let c = ros_dot(v, u)
+            for d in 0..<dim {
+              v[d] = v[d] - c * u[d]
+            }
+          }
+          let nv = ros_l2norm(v)
+          if nv > 1.0e-10 {
+            for d in 0..<dim {
+              v[d] = v[d] / nv
+            }
+            out.push(v)
+          }
+        }
+        if out.length() == dim {
+          for i in 0..<dim {
+            dirs[i] = out[i]
+          }
+        }
+        // reset steps after rotation
+        for i in 0..<dim {
+          steps[i] = s0
+        }
+      }
+    } else {
+      stall_rounds = stall_rounds + 1
+      let mut max_step = 0.0
+      for i in 0..<dim {
+        steps[i] = beta * steps[i]
+        if steps[i] > max_step {
+          max_step = steps[i]
+        }
+      }
+      // conservative restart: only after repeated zero-improvement stages
+      // with tiny steps; randomness is confined to the restart sample
+      if stall_rounds >= 2 && max_step < s_min {
+        stall_rounds = 0
+        x = random_solution(dim, bounds, current_rng)
+        fx = evaluate(f, x)
+        evaluations = evaluations + 1
+        if fx < best_val {
+          best_val = fx
+          best_pos = x
+        }
+        for i in 0..<dim {
+          steps[i] = s0
+          let v : Array[Double] = []
+          for d in 0..<dim {
+            v.push(if d == i { 1.0 } else { 0.0 })
+          }
+          dirs[i] = v
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

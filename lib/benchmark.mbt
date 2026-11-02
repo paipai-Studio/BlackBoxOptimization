@@ -1140,6 +1140,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       variable_neighborhood_search(make_vns_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "Rosenbrock",
+    run: (e, d, b, r, f) => {
+      rosenbrock_method(make_rosenbrock_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
