@@ -1380,6 +1380,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       nutcracker_optimization_algorithm(make_noa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "ESOA",
+    run: (e, d, b, r, f) => {
+      egret_swarm_optimization_algorithm(make_esoa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
