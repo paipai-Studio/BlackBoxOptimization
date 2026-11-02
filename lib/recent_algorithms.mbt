@@ -11900,3 +11900,126 @@ pub fn ant_colony_continuous(
     evaluations,
   }
 }
+
+// ===== QPSO: Quantum-behaved PSO (2004) =====
+
+///|
+pub struct QPSOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_qpso_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> QPSOConfig {
+  QPSOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Quantum-behaved Particle Swarm Optimization (Sun et al. 2004): velocity
+/// is dropped entirely; each particle samples around a per-dimension point
+/// p = phi*pbest + (1-phi)*gbest with a double-exponential spread scaled by
+/// beta * |mbest[d] - x[d]|, where mbest is the mean of all personal bests.
+/// Beta decays linearly from 1.0 to 0.25 and the exponential tail of
+/// ln(1/u) is capped at 4 (the textbook long tail kept the terminal spread
+/// too wide: Sphere 5k=5.2e-3); the schedule is bounded below so the search
+/// never freezes; per-dimension sampling and historical-best tracking
+/// follow the established house rules.
+pub fn quantum_behaved_pso(
+  config : QPSOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 4 {
+    4
+  } else {
+    config.population_size
+  }
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let pbest : Array[Array[Double]] = []
+  let pbest_vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  pbest.push(best_pos)
+  pbest_vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    pbest.push(p)
+    pbest_vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let beta = 1.0 - 0.75 * iter
+    // mbest: mean of all personal bests
+    let mbest : Array[Double] = []
+    for d in 0..<dim {
+      let mut m = 0.0
+      for i in 0..<pop_size {
+        m = m + pbest[i][d]
+      }
+      mbest.push(m / pop_size.to_double())
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let phi = RNG::next(current_rng)
+        let pd = phi * pbest[i][d] + (1.0 - phi) * best_pos[d]
+        let u = RNG::next(current_rng)
+        let u_safe = if u < 1.0e-12 { 1.0e-12 } else { u }
+        let lnu = @math.ln(1.0 / u_safe)
+        let ltail = if lnu > 4.0 { 4.0 } else { lnu }
+        let spread = beta * (mbest[d] - pop[i][d]).abs() * ltail
+        let sign = if RNG::next(current_rng) < 0.5 { -1.0 } else { 1.0 }
+        cand.push(max(bounds.min, min(bounds.max, pd + sign * spread)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < pbest_vals[i] {
+        pbest[i] = cand
+        pbest_vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

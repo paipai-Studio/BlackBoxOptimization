@@ -1180,6 +1180,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       ant_colony_continuous(make_acor_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "QPSO",
+    run: (e, d, b, r, f) => {
+      quantum_behaved_pso(make_qpso_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
