@@ -16820,3 +16820,140 @@ pub fn emperor_penguin_optimization_algorithm(
     evaluations,
   }
 }
+
+// ===== CPO: Crested Porcupine Optimizer (2024) =====
+
+///|
+pub struct CPOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_cpo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CPOConfig {
+  CPOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Crested Porcupine Optimizer (Abdel-Basset et al. 2024), mechanism-faithful
+/// variant of the porcupine's four defence mechanisms.  A defence-strength
+/// factor Tf = e^{-t/2500} shrinks the perturbation as the threat closes in,
+/// and the four mechanisms are drawn with probabilities that migrate from
+/// exploration to exploitation as Tf decays:
+///   * sight    (r1 < 0.5 Tf) - relocate toward a random fellow porcupine,
+///     X_i <- X_i + r2 (X_rand - X_i) + r3 (2 r4 - 1) range Tf 0.1;
+///   * sound    (r1 < 0.5 Tf + 0.2) - approach the best with a Tf scatter,
+///     X_i <- gbest + r2 (X_i - gbest) + r3 (2 r4 - 1) range Tf;
+///   * smell    (r1 < 0.5 Tf + 0.35) - fine local walk with a Tf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range Tf^2;
+///   * physical (rest) - drive from the current position onto the best,
+///     X_i <- X_i + r2 (gbest - X_i) + r3 (2 r4 - 1) range Tf 0.05.
+/// Individuals are moved unconditionally while the global best is tracked
+/// separately (this keeps the population from collapsing prematurely).
+pub fn crested_porcupine_optimizer(
+  config : CPOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // defence-strength factor Tf decays 1 -> 0 as evaluations are spent
+      let tf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < tf * 0.5 {
+        // sight: relocate toward a random fellow porcupine
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * tf * 0.1
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < tf * 0.5 + 0.2 {
+        // sound: approach the best with a Tf-scaled scatter
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * tf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < tf * 0.5 + 0.35 {
+        // smell: fine local walk with a Tf^2-scaled step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * tf * tf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // physical: drive from the current position onto the best
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * tf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

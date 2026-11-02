@@ -1356,6 +1356,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       emperor_penguin_optimization_algorithm(make_epo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "CPO",
+    run: (e, d, b, r, f) => {
+      crested_porcupine_optimizer(make_cpo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
