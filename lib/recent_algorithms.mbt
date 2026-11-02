@@ -12998,3 +12998,177 @@ pub fn opposition_de(
     evaluations,
   }
 }
+
+// ===== CBO: Colliding Bodies Optimization (2014) =====
+
+///|
+pub struct CBOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_cbo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CBOConfig {
+  CBOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Colliding Bodies Optimization (Kaveh & Mahdavi 2014): bodies are ranked
+/// by fitness into a light fast half (CB2) and a heavy slow half (CB1),
+/// paired best-to-worst.  The heavy half (CB1) keeps one-dimensional
+/// collision momentum exchange (restitution alpha=1.3) as its exploration
+/// with a linearly decaying displacement; the light half (CB2) refines
+/// around the incumbent best with a fading Gaussian, which fixed the
+/// first version's stall (Sphere 5k 0.66).  Historical-best tracking is
+/// added.
+pub fn colliding_bodies_optimization(
+  config : CBOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let pop_size = if config.population_size < 4 {
+    4
+  } else {
+    config.population_size
+  }
+  let half = pop_size / 2
+  let alpha = 1.3
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let vel : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  let v0 : Array[Double] = []
+  for _d in 0..<dim {
+    v0.push(0.0)
+  }
+  vel.push(v0)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    let vi : Array[Double] = []
+    for _d in 0..<dim {
+      vi.push((RNG::next(current_rng) - 0.5) * 0.2)
+    }
+    vel.push(vi)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    // rank indices ascending
+    let idx : Array[Int32] = []
+    for i in 0..<pop_size {
+      idx.push(i)
+    }
+    for a in 0..<pop_size {
+      let mut m = a
+      for b2 in (a + 1)..<pop_size {
+        if vals[idx[b2]] < vals[idx[m]] {
+          m = b2
+        }
+      }
+      if m != a {
+        let ti = idx[a]
+        idx[a] = idx[m]
+        idx[m] = ti
+      }
+    }
+    // collision pairs: best half (CB1) keeps momentum-exchange exploration
+    // with an enlarged displacement; worst half (CB2) switches to a fading
+    // Gaussian refinement around the best (first version's tiny collision
+    // displacements stalled Sphere 5k at 0.66)
+    for j in 0..<half {
+      if evaluations >= max_evals {
+        break
+      }
+      let i1 = idx[j]
+      let i2 = idx[half + j]
+      let m1 = (half - j).to_double()
+      let m2 = (j + 1).to_double()
+      let total = m1 + m2
+      // CB1: collide with its paired CB2, momentum exchange
+      {
+        let ii = i1
+        let i = i2
+        let newv : Array[Double] = []
+        let newx : Array[Double] = []
+        for d in 0..<dim {
+          let vs = vel[ii][d]
+          let vo = vel[i][d]
+          let vn = (m2 * vo + (m1 - alpha * m2) * vs) / total
+          newv.push(vn)
+          newx.push(
+            max(bounds.min, min(bounds.max, pop[ii][d] + vn * rb * range * 0.2)),
+          )
+        }
+        let fv = evaluate(f, newx)
+        evaluations = evaluations + 1
+        if fv < vals[ii] {
+          vel[ii] = newv
+          pop[ii] = newx
+          vals[ii] = fv
+          if fv < best_val {
+            best_val = fv
+            best_pos = newx
+          }
+        }
+      }
+      // CB2: fading Gaussian refinement around the best
+      if evaluations < max_evals {
+        let ii = i2
+        let newx : Array[Double] = []
+        for d in 0..<dim {
+          let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+          newx.push(
+            max(bounds.min, min(bounds.max, best_pos[d] + range * 0.1 * rb * g)),
+          )
+        }
+        let fv = evaluate(f, newx)
+        evaluations = evaluations + 1
+        if fv < vals[ii] {
+          pop[ii] = newx
+          vals[ii] = fv
+          if fv < best_val {
+            best_val = fv
+            best_pos = newx
+          }
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
