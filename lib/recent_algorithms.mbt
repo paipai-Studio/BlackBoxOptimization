@@ -13172,3 +13172,168 @@ pub fn colliding_bodies_optimization(
     evaluations,
   }
 }
+
+// ===== TWO: Teamwork Optimization Algorithm (2021) =====
+
+///|
+pub struct TWOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_two_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> TWOConfig {
+  TWOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Teamwork Optimization Algorithm (Dehghani et al. 2021): the population
+/// is split into teams, each with its own leader (team best).  Per
+/// generation every member makes two coordinated moves - first toward its
+/// team leader, then toward the global leader - with per-dimension random
+/// pulls and greedy acceptance; leaders themselves stay put.  A fading
+/// Gaussian jitter on non-leaders keeps exploration alive late.
+/// Historical-best tracking is added.
+pub fn teamwork_optimization(
+  config : TWOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let pop_size = if config.population_size < 8 {
+    8
+  } else {
+    config.population_size
+  }
+  let n_teams = 4
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    // team leaders: best member of each team
+    let leaders : Array[Int32] = []
+    for t in 0..<n_teams {
+      let mut li = t
+      let mut lv = vals[t]
+      let mut i = t + n_teams
+      while i < pop_size {
+        if vals[i] < lv {
+          lv = vals[i]
+          li = i
+        }
+        i = i + n_teams
+      }
+      leaders.push(li)
+    }
+    // round 1: toward team leader
+    for t in 0..<n_teams {
+      let mut i = t
+      while i < pop_size {
+        if evaluations >= max_evals {
+          break
+        }
+        if i != leaders[t] {
+          let cand : Array[Double] = []
+          for d in 0..<dim {
+            let r = RNG::next(current_rng)
+            cand.push(
+              max(
+                bounds.min,
+                min(
+                  bounds.max,
+                  pop[i][d] + r * (pop[leaders[t]][d] - pop[i][d]),
+                ),
+              ),
+            )
+          }
+          let fv = evaluate(f, cand)
+          evaluations = evaluations + 1
+          if fv < vals[i] {
+            pop[i] = cand
+            vals[i] = fv
+            if fv < best_val {
+              best_val = fv
+              best_pos = cand
+            }
+          }
+        }
+        i = i + n_teams
+      }
+    }
+    // round 2: toward the global leader + fading jitter
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let is_leader = leaders.contains(i)
+      if is_leader {
+        continue
+      }
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let r = RNG::next(current_rng)
+        let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+        cand.push(
+          max(
+            bounds.min,
+            min(
+              bounds.max,
+              pop[i][d] + r * (best_pos[d] - pop[i][d]) + range * 0.02 * rb * g,
+            ),
+          ),
+        )
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

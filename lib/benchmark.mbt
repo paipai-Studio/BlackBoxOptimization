@@ -1222,6 +1222,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       colliding_bodies_optimization(make_cbo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "TWO",
+    run: (e, d, b, r, f) => {
+      teamwork_optimization(make_two_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

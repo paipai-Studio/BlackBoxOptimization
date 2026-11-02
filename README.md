@@ -196,6 +196,7 @@
 | 组合差分进化 | CoDE | 三参数池 × 双策略试验竞争的 DE (2011) |
 | 反向差分进化 | ODE | 反向学习反射 + 经典 DE/rand/1/bin (2006) |
 | 碰撞体优化 | CBO | 动量守恒碰撞探索 + 渐隐精修 (2014) |
+| 团队工作优化 | TWO | 团队领导 + 全局领导两轮协同 (2021) |
 
 > **通用群体智能参数**: 大部分算法默认 `population_size = 25`。下表列出各算法的特有参数。
 
@@ -225,7 +226,7 @@
 | WCA | `num_rivers` | 4 |
 | MFO | `spiral_constant` | 1.0 |
 | WOA | `spiral_constant` | 1.0 |
-| 其余算法 (GWO, SCA, ALO, HHO, SalpSA, AEO, SOS, GBPSO, MSA, PFA, CPA, BCO, FFOA, FWA, PIO, HBA, POA, TSA, GJO, GOA, SOA, GTO, SMA, AO, ChOA, DO, ZOA, MRFO, HGS, RSA, MPA, GEO, AVOA, WSO, COA, OOA, TDO, PDO, NGO, BWO, GBO, GO, WaOA, CLONALG, ABC, EM, DBO, TSO, KOA, FHO, RIME, INFO, SO, MGO, CHIO, PO, SCSO, SABO, HPO, AHA, BKA, ARO, FOX, DMO, RSO, EVO, EEFO, Golden-SA, YSGA, FBI, CapSA, SWO, GAO, MAO, UMDA, cGA, CA, COY, BES, GOOSE, Powell, TEO, SHO, ROA, HOA, BWA, CPSO, LPSO, WWO, WHO, GD, VNS, Rosenbrock, BBBC, BOA, MFA, SBO, TA, ACOR, QPSO, SaDE, BH, LOA, BHop, CoDE, ODE, CBO) | 仅需 `population_size` | 25 |
+| 其余算法 (GWO, SCA, ALO, HHO, SalpSA, AEO, SOS, GBPSO, MSA, PFA, CPA, BCO, FFOA, FWA, PIO, HBA, POA, TSA, GJO, GOA, SOA, GTO, SMA, AO, ChOA, DO, ZOA, MRFO, HGS, RSA, MPA, GEO, AVOA, WSO, COA, OOA, TDO, PDO, NGO, BWO, GBO, GO, WaOA, CLONALG, ABC, EM, DBO, TSO, KOA, FHO, RIME, INFO, SO, MGO, CHIO, PO, SCSO, SABO, HPO, AHA, BKA, ARO, FOX, DMO, RSO, EVO, EEFO, Golden-SA, YSGA, FBI, CapSA, SWO, GAO, MAO, UMDA, cGA, CA, COY, BES, GOOSE, Powell, TEO, SHO, ROA, HOA, BWA, CPSO, LPSO, WWO, WHO, GD, VNS, Rosenbrock, BBBC, BOA, MFA, SBO, TA, ACOR, QPSO, SaDE, BH, LOA, BHop, CoDE, ODE, CBO, TWO) | 仅需 `population_size` | 25 |
 
 ### 📐 确定性直接搜索
 无需梯度信息，通过几何模式进行直接搜索，适合不可导函数。
