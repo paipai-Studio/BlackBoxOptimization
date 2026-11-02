@@ -12851,3 +12851,150 @@ pub fn composite_de(
     evaluations,
   }
 }
+
+// ===== ODE: Opposition-based Differential Evolution (2006) =====
+
+///|
+pub struct ODEConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ode_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ODEConfig {
+  ODEConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Opposition-based Differential Evolution (Rahnamayan et al. 2006): the
+/// classical DE/rand/1/bin plus opposition-based learning - with jump
+/// rate JR each generation a random quarter of the population is
+/// reflected through the bound midpoint (x' = lb + ub - x) and the better
+/// of the pair is kept, restarting exploration from the opposite side of
+/// the box.  Historical-best tracking is added.
+pub fn opposition_de(
+  config : ODEConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 4 {
+    4
+  } else {
+    config.population_size
+  }
+  let jr = 0.3
+  let f_factor = 0.7
+  let cr = 0.9
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // opposition jump: reflect a random quarter of the population
+    if RNG::next(current_rng) < jr {
+      for i in 0..<pop_size {
+        if evaluations >= max_evals {
+          break
+        }
+        if RNG::next(current_rng) < 0.25 {
+          let opp : Array[Double] = []
+          for d in 0..<dim {
+            opp.push(bounds.min + bounds.max - pop[i][d])
+          }
+          let fv = evaluate(f, opp)
+          evaluations = evaluations + 1
+          if fv < vals[i] {
+            pop[i] = opp
+            vals[i] = fv
+            if fv < best_val {
+              best_val = fv
+              best_pos = opp
+            }
+          }
+        }
+      }
+    }
+    // DE/rand/1/bin generation
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let r1 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let mut r2 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let mut r3 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      while r2 == r1 {
+        r2 = (RNG::next(current_rng) * pop_size.to_double()).to_int() % pop_size
+      }
+      while r3 == r1 || r3 == r2 {
+        r3 = (RNG::next(current_rng) * pop_size.to_double()).to_int() % pop_size
+      }
+      let mut_trial : Array[Double] = []
+      for d in 0..<dim {
+        mut_trial.push(pop[r1][d] + f_factor * (pop[r2][d] - pop[r3][d]))
+      }
+      let trial : Array[Double] = []
+      for d in 0..<dim {
+        let use_mut = RNG::next(current_rng) < cr ||
+          (RNG::next(current_rng) * dim.to_double()).to_int() % dim == d
+        trial.push(
+          if use_mut {
+            max(bounds.min, min(bounds.max, mut_trial[d]))
+          } else {
+            pop[i][d]
+          },
+        )
+      }
+      let fv = evaluate(f, trial)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = trial
+        vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = trial
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

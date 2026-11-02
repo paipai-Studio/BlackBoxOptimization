@@ -1212,6 +1212,10 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
     name: "CoDE",
     run: (e, d, b, r, f) => composite_de(make_code_config(e, d, b, 25), f, r),
   })
+  entries.push(AlgoEntry::{
+    name: "ODE",
+    run: (e, d, b, r, f) => opposition_de(make_ode_config(e, d, b, 25), f, r),
+  })
   entries
 }
 
