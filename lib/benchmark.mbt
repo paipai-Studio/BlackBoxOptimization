@@ -1338,6 +1338,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       hippopotamus_optimization_algorithm(make_ho_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "NMRA",
+    run: (e, d, b, r, f) => {
+      naked_mole_rat_algorithm(make_nmra_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
