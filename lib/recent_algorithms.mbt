@@ -13895,9 +13895,15 @@ pub fn unified_pso(
     }
   }
 
+  let mut gen = 0
   while evaluations < max_evals {
-    let iter = evaluations.to_double() / max_evals.to_double()
-    let w = 0.7298 - 0.3298 * iter * iter
+    gen = gen + 1
+    // budget-independent inertia schedule: geometric per-generation decay
+    // clamped at 0.3 (the evals/max-coupled quadratic schedule made the
+    // 5k trajectory search far longer at high inertia than the 1k one,
+    // flipping Rastrigin d5 both in mean and median at 100 seeds)
+    let w0 = 0.7298 * @math.pow(0.98, gen.to_double())
+    let w = if w0 < 0.3 { 0.3 } else { w0 }
     for i in 0..<pop_size {
       if evaluations >= max_evals {
         break
@@ -13960,8 +13966,9 @@ pub fn unified_pso(
       let cand : Array[Double] = []
       for d in 0..<dim {
         let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
-        let sigma_rs = if range * 0.05 * (1.0 - iter) > range * 0.02 {
-          range * 0.05 * (1.0 - iter)
+        let sigma_raw = range * 0.05 * @math.pow(0.98, gen.to_double())
+        let sigma_rs = if sigma_raw > range * 0.02 {
+          sigma_raw
         } else {
           range * 0.02
         }
