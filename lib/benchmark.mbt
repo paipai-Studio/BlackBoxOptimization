@@ -1404,6 +1404,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       mayfly_optimization_algorithm(make_ma_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SSO",
+    run: (e, d, b, r, f) => {
+      social_spider_optimization(make_sso_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
