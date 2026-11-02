@@ -1398,6 +1398,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       atomic_orbital_search(make_aos_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "MA",
+    run: (e, d, b, r, f) => {
+      mayfly_optimization_algorithm(make_ma_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

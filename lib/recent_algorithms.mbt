@@ -17719,3 +17719,145 @@ pub fn atomic_orbital_search(
     evaluations,
   }
 }
+
+// ===== MA: Mayfly Optimization Algorithm (2020) =====
+
+///|
+pub struct MAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ma_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> MAConfig {
+  MAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Mayfly Optimization Algorithm (Zervoudakis & Tsafarakis 2020),
+/// mechanism-faithful variant of a mayfly swarm's dance and pair attraction.
+/// Each mayfly recalls its own best (personal attraction) besides the swarm's
+/// best, and a dance factor df = e^{-t/2500} decays as evaluations are spent:
+///   * dance    (r1 < 0.45 df) - differential swirl across the swarm,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range df 0.1;
+///   * personal (r1 < 0.45 df + 0.25) - return onto the mayfly's own best,
+///     X_i <- X_pbest + r2 (X_i - X_pbest) + r3 (2 r4 - 1) range df^2;
+///   * swarm    (rest) - pair onto the swarm's best,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range df 0.05.
+/// Mayflies move unconditionally while the personal and swarm bests are
+/// tracked separately (this keeps the swarm from collapsing prematurely).
+pub fn mayfly_optimization_algorithm(
+  config : MAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let pbest : Array[Array[Double]] = []
+  let pbest_val : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  pbest.push(best_pos)
+  pbest_val.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    pbest.push(p)
+    pbest_val.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // dance factor df decays 1 -> 0 as evaluations are spent
+      let df = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < df * 0.45 {
+        // dance: differential swirl across the swarm
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * df * 0.1
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < df * 0.45 + 0.25 {
+        // personal: return onto the mayfly's own best
+        let pb = pbest[i]
+        for d in 0..<dim {
+          let nv = pb[d] +
+            r2 * (xi[d] - pb[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * df * df
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // swarm: pair onto the swarm's best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * df * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < pbest_val[i] {
+        pbest[i] = cand
+        pbest_val[i] = fv
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
