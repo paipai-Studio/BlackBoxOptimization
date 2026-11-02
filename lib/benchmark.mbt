@@ -1192,6 +1192,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       self_adaptive_de(make_sade_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "BH",
+    run: (e, d, b, r, f) => {
+      black_hole_algorithm(make_bh_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

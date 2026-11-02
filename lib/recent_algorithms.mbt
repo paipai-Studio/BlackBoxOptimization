@@ -12236,3 +12236,178 @@ pub fn self_adaptive_de(
     evaluations,
   }
 }
+
+// ===== BH: Black Hole Algorithm (2013) =====
+
+///|
+pub struct BHConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bh_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BHConfig {
+  BHConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Black Hole Algorithm (Hatamlou 2013): the best individual becomes the
+/// black hole; every other star moves toward it (per-dimension random pull)
+/// and any star crossing the event horizon is absorbed and re-randomised.
+/// The horizon radius scales with the fitness ratio f_bh/f_mean (bounded
+/// below so absorption keeps refreshing the population even near
+/// convergence); the BH itself is refined each generation by a fading
+/// Gaussian (rb^2) so the cluster keeps tightening.  Historical-best
+/// tracking is added.
+pub fn black_hole_algorithm(
+  config : BHConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let pop_size = if config.population_size < 4 {
+    4
+  } else {
+    config.population_size
+  }
+  let r_base = range * 0.3
+  let r_floor = range * 0.01
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut bh_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut bh_val = evaluate(f, bh_pos)
+  let mut evaluations = 1
+  pop.push(bh_pos)
+  vals.push(bh_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < bh_val {
+      bh_val = v
+      bh_pos = p
+    }
+  }
+  let mut best_pos : Array[Double] = bh_pos
+  let mut best_val = bh_val
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    // fading refinement of the black hole itself: without this the swarm
+    // merely clusters around an unrefined BH and stalls (Sphere 1k->5k
+    // improved by only 8%)
+    if evaluations < max_evals {
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+        cand.push(
+          max(
+            bounds.min,
+            min(bounds.max, bh_pos[d] + range * 0.1 * rb * rb * g),
+          ),
+        )
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < bh_val {
+        bh_pos = cand
+        bh_val = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+    // mean fitness for the horizon radius
+    let mut f_sum = 0.0
+    for i in 0..<pop_size {
+      f_sum = f_sum + vals[i]
+    }
+    let f_mean = f_sum / pop_size.to_double()
+    let mut r_horizon = r_base * (bh_val / (f_mean + 1.0e-12))
+    if r_horizon < r_floor {
+      r_horizon = r_floor
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      // gravitational pull toward the black hole (skip the BH itself)
+      let is_bh = pop[i] == bh_pos
+      if is_bh {
+        continue
+      }
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let r = RNG::next(current_rng)
+        cand.push(
+          max(
+            bounds.min,
+            min(bounds.max, pop[i][d] + r * (bh_pos[d] - pop[i][d])),
+          ),
+        )
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      let mut absorbed = false
+      // event horizon: distance to the black hole
+      let mut dist2 = 0.0
+      for d in 0..<dim {
+        let dd = cand[d] - bh_pos[d]
+        dist2 = dist2 + dd * dd
+      }
+      if dist2.sqrt() < r_horizon {
+        absorbed = true
+      }
+      if absorbed {
+        // absorbed: re-randomise
+        let p = random_solution(dim, bounds, current_rng)
+        pop[i] = p
+        vals[i] = evaluate(f, p)
+        evaluations = evaluations + 1
+      } else {
+        pop[i] = cand
+        vals[i] = fv
+      }
+      // black hole swap if the star became better than the BH
+      if fv < bh_val && !absorbed {
+        bh_pos = cand
+        bh_val = fv
+      }
+      if vals[i] < best_val {
+        best_val = vals[i]
+        best_pos = pop[i]
+      }
+      if bh_val < best_val {
+        best_val = bh_val
+        best_pos = bh_pos
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
