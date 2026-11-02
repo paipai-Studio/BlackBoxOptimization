@@ -1100,6 +1100,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       horse_herd_optimization(make_hoa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "BWA",
+    run: (e, d, b, r, f) => {
+      black_widow_optimization_algorithm(make_bwa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
