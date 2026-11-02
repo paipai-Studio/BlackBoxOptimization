@@ -1416,6 +1416,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       sea_lion_optimization_algorithm(make_sea_lion_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "FOA",
+    run: (e, d, b, r, f) => {
+      fruit_fly_optimization_algorithm(make_foa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
