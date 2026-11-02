@@ -1162,6 +1162,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
     name: "MFA",
     run: (e, d, b, r, f) => mayfly_algorithm(make_mfa_config(e, d, b, 25), f, r),
   })
+  entries.push(AlgoEntry::{
+    name: "SBO",
+    run: (e, d, b, r, f) => {
+      secretary_bird_optimization(make_sbo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

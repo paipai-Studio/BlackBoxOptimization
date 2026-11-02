@@ -11476,3 +11476,146 @@ pub fn mayfly_algorithm(
     evaluations,
   }
 }
+
+// ===== SBO: Secretary Bird Optimization (2024) =====
+
+///|
+pub struct SBOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_sbo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SBOConfig {
+  SBOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Secretary Bird Optimization (Fu et al. 2024), mechanism-faithful variant:
+/// the foraging phase (early) alternates between searching the snake via a
+/// best-pull plus a differential peer term and striking via a cosine-modded
+/// step with a fading jitter; the escape phase (late) refines around the
+/// best with a fading Gaussian.  All moves are greedy-accepted with
+/// historical-best tracking and per-dimension sampling.
+pub fn secretary_bird_optimization(
+  config : SBOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let pop_size = if config.population_size < 4 {
+    4
+  } else {
+    config.population_size
+  }
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let r = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let q = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let cand : Array[Double] = []
+      if rb > 0.5 {
+        // foraging: search or strike
+        if RNG::next(current_rng) < 0.5 {
+          for d in 0..<dim {
+            let r1 = RNG::next(current_rng)
+            let r2 = RNG::next(current_rng)
+            cand.push(
+              max(
+                bounds.min,
+                min(
+                  bounds.max,
+                  pop[i][d] +
+                  r1 * (best_pos[d] - pop[i][d]) +
+                  r2 * (pop[r][d] - pop[q][d]),
+                ),
+              ),
+            )
+          }
+        } else {
+          let phi = RNG::next(current_rng) * 6.283185307179586
+          for d in 0..<dim {
+            let r1 = RNG::next(current_rng)
+            let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+            let strike = r1 * (best_pos[d] - pop[i][d]) * @math.cos(phi).abs()
+            cand.push(
+              max(
+                bounds.min,
+                min(bounds.max, pop[i][d] + strike + range * 0.05 * rb * g),
+              ),
+            )
+          }
+        }
+      } else {
+        // escape/hunt: fading Gaussian refinement around the best
+        for d in 0..<dim {
+          let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+          cand.push(
+            max(
+              bounds.min,
+              min(bounds.max, best_pos[d] + range * 0.1 * rb * rb * g),
+            ),
+          )
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
