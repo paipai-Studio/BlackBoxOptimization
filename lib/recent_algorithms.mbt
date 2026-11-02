@@ -10509,3 +10509,92 @@ pub fn wild_horse_optimizer(
     evaluations,
   }
 }
+
+// ===== GD: Great Deluge Algorithm (1993) =====
+
+///|
+pub struct GDConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_gd_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> GDConfig {
+  GDConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Great Deluge Algorithm (1993): a single solution wanders with Gaussian
+/// steps and is accepted whenever it stays under the water level
+/// WL = best + margin, where the margin shrinks geometrically.  The level
+/// schedule is independent of the evaluation budget, so the trajectory prefix
+/// is budget-independent and the historical best is monotone.
+pub fn great_deluge_algorithm(
+  config : GDConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let _n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let margin_init = range
+  let sigma0 = range * 0.05
+
+  let mut x = random_solution(dim, bounds, current_rng)
+  let mut fx = evaluate(f, x)
+  let mut evaluations = 1
+  let mut best_pos : Array[Double] = x
+  let mut best_val = fx
+  let mut margin = margin_init
+
+  while evaluations < max_evals {
+    let margin_ratio = margin / margin_init
+    let sigma = max(range * 1.0e-9, sigma0 * margin_ratio)
+    // half of the budget refines around the best (fading Gaussian), the rest
+    // performs the classic water-level random walk
+    let walk = RNG::next(current_rng) < 0.5
+    let cand : Array[Double] = []
+    for d in 0..<dim {
+      let gauss = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+      let pos = if walk {
+        x[d] + sigma * gauss
+      } else {
+        best_pos[d] + range * 0.1 * margin_ratio * gauss
+      }
+      cand.push(max(bounds.min, min(bounds.max, pos)))
+    }
+    let fv = evaluate(f, cand)
+    evaluations = evaluations + 1
+    if fv < best_val {
+      best_val = fv
+      best_pos = cand
+    }
+    // water level: accept everything under WL = best + margin
+    if fv <= best_val + margin {
+      x = cand
+      fx = fv
+    }
+    margin = margin * 0.999
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

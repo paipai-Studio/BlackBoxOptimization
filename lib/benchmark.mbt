@@ -920,6 +920,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       wild_horse_optimizer(make_who_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "GD",
+    run: (e, d, b, r, f) => {
+      great_deluge_algorithm(make_gd_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
