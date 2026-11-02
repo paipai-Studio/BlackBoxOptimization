@@ -1458,6 +1458,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       chaos_game_optimization(make_cgo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "CDO",
+    run: (e, d, b, r, f) => {
+      chernobyl_disaster_optimizer(make_cdo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
