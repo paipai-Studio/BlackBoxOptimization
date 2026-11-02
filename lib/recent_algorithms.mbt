@@ -15303,3 +15303,177 @@ pub fn jade(
     evaluations,
   }
 }
+
+// ===== LCA: League Championship Algorithm (2015) =====
+
+///|
+pub struct LCAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_lca_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> LCAConfig {
+  LCAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// League Championship Algorithm (Kashan 2015): each round pairs the
+/// teams randomly.  The winner plays an extrapolation shot along its own
+/// victory direction (x_w' = x_w + U(0,2)*(x_w - x_l)) and the loser
+/// imitates the winner's new play (x_l' = x_l + U(0,2)*(x_w' - x_l));
+/// both moves are greedy-accepted with per-dimension sampling.  A fading
+/// Gaussian jitter keeps late rounds from stalling; historical-best
+/// tracking is added.
+pub fn league_championship_algorithm(
+  config : LCAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let pop_size = if config.population_size < 4 {
+    4
+  } else {
+    config.population_size
+  }
+  let pop_size_even = pop_size - pop_size % 2
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    // random pairing for this round (Fisher-Yates on a copy of indices)
+    let order : Array[Int32] = []
+    for i in 0..<pop_size_even {
+      order.push(i)
+    }
+    let n_order = pop_size_even
+    for i in 0..<n_order {
+      let j = (RNG::next(current_rng) * n_order.to_double()).to_int() % n_order
+      let t = order[i]
+      order[i] = order[j]
+      order[j] = t
+    }
+    let n_pairs = pop_size_even / 2
+    for pr in 0..<n_pairs {
+      if evaluations >= max_evals {
+        break
+      }
+      let a = order[2 * pr]
+      let b2 = order[2 * pr + 1]
+      let (winner, loser) = if vals[a] <= vals[b2] { (a, b2) } else { (b2, a) }
+      // winner's extrapolation shot
+      let w_new : Array[Double] = []
+      for d in 0..<dim {
+        let r = RNG::next(current_rng) * 2.0
+        w_new.push(
+          max(
+            bounds.min,
+            min(
+              bounds.max,
+              pop[winner][d] + r * (pop[winner][d] - pop[loser][d]),
+            ),
+          ),
+        )
+      }
+      let fv_w = evaluate(f, w_new)
+      evaluations = evaluations + 1
+      if fv_w < vals[winner] {
+        pop[winner] = w_new
+        vals[winner] = fv_w
+        if fv_w < best_val {
+          best_val = fv_w
+          best_pos = w_new
+        }
+      }
+      // loser imitates the winner's play
+      if evaluations < max_evals {
+        let l_new : Array[Double] = []
+        for d in 0..<dim {
+          let r = RNG::next(current_rng) * 2.0
+          l_new.push(
+            max(
+              bounds.min,
+              min(
+                bounds.max,
+                pop[loser][d] + r * (pop[winner][d] - pop[loser][d]),
+              ),
+            ),
+          )
+        }
+        let fv_l = evaluate(f, l_new)
+        evaluations = evaluations + 1
+        if fv_l < vals[loser] {
+          pop[loser] = l_new
+          vals[loser] = fv_l
+          if fv_l < best_val {
+            best_val = fv_l
+            best_pos = l_new
+          }
+        }
+      }
+    }
+    // fading jitter on one random team
+    if evaluations < max_evals {
+      let w = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+        cand.push(
+          max(bounds.min, min(bounds.max, pop[w][d] + range * 0.05 * rb * g)),
+        )
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[w] {
+        pop[w] = cand
+        vals[w] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

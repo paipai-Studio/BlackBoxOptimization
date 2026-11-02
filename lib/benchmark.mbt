@@ -1290,6 +1290,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
     name: "JADE",
     run: (e, d, b, r, f) => jade(make_jade_config(e, d, b, 25), f, r),
   })
+  entries.push(AlgoEntry::{
+    name: "LCA",
+    run: (e, d, b, r, f) => {
+      league_championship_algorithm(make_lca_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
