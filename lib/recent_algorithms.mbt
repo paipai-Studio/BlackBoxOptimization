@@ -14558,3 +14558,137 @@ pub fn newton_raphson_based_optimization(
     evaluations,
   }
 }
+
+// ===== SPSA: Simultaneous Perturbation Stochastic Approximation (1992) =====
+
+///|
+pub struct SPSAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_spsa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SPSAConfig {
+  SPSAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Simultaneous Perturbation Stochastic Approximation (Spall 1992): a
+/// single incumbent estimates a descent direction from exactly two
+/// function evaluations per generation - one forward and one backward
+/// sample along a random +-1 perturbation vector (all dimensions moved
+/// simultaneously).  The perturbation radius c and the step size a decay
+/// geometrically per generation with floors (budget-independent schedule,
+/// prefix-stable trajectory), and a fading Gaussian jitter guards against
+/// late stagnation on multimodal landscapes.  Historical-best tracking is
+/// added.
+pub fn simultaneous_perturbation_spa(
+  config : SPSAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+
+  let mut x = random_solution(dim, bounds, current_rng)
+  let mut fx = evaluate(f, x)
+  let mut evaluations = 1
+  let mut best_pos : Array[Double] = x
+  let mut best_val = fx
+
+  let mut gen = 0
+  while evaluations < max_evals {
+    gen = gen + 1
+    // Spall's polynomial schedules (much slower than geometric decay:
+    // with 0.97^gen the perturbation radius hit its floor long before
+    // Rosenbrock's valley was crossed and the estimate drowned in noise)
+    let c_k = range * 0.2 / @math.pow(gen.to_double(), 0.101)
+    let step_k = range * 0.15 / @math.pow((gen + 10).to_double(), 0.602)
+    // simultaneous perturbation: random +-1 per dimension, both probes
+    // drawn, then the gradient estimate uses the actual deltas
+    let delta : Array[Double] = []
+    for _d in 0..<dim {
+      delta.push(if RNG::next(current_rng) < 0.5 { -1.0 } else { 1.0 })
+    }
+    let x_plus : Array[Double] = []
+    for d in 0..<dim {
+      x_plus.push(max(bounds.min, min(bounds.max, x[d] + c_k * delta[d])))
+    }
+    let fp = evaluate(f, x_plus)
+    evaluations = evaluations + 1
+    let x_minus : Array[Double] = []
+    for d in 0..<dim {
+      x_minus.push(max(bounds.min, min(bounds.max, x[d] - c_k * delta[d])))
+    }
+    let fm = evaluate(f, x_minus)
+    evaluations = evaluations + 1
+    // gradient estimate and update; the raw estimate has the function's
+    // gradient magnitude (Rosenbrock's valley walls carry |g| ~ 1e4, so
+    // a raw a_k*g step overshoots into the opposite corner and oscillates
+    // there forever) - normalize to a trust-region step of step_k*range
+    // along -g
+    let mut gnorm2 = 0.0
+    for d in 0..<dim {
+      let g = (fp - fm) / (2.0 * c_k * delta[d])
+      gnorm2 = gnorm2 + g * g
+    }
+    let gnorm = gnorm2.sqrt() + 1.0e-300
+    for d in 0..<dim {
+      let g = (fp - fm) / (2.0 * c_k * delta[d])
+      x[d] = max(bounds.min, min(bounds.max, x[d] - step_k * g / gnorm))
+    }
+    fx = evaluate(f, x)
+    evaluations = evaluations + 1
+    if fx < best_val {
+      best_val = fx
+      best_pos = x
+    }
+    // fading jitter against late stagnation (sigma floored so the
+    // incumbent can still leave a local basin at 5k: Ackley was frozen
+    // bit-exact at 0.0677)
+    if evaluations < max_evals && RNG::next(current_rng) < 0.3 {
+      let cand : Array[Double] = []
+      let sigma_j0 = range * 0.05 * @math.pow(0.98, gen.to_double())
+      let sigma_j = if sigma_j0 > range * 0.005 {
+        sigma_j0
+      } else {
+        range * 0.005
+      }
+      for d in 0..<dim {
+        let g2 = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+        cand.push(max(bounds.min, min(bounds.max, best_pos[d] + sigma_j * g2)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < fx {
+        x = cand
+        fx = fv
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

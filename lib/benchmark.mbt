@@ -1268,6 +1268,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       newton_raphson_based_optimization(make_nrbo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SPSA",
+    run: (e, d, b, r, f) => {
+      simultaneous_perturbation_spa(make_spsa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
