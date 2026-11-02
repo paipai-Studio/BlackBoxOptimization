@@ -1,10 +1,10 @@
 # BlackBoxOptimization
 
-基于 MoonBit 实现的黑盒优化算法框架，支持 92 种经典优化算法，提供统一的接口和基准测试框架。
+基于 MoonBit 实现的黑盒优化算法框架，支持 176 种经典优化算法，提供统一的接口和基准测试框架。
 
 ## 算法分类
 
-本框架实现了 **92 种**黑盒优化算法，按设计灵感和机制分为以下类别：
+本框架实现了 **176 种**黑盒优化算法，按设计灵感和机制分为以下类别：
 
 ### 🔍 单点搜索算法
 最简单的优化策略，从单个初始解出发，通过迭代改进逐步逼近最优值。
@@ -14,6 +14,8 @@
 | 随机搜索 | Random Search | 随机采样搜索空间中的点作为基线对比 |
 | 爬山法 | Hill Climbing | 从当前解的邻域中选择更优解进行迭代 |
 | 模拟退火 | Simulated Annealing | 以概率接受劣解，跳出局部最优陷阱 |
+| 盆地跳跃算法 | BHop | 自适应跳跃 + 收缩精修 + Metropolis 接受 (1997) |
+| 同步扰动随机逼近 | SPSA | 两次评估估计梯度 + 归一化信任域步长 (1992) |
 
 > **通用参数**: 所有算法均包含 `max_evals`（最大评估次数）、`dim`（维度）、`bounds`（搜索边界）三个基础参数。
 
@@ -22,6 +24,7 @@
 | Random Search | 无需额外参数 | - |
 | Hill Climbing | 无需额外参数 | - |
 | Simulated Annealing | `initial_temp`（初始温度）, `cooling_rate`（降温速率）, `step_size`（步长） | 100.0, 0.995, 0.5 |
+| SPSA / Basin Hopping | 仅需 `population_size` | 25 |
 
 ### 🔧 局部搜索算法
 强化局部开发能力，通过记忆或惩罚机制避免陷入循环。
@@ -30,11 +33,15 @@
 |------|------|------|
 | 禁忌搜索 | Tabu Search | 使用禁忌表记录近期操作，避免循环 |
 | 引导局部搜索 | Guided LS | 添加惩罚项引导搜索逃出局部最优 |
+| 大洪水算法 | GD | 水位线 WL 判据，margin 几何收缩 (1993) |
+| 变邻域搜索 | VNS | 多邻域 shake 轮换 + 渐隐局部步 (1997) |
+| 阈值接受算法 | TA | 阈值收缩的确定性接受准则，模拟退火孪生 (1990) |
 
 | 算法 | 关键参数 | 推荐值 |
 |------|----------|--------|
 | Tabu Search | `tabu_list_size`（禁忌表大小）, `neighborhood_size`（邻域大小）, `step_size`（步长） | 50, 30, 0.5 |
 | Guided LS | `neighborhood_size`（邻域大小）, `step_size`（步长）, `lambda`（惩罚系数） | 30, 0.5, 0.5 |
+| GD / VNS / TA | 仅需 `population_size` | 25 |
 
 ### 🧬 进化算法
 模拟自然选择与遗传过程，基于种群的进化搜索机制。
@@ -49,6 +56,17 @@
 | 帝国主义竞争算法 | ICA | 模拟帝国殖民、同化和竞争机制 |
 | 生物地理学优化 | BBO | 基于栖息地适宜度与物种迁移模型 |
 | 回溯搜索算法 | BSA | 基于历史种群记忆的定向交叉变异 |
+| 克隆选择算法 | CLONALG | 克隆-变异-选择的人工免疫机制 (2002) |
+| 新冠群体免疫优化 | CHIO | 感染/隔离/群体免疫驱动搜索 (2021) |
+| 文化算法 | CA | 群体空间 + 信念空间双重进化 (1994) |
+| 蜉蝣算法 | MFA | 雌雄双群 PSO 式移动 + 交配重组 (2020) |
+| 自适应差分进化 | SaDE | 四策略竞争 + 选择概率自适应 (2009) |
+| 组合差分进化 | CoDE | 三参数池 × 双策略试验竞争的 DE (2011) |
+| 反向差分进化 | ODE | 反向学习反射 + 经典 DE/rand/1/bin (2006) |
+| 实数编码遗传算法 | RGA | SBX 交叉 + 多项式变异 + 精英截断 (1995) |
+| 藤壶交配优化 | BMO | soft 双亲重组 / hard 与 best 交配 (2018) |
+| 模因算法 | Memetic | SBX-GA 主体 + Lamarckian 局部精修 (1989) |
+| 自适应差分进化 JADE | JADE | current-to-pbest + 外部档案 + Lehmer 自适应 (2009) |
 
 | 算法 | 关键参数 | 推荐值 |
 |------|----------|--------|
@@ -60,6 +78,7 @@
 | ICA | `population_size`, `imperialist_count`, `assimilation_rate`, `revolution_rate` | 25, 3, 0.3, 0.3 |
 | BBO | `population_size`, `mutation_rate` | 25, 0.01 |
 | BSA | `population_size` | 25 |
+| CLONALG / CA / CHIO / SaDE / CoDE / ODE / JADE / RGA / Memetic / MFA / BMO | 仅需 `population_size` | 25 |
 
 ### 🐝 群体智能算法
 本框架最大的算法类别，模拟自然界生物群体行为进行协同搜索。
@@ -129,24 +148,16 @@
 | 草原犬鼠优化 | PDO | 觅食/挖洞/警戒/平静四阶段 (2022) |
 | 北方苍鹰优化 | NGO | 俯冲猎物 + 尾部追击双阶段 (2021) |
 | 白鲸优化 | BWO | 游动/捕食/鲸落三阶段 (2022) |
-| 梯度优化器 | GBO | 梯度搜索规则 + 局部逃逸算子 (2020) |
 | 生长优化器 | GO | 学习阶段 + 反思阶段双阶段 (2023) |
 | 海象优化器 | WaOA | 觅食/迁徙/躲避天敌三行为 (2023) |
-| 克隆选择算法 | CLONALG | 克隆-变异-选择的人工免疫机制 (2002) |
 | 人工蜂群算法 | ABC | 雇佣/观察/侦察蜂三阶段觅食 (2007) |
-| 电磁机制算法 | EM | 电荷吸引/排斥的库仑类搜索 (2003) |
 | 蜣螂优化器 | DBO | 滚球/繁殖/觅食/偷窃四角色 (2022) |
 | 被囊群算法 | TSO | 喷流推进 + 重力/水流被囊群搜索 (2020) |
 | 笑翠鸟优化算法 | KOA | 栖枝扫描 + 俯冲扑食两相 (2024) |
 | 火鹰优化算法 | FHO | 投掷火棒惊猎/捕获两相 (2022) |
-| 霜冰优化算法 | RIME | 软霜搜索 + 硬霜穿刺 + 附着因子 (2023) |
-| 向量加权平均优化 | INFO | best/better/worst 加权均值驱动 (2022) |
 | 蛇优化器 | SO | 温度驱动的雄雌蛇觅食/争斗/探索 (2022) |
 | 山地瞪羚优化 | MGO | 迁徙/觅食/争斗 + 成年雄群中心 (2022) |
-| 新冠群体免疫优化 | CHIO | 感染/隔离/群体免疫驱动搜索 (2021) |
-| 政治优化器 | PO | 党内竞选 + 跨党领袖影响 (2020) |
 | 沙猫群优化 | SCSO | 搜寻猎物/攻击猎物（灵敏度范围驱动）(2020) |
-| 减法平均优化 | SABO | 随机个体差分平均向量驱动 (2023) |
 | 猎人-猎物优化 | HPO | 猎人/猎物两角色 + 平均位置驱动 (2022) |
 | 人工蜂鸟算法 | AHA | 引导/领地/迁徙三种觅食 + 访问表 (2021) |
 | 黑翅鸢算法 | BKA | 攻击 + 迁徙两行为 (2023) |
@@ -156,61 +167,28 @@
 | 鼠群优化 | RSO | 追逐/争斗猎物 (2021) |
 | 埃及秃鹫优化 | EVO | 探索盘旋 + 攻击猎物 (2021) |
 | 电鳗觅食优化 | EEFO | 休息/迁移/交互捕食 (2023) |
-| 黄金正弦算法 | Golden-SA | 黄金比例 + 正弦算子位置更新 (2017) |
 | 黄鞍山羊鱼算法 | YSGA | 追捕者/拦截者协同围捕 (2019) |
-| 法证调查优化 | FBI | 调查 + 讯问两阶段 (2020) |
 | 卷尾猴搜索算法 | CapSA | 跳跃/摇摆/攀爬/觅食 (2021) |
 | 蜘蛛蜂优化器 | SWO | 搜索/跟随/筑巢 + 交配选择 (2023) |
 | 绿森蚺优化 | GAO | 攻击 + 缠绕猎物 (2023) |
 | 墨西哥钝口螈优化 | MAO | 觅食 + 再生修复 (2024) |
-| 单变量边缘分布算法 | UMDA | 边缘分布估计 + 高斯采样 (1996) |
-| 紧凑遗传算法 | cGA | 双样本竞赛更新概率模型 (1999) |
-| 文化算法 | CA | 群体空间 + 信念空间双重进化 (1994) |
 | 郊狼优化算法 | COY | 群体成长 + 出生/死亡 + 倾向性 (2018) |
 | 秃鹰搜索算法 | BES | 选择/搜索/俯冲三阶段 (2019) |
 | 鹅优化算法 | GOOSE | 觅食/警戒/编队迁徙 (2024) |
-| 鲍威尔共轭方向法 | Powell | 线搜索 + 共轭方向更新的经典直接搜索 (1964) |
-| 热交换优化 | TEO | 随机配对热交换 + 环境冷却 (2017) |
 | 斑点鬣狗优化 | SHO | 围捕/平均攻击，攻击系数线性衰减 (2017) |
 | 鮣鱼优化器 | ROA | 吸附宿主/随游/清洁觅食 (2021) |
 | 马群优化 | HOA | 放牧/交配/争斗支配 (2019) |
 | 黑寡妇蜘蛛优化 | BWA | 蛛网收缩/趋雌/交配 (2020) |
 | 收缩因子粒子群 | CPSO | Clerc 收缩因子 + 速度夹持的 PSO (2002) |
 | 局部最优粒子群 | LPSO | 环形邻域 lbest 拓扑的收缩 PSO (2002) |
-| 水波优化 | WWO | 传播/折射/破碎，波长渐隐 (2015) |
 | 野马优化 | WHO | 驹学习/交配/种马驱赶 (2021) |
-| 大洪水算法 | GD | 水位线 WL 判据，margin 几何收缩 (1993) |
-| 变邻域搜索 | VNS | 多邻域 shake 轮换 + 渐隐局部步 (1997) |
-| Rosenbrock 旋转坐标搜索 | Rosenbrock | 方向轮换 + Gram-Schmidt 旋转的经典直接搜索 (1960) |
-| 大爆炸-大挤压算法 | BBBC | 精英挤压中心 + 几何收缩双尺度采样 (2006) |
 | 蝴蝶优化算法 | BOA | 香气浓度 f=c·I^a 驱动的全局/局部搜索 (2019) |
-| 蜉蝣算法 | MFA | 雌雄双群 PSO 式移动 + 交配重组 (2020) |
 | 秘书鸟优化 | SBO | 捕蛇觅食（搜索/攻击）+ 逃猎两阶段 (2024) |
-| 阈值接受算法 | TA | 阈值收缩的确定性接受准则，模拟退火孪生 (1990) |
 | 连续域蚁群优化 | ACOR | 解档案高斯核加权采样的连续蚁群 (2008) |
 | 量子粒子群 | QPSO | 无速度项，mbest 中心指数采样 (2004) |
-| 自适应差分进化 | SaDE | 四策略竞争 + 选择概率自适应 (2009) |
-| 黑洞算法 | BH | 事件视界吞没重生 + 黑洞渐隐精修 (2013) |
 | 狮子优化算法 | LOA | 狮王防御/母狮合围/幼狮学习三角色 (2016) |
-| 盆地跳跃算法 | BHop | 自适应跳跃 + 收缩精修 + Metropolis 接受 (1997) |
-| 组合差分进化 | CoDE | 三参数池 × 双策略试验竞争的 DE (2011) |
-| 反向差分进化 | ODE | 反向学习反射 + 经典 DE/rand/1/bin (2006) |
-| 碰撞体优化 | CBO | 动量守恒碰撞探索 + 渐隐精修 (2014) |
-| 团队工作优化 | TWO | 团队领导 + 全局领导两轮协同 (2021) |
-| 螺旋优化算法 | SPO | 收缩因子 + 随机平面旋转的 n 维螺旋 (2011) |
 | 红尾鵟算法 | RTH | 翱翔/扫描/俯冲/击杀四阶段狩猎 (2022) |
-| 受控随机搜索 | CRS | 随机子集聚类中心反射 + 渐隐精修 (1973) |
 | 统一粒子群 | UPSO | gbest/lbest 双拉力融合 + 环形邻域 (2004) |
-| 实数编码遗传算法 | RGA | SBX 交叉 + 多项式变异 + 精英截断 (1995) |
-| 室内设计搜索 | InS | 对 best 镜面反射 + 渐隐重组 (2015) |
-| 藤壶交配优化 | BMO | soft 双亲重组 / hard 与 best 交配 (2018) |
-| 牛顿-拉夫逊优化 | NRBO | NRA 三项差分 + TRD 训练规则交替 (2024) |
-| 同步扰动随机逼近 | SPSA | 两次评估估计梯度 + 归一化信任域步长 (1992) |
-| 矩形分割全局优化 | DIRECT | 最优/最宽矩形三等分分割 (1993) |
-| 模因算法 | Memetic | SBX-GA 主体 + Lamarckian 局部精修 (1989) |
-| 自适应差分进化 JADE | JADE | current-to-pbest + 外部档案 + Lehmer 自适应 (2009) |
-| 冠军联赛算法 | LCA | 轮转配对抗衡 + 败者模仿胜者 (2015) |
-| 亨利气体溶解优化 | HGSO | 气体分组亨利常数 + 溶解度步长 (2019) |
 
 > **通用群体智能参数**: 大部分算法默认 `population_size = 25`。下表列出各算法的特有参数。
 
@@ -240,7 +218,7 @@
 | WCA | `num_rivers` | 4 |
 | MFO | `spiral_constant` | 1.0 |
 | WOA | `spiral_constant` | 1.0 |
-| 其余算法 (GWO, SCA, ALO, HHO, SalpSA, AEO, SOS, GBPSO, MSA, PFA, CPA, BCO, FFOA, FWA, PIO, HBA, POA, TSA, GJO, GOA, SOA, GTO, SMA, AO, ChOA, DO, ZOA, MRFO, HGS, RSA, MPA, GEO, AVOA, WSO, COA, OOA, TDO, PDO, NGO, BWO, GBO, GO, WaOA, CLONALG, ABC, EM, DBO, TSO, KOA, FHO, RIME, INFO, SO, MGO, CHIO, PO, SCSO, SABO, HPO, AHA, BKA, ARO, FOX, DMO, RSO, EVO, EEFO, Golden-SA, YSGA, FBI, CapSA, SWO, GAO, MAO, UMDA, cGA, CA, COY, BES, GOOSE, Powell, TEO, SHO, ROA, HOA, BWA, CPSO, LPSO, WWO, WHO, GD, VNS, Rosenbrock, BBBC, BOA, MFA, SBO, TA, ACOR, QPSO, SaDE, BH, LOA, BHop, CoDE, ODE, CBO, TWO, SPO, RTH, CRS, UPSO, RGA, InS, BMO, NRBO, SPSA, DIRECT, Memetic, JADE, LCA, HGSO) | 仅需 `population_size` | 25 |
+| 其余算法 (GWO, SCA, ALO, HHO, SalpSA, AEO, SOS, GBPSO, MSA, PFA, CPA, BCO, FFOA, FWA, PIO, HBA, POA, TSA, GJO, GOA, SOA, GTO, SMA, AO, ChOA, DO, ZOA, MRFO, HGS, RSA, MPA, GEO, AVOA, WSO, COA, OOA, TDO, PDO, NGO, BWO, GO, WaOA, ABC, DBO, TSO, KOA, FHO, SO, MGO, HPO, AHA, BKA, ARO, FOX, DMO, RSO, EVO, EEFO, YSGA, CapSA, SWO, GAO, MAO, COY, BES, GOOSE, SHO, ROA, HOA, BWA, CPSO, LPSO, WHO, BOA, SBO, ACOR, QPSO, UPSO, RTH) | 仅需 `population_size` | 25 |
 
 ### 📐 确定性直接搜索
 无需梯度信息，通过几何模式进行直接搜索，适合不可导函数。
@@ -249,11 +227,16 @@
 |------|------|------|
 | Nelder-Mead 单纯形法 | NM | 无导数的单纯形几何变形方法 |
 | Hooke-Jeeves 模式搜索 | HJ | 无导数的直接搜索方法 |
+| 鲍威尔共轭方向法 | Powell | 线搜索 + 共轭方向更新的经典直接搜索 (1964) |
+| Rosenbrock 旋转坐标搜索 | Rosenbrock | 方向轮换 + Gram-Schmidt 旋转的经典直接搜索 (1960) |
+| 受控随机搜索 | CRS | 随机子集聚类中心反射 + 渐隐精修 (1973) |
+| 矩形分割全局优化 | DIRECT | 最优/最宽矩形三等分分割 (1993) |
 
 | 算法 | 关键参数 | 推荐值 |
 |------|----------|--------|
 | Nelder-Mead | `reflection_coeff` (α), `expansion_coeff` (γ), `contraction_coeff` (ρ), `shrink_coeff` (σ) | 1.0, 2.0, 0.5, 0.5 |
 | Hooke-Jeeves | `initial_step`, `step_reduction`, `min_step` | 0.5, 0.5, 1e-6 |
+| Powell / Rosenbrock / CRS / DIRECT | 仅需 `population_size` | 25 |
 
 ### 🧮 进化策略
 基于概率分布的参数自适应优化，适合复杂病态问题。
@@ -276,12 +259,15 @@
 | 交叉熵方法 | CEM | 基于高斯分布的迭代估计 |
 | 随机分形搜索 | SFS | 基于分形发现和学习两阶段搜索 |
 | 基于群体的增量学习 | PBIL | 连续分布估计与精英统计更新 |
+| 单变量边缘分布算法 | UMDA | 边缘分布估计 + 高斯采样 (1996) |
+| 紧凑遗传算法 | cGA | 双样本竞赛更新概率模型 (1999) |
 
 | 算法 | 关键参数 | 推荐值 |
 |------|----------|--------|
 | CEM | `sample_size`, `elite_fraction`, `smoothing` | 100, 0.1, 0.7 |
 | SFS | `population_size`, `discovery_iterations`, `learning_iterations` | 25, 3, 2 |
 | PBIL | `sample_size`, `elite_size`, `learning_rate` | 100, 10, 0.3 |
+| UMDA / cGA | 仅需 `population_size` | 25 |
 
 ### ⚛️ 物理启发算法
 基于物理定律和自然现象的搜索机制。
@@ -293,6 +279,14 @@
 | 均衡优化 | EO | 基于控制理论均衡池与指数衰减策略 |
 | 风驱动优化 | WDO | 模拟大气风速更新与科里奥利力 |
 | 水循环算法 | WCA | 基于水循环和河流流动过程 |
+| 电磁机制算法 | EM | 电荷吸引/排斥的库仑类搜索 (2003) |
+| 霜冰优化算法 | RIME | 软霜搜索 + 硬霜穿刺 + 附着因子 (2023) |
+| 热交换优化 | TEO | 随机配对热交换 + 环境冷却 (2017) |
+| 水波优化 | WWO | 传播/折射/破碎，波长渐隐 (2015) |
+| 大爆炸-大挤压算法 | BBBC | 精英挤压中心 + 几何收缩双尺度采样 (2006) |
+| 黑洞算法 | BH | 事件视界吞没重生 + 黑洞渐隐精修 (2013) |
+| 碰撞体优化 | CBO | 动量守恒碰撞探索 + 渐隐精修 (2014) |
+| 亨利气体溶解优化 | HGSO | 气体分组亨利常数 + 溶解度步长 (2019) |
 
 | 算法 | 关键参数 | 推荐值 |
 |------|----------|--------|
@@ -301,6 +295,7 @@
 | EO | 仅需 `population_size` | 25 |
 | WDO | 仅需 `population_size` | 25 |
 | WCA | `population_size`, `num_rivers` | 25, 4 |
+| EM / WWO / TEO / RIME / BBBC / BH / CBO / HGSO | 仅需 `population_size` | 25 |
 
 ### 🎓 教学模型算法
 模拟教学与学习过程的优化方法。
@@ -321,12 +316,20 @@
 | Jaya算法 | Jaya | 基于最优-最差个体更新策略 |
 | 算术优化算法 | AOA | 基于算术运算符(除/乘/减/加)的搜索 |
 | Runge Kutta 优化器 | RUN | 基于 RK4 斜率加权组合的位置更新 (2021) |
+| 梯度优化器 | GBO | 梯度搜索规则 + 局部逃逸算子 (2020) |
+| 向量加权平均优化 | INFO | best/better/worst 加权均值驱动 (2022) |
+| 减法平均优化 | SABO | 随机个体差分平均向量驱动 (2023) |
+| 黄金正弦算法 | Golden-SA | 黄金比例 + 正弦算子位置更新 (2017) |
+| 螺旋优化算法 | SPO | 收缩因子 + 随机平面旋转的 n 维螺旋 (2011) |
+| 室内设计搜索 | InS | 对 best 镜面反射 + 渐隐重组 (2015) |
+| 牛顿-拉夫逊优化 | NRBO | NRA 三项差分 + TRD 训练规则交替 (2024) |
 
 | 算法 | 关键参数 | 推荐值 |
 |------|----------|--------|
 | Jaya | 仅需 `population_size` | 25 |
 | AOA | 仅需 `population_size` | 25 |
 | RUN | 仅需 `population_size` | 25 |
+| GBO / INFO / SABO / Golden-SA / NRBO / InS / SPO | 仅需 `population_size` | 25 |
 
 ### 👥 人类行为算法
 模拟人类社会活动和思维过程的优化方法。
@@ -335,11 +338,16 @@
 |------|------|------|
 | 头脑风暴优化 | BSO | 模拟人类头脑风暴聚类的创意生成过程 |
 | 足球联赛竞争算法 | SLC | 模拟足球联赛团队竞争与球员交换 |
+| 政治优化器 | PO | 党内竞选 + 跨党领袖影响 (2020) |
+| 法证调查优化 | FBI | 调查 + 讯问两阶段 (2020) |
+| 团队工作优化 | TWO | 团队领导 + 全局领导两轮协同 (2021) |
+| 冠军联赛算法 | LCA | 轮转配对抗衡 + 败者模仿胜者 (2015) |
 
 | 算法 | 关键参数 | 推荐值 |
 |------|----------|--------|
 | BSO | 仅需 `population_size` | 25 |
 | SLC | 仅需 `population_size` | 25 |
+| PO / FBI / TWO / LCA | 仅需 `population_size` | 25 |
 
 ## 项目结构
 
@@ -352,7 +360,7 @@ BlackBoxOptimization/
 │   ├── swarm_algorithms_1.mbt    # 群体智能算法（Firefly..SSA）
 │   ├── swarm_algorithms_2.mbt    # 群体智能算法（HHO..KH）
 │   ├── meta_algorithms.mbt       # 物理/人文启发算法（ICA..GBPSO）
-│   ├── recent_algorithms.mbt     # 新一代算法（MSA..WCA）
+│   ├── recent_algorithms.mbt     # 新一代算法（MSA..HGSO）
 │   └── benchmark.mbt             # 测试函数 + 基准框架 + 算法注册表
 ├── main/                         # 主程序入口
 │   ├── moon.pkg                  # 包配置
@@ -397,7 +405,7 @@ moon run main
 ### 运行测试
 
 ```bash
-# 运行所有测试（172 个测试用例）
+# 运行所有测试（374 个测试用例）
 moon test
 
 # 代码检查
@@ -854,17 +862,17 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 
 | 类别 | 代表算法 | 特点 |
 |------|----------|------|
-| **🔍 单点搜索** | 随机搜索、爬山法、模拟退火 | 简单、易于实现，适合低维问题 |
-| **🔧 局部搜索** | 禁忌搜索、引导局部搜索 | 强化局部开发，避免陷入局部最优 |
-| **🧬 进化算法** | DE、GA、ICA、BBO、BSA | 基于种群进化，鲁棒性好 |
-| **🐝 群体智能** | PSO、萤火虫、蚁群、蜂群、灰狼、鲸群、蝙蝠、和声、麻雀搜索、哈里斯鹰、GOA、SOA、CSO、GTO、SMA、AO、ChOA、DO、ZOA 等 | 基于群体行为，全局搜索能力强 |
-| **📐 确定性直接搜索** | Nelder-Mead、Hooke-Jeeves | 无需梯度，适合不可导函数 |
-| **🧮 进化策略** | CMA-ES | 协方差自适应，适合病态问题 |
-| **📊 估计分布** | CEM、SFS | 基于概率分布估计，适合连续优化 |
-| **⚛️ 物理启发** | GSA、MVO、EO、WDO、WCA | 基于物理规律，自适应搜索 |
+| **🔍 单点搜索** | 随机搜索、爬山法、模拟退火、SPSA、盆地跳跃 | 简单、易于实现，适合低维问题 |
+| **🔧 局部搜索** | 禁忌搜索、引导局部搜索、大洪水、变邻域、阈值接受 | 强化局部开发，避免陷入局部最优 |
+| **🧬 进化算法** | DE、GA、jDE、SHADE、JADE、SaDE、Memetic、CLONALG、ICA、BBO、BSA | 基于种群进化，鲁棒性好 |
+| **🐝 群体智能** | PSO、萤火虫、蚁群、蜂群、灰狼、鲸群、蝙蝠、和声、麻雀搜索、哈里斯鹰、GOA、SOA、CSO、GTO、SMA、AO、ChOA、DO、ZOA、CPSO、LPSO、QPSO、UPSO、ACOR 等 | 基于群体行为，全局搜索能力强 |
+| **📐 确定性直接搜索** | Nelder-Mead、Hooke-Jeeves、Powell、Rosenbrock、CRS、DIRECT | 无需梯度，适合不可导函数 |
+| **🧮 进化策略** | CMA-ES、ES | 协方差自适应，适合病态问题 |
+| **📊 估计分布** | CEM、SFS、PBIL、UMDA、cGA | 基于概率分布估计，适合连续优化 |
+| **⚛️ 物理启发** | GSA、MVO、EO、WDO、WCA、EM、WWO、TEO、RIME、BBBC、BH、CBO、HGSO | 基于物理规律，自适应搜索 |
 | **🎓 教学模型** | TLBO | 无需算法特定参数，收敛速度快 |
-| **🔢 数学启发** | Jaya、AOA | 基于数学原理的搜索机制 |
-| **👥 人类行为** | BSO、SLC | 模拟人类社会行为过程 |
+| **🔢 数学启发** | Jaya、AOA、RUN、GBO、INFO、SABO、Golden-SA、NRBO、InS、SPO | 基于数学原理的搜索机制 |
+| **👥 人类行为** | BSO、SLC、PO、FBI、TWO、LCA | 模拟人类社会行为过程 |
 
 ## 许可证
 
