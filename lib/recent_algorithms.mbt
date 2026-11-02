@@ -15815,3 +15815,152 @@ pub fn coot_optimization_algorithm(
     evaluations,
   }
 }
+
+// ===== DOA: Dingo Optimization Algorithm (2021) =====
+
+///|
+pub struct DOAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_doa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> DOAConfig {
+  DOAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn dingo_distance(a : Array[Double], b : Array[Double]) -> Double {
+  let mut s = 0.0
+  for d in 0..<a.length() {
+    let diff = a[d] - b[d]
+    s = s + diff * diff
+  }
+  s.sqrt()
+}
+
+///|
+/// Dingo Optimization Algorithm (Peraza-Vazquez et al. 2021),
+/// mechanism-faithful variant.  Each dingo picks one of three hunting
+/// strategies by a random draw (0.5 / 0.25 / 0.25):
+///   * group attack - consensus move toward the rest of the pack,
+///     X_i <- X_i + beta1 sum_k phi_k (X_k - X_i) / (||X_k - X_i|| + eps);
+///   * persecution  - chase the best,
+///     X_i <- X_i + beta1 e^{-beta2} (gbest - X_i);
+///   * scavenging   - reposition,
+///     X_i <- 0.5 (e^{-beta2 gbest} - (-1)^lambda X_i), lambda in {0,1}.
+/// beta1 ~ U(-2,2), beta2 ~ U(0,2); greedy acceptance and historical-best
+/// tracking are added.
+pub fn dingo_optimization_algorithm(
+  config : DOAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let cand : Array[Double] = []
+      let strategy = RNG::next(current_rng)
+      if strategy < 0.5 {
+        // group attack: consensus of the pack
+        let beta1 = RNG::next(current_rng) * 4.0 - 2.0
+        let acc : Array[Double] = []
+        for _d in 0..<dim {
+          acc.push(0.0)
+        }
+        for k in 0..<pop_size {
+          if k != i {
+            let dist = dingo_distance(xi, pop[k]) + 1.0e-12
+            let phi = RNG::next(current_rng)
+            for d in 0..<dim {
+              acc[d] = acc[d] + phi * (pop[k][d] - xi[d]) / dist
+            }
+          }
+        }
+        for d in 0..<dim {
+          let nv = xi[d] + beta1 * acc[d] / pop_size.to_double()
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if strategy < 0.75 {
+        // persecution: chase the global best
+        let beta1 = RNG::next(current_rng) * 4.0 - 2.0
+        let beta2 = RNG::next(current_rng) * 2.0
+        let decay = @math.exp(-beta2)
+        for d in 0..<dim {
+          let nv = xi[d] + beta1 * decay * (best_pos[d] - xi[d])
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // scavenging: reposition
+        let beta2 = RNG::next(current_rng) * 2.0
+        let lambda = RNG::next(current_rng) < 0.5
+        for d in 0..<dim {
+          let pos_term = @math.exp(-beta2 * best_pos[d])
+          let sign = if lambda { -1.0 } else { 1.0 }
+          let nv = 0.5 * (pos_term - sign * xi[d])
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

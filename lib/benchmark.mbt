@@ -1308,6 +1308,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       coot_optimization_algorithm(make_coot_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "DOA",
+    run: (e, d, b, r, f) => {
+      dingo_optimization_algorithm(make_doa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
