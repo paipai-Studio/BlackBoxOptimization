@@ -10183,3 +10183,116 @@ pub fn constriction_pso(
 
   OptimizationResult::{ best_solution: gbest, best_value: gval, evaluations, }
 }
+
+// ===== LPSO: Local-best Particle Swarm Optimization (2002) =====
+
+///|
+pub struct LPSOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  swarm_size : Int32
+}
+
+///|
+pub fn make_lpso_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  swarm_sz : Int32,
+) -> LPSOConfig {
+  LPSOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    swarm_size: swarm_sz,
+  }
+}
+
+///|
+/// Local-best Particle Swarm Optimization (2002): the same constriction update
+/// as CPSO, but the social term follows the best personal position inside the
+/// ring neighbourhood {i-1, i, i+1}, which slows information spread and helps
+/// on multimodal functions.  Historical-best tracking is added.
+pub fn local_best_pso(
+  config : LPSOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let n = config.swarm_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let chi = 0.729843788
+  let c1 = 1.496180
+  let c2 = 1.496180
+  let v_max = 0.2 * range
+
+  let positions : Array[Array[Double]] = []
+  let velocities : Array[Array[Double]] = []
+  let pbest : Array[Array[Double]] = []
+  let pvals : Array[Double] = []
+  for _i in 0..<n {
+    let pos = random_solution(dim, bounds, current_rng)
+    positions.push(pos)
+    let vel : Array[Double] = []
+    for _d in 0..<dim {
+      vel.push((RNG::next(current_rng) * 2.0 - 1.0) * v_max)
+    }
+    velocities.push(vel)
+    pbest.push(pos)
+    pvals.push(evaluate(f, pos))
+  }
+  let mut evaluations = n
+  let sorted_idx = sort_indices(pvals)
+  let mut gbest : Array[Double] = pbest[sorted_idx[0]]
+  let mut gval = pvals[sorted_idx[0]]
+
+  while evaluations < max_evals {
+    for i in 0..<n {
+      if evaluations >= max_evals {
+        break
+      }
+      // ring neighbourhood {i-1, i, i+1}: local best among personal bests
+      let left = if i == 0 { n - 1 } else { i - 1 }
+      let right = if i + 1 == n { 0 } else { i + 1 }
+      let mut lbest = i
+      if pvals[left] < pvals[lbest] {
+        lbest = left
+      }
+      if pvals[right] < pvals[lbest] {
+        lbest = right
+      }
+      let nvel : Array[Double] = []
+      let npos : Array[Double] = []
+      for d in 0..<dim {
+        let r1 = RNG::next(current_rng)
+        let r2 = RNG::next(current_rng)
+        let raw = velocities[i][d] +
+          c1 * r1 * (pbest[i][d] - positions[i][d]) +
+          c2 * r2 * (pbest[lbest][d] - positions[i][d])
+        let v = chi * raw
+        let v_clamped = max(-v_max, min(v_max, v))
+        nvel.push(v_clamped)
+        let pos = positions[i][d] + v_clamped
+        npos.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      velocities[i] = nvel
+      positions[i] = npos
+      let cv = evaluate(f, npos)
+      evaluations = evaluations + 1
+      if cv < pvals[i] {
+        pvals[i] = cv
+        pbest[i] = npos
+        if cv < gval {
+          gval = cv
+          gbest = npos
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{ best_solution: gbest, best_value: gval, evaluations, }
+}
