@@ -1302,6 +1302,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       henry_gas_solubility_optimization(make_hgso_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "COOT",
+    run: (e, d, b, r, f) => {
+      coot_optimization_algorithm(make_coot_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

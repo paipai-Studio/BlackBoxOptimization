@@ -15653,3 +15653,165 @@ pub fn henry_gas_solubility_optimization(
     evaluations,
   }
 }
+
+// ===== COOT: Coot Optimization Algorithm (2021) =====
+
+///|
+pub struct COOTConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_coot_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> COOTConfig {
+  COOTConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn coot_chosen(chosen : Array[Int32], idx : Int32) -> Bool {
+  let mut found = false
+  for c in 0..<chosen.length() {
+    if chosen[c] == idx {
+      found = true
+    }
+  }
+  found
+}
+
+///|
+fn coot_select_leaders(vals : Array[Double], k : Int32) -> Array[Int32] {
+  let n = vals.length()
+  let chosen : Array[Int32] = []
+  for _c in 0..<k {
+    let mut best_i : Int32 = -1
+    let mut best_v = 1.0e308
+    for i in 0..<n {
+      if coot_chosen(chosen, i) == false && vals[i] < best_v {
+        best_v = vals[i]
+        best_i = i
+      }
+    }
+    if best_i >= 0 {
+      chosen.push(best_i)
+    }
+  }
+  chosen
+}
+
+///|
+/// Coot Optimization Algorithm (Naruei & Keynia 2021), mechanism-faithful
+/// variant blending the paper's three movements over a population whose best
+/// ~10% act as leaders:
+///   * random movement - a coot steps from a random peer j using
+///     A = (X_i - X_j) - X_j,  X_i <- X_i + 2 r2 A -/+ (X_i - X_j);
+///   * chain movement  - a coot moves to the midpoint of itself and the
+///     previous coot,  X_i <- (X_i + X_{i-1}) / 2;
+///   * leader movement - each leader follows the global best with a
+///     cosine-scaled step, B r3 cos(2 pi r4)(gbest - X) +/- gbest, where
+///     B = 2 - 2 t/Tmax decays with progress.
+/// Greedy acceptance and historical-best tracking are added.
+pub fn coot_optimization_algorithm(
+  config : COOTConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let n_leaders = max_int(1, pop_size / 10)
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    let progress = evaluations.to_double() / max_evals.to_double()
+    let b_factor = 2.0 - 2.0 * progress
+    let leaders = coot_select_leaders(vals, n_leaders)
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let cand : Array[Double] = []
+      if coot_chosen(leaders, i) {
+        let r3 = RNG::next(current_rng)
+        let r4 = RNG::next(current_rng)
+        let r5 = RNG::next(current_rng)
+        let cos_term = @math.cos(TWO_PI * r4)
+        for d in 0..<dim {
+          let step = b_factor * r3 * cos_term * (best_pos[d] - xi[d])
+          let nv = if r5 < 0.5 { step + best_pos[d] } else { step - best_pos[d] }
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if RNG::next(current_rng) < 0.5 {
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let r2 = RNG::next(current_rng)
+        let sign_flip = RNG::next(current_rng) < 0.5
+        let xj = pop[j]
+        for d in 0..<dim {
+          let bvec = xi[d] - xj[d]
+          let a = bvec - xj[d]
+          let base = xi[d] + 2.0 * r2 * a
+          let nv = if sign_flip { base - bvec } else { base + bvec }
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        let prev = pop[if i == 0 { pop_size - 1 } else { i - 1 }]
+        for d in 0..<dim {
+          cand.push(max(bounds.min, min(bounds.max, (xi[d] + prev[d]) / 2.0)))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
