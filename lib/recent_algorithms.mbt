@@ -12545,3 +12545,125 @@ pub fn lion_optimization(
     evaluations,
   }
 }
+
+// ===== BasinHopping: Basin Hopping (1997) =====
+
+///|
+pub struct BHopConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bhop_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BHopConfig {
+  BHopConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Basin Hopping (Wales & Doye 1997), gradient-free variant: each round
+/// kicks the incumbent with an adaptive Gaussian jump (reset on
+/// acceptance, shrunk by 0.85 on rejection so the incumbent digs deeper
+/// into the current basin; amplitude stays budget-independent), refines
+/// the kicked point by a shrinking-Gaussian local
+/// search (12 steps, sigma halving - deeper than the first version whose
+/// 5-step refinement left Sphere 5k at 4.9e-2), then applies the
+/// Metropolis criterion with a quadratically decaying temperature (late
+/// rounds are effectively greedy).
+/// Historical-best tracking is added.
+pub fn basin_hopping(
+  config : BHopConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let jump0 = range * 0.3
+  let jump_floor = range * 0.02
+  let refine_steps = 12
+  let mut jump_cur = jump0
+
+  let mut x = random_solution(dim, bounds, current_rng)
+  let mut fx = evaluate(f, x)
+  let mut evaluations = 1
+  let mut best_pos : Array[Double] = x
+  let mut best_val = fx
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    let temp = 0.1 * rb * rb + 0.002
+    // kick
+    let xp : Array[Double] = []
+    for d in 0..<dim {
+      let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+      xp.push(max(bounds.min, min(bounds.max, x[d] + jump_cur * g)))
+    }
+    let mut xr = xp
+    let mut fr = evaluate(f, xp)
+    evaluations = evaluations + 1
+    // local refinement: shrinking Gaussian
+    let mut sigma = range * 0.08
+    for _l in 0..<refine_steps {
+      if evaluations >= max_evals {
+        break
+      }
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+        cand.push(max(bounds.min, min(bounds.max, xr[d] + sigma * g)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < fr {
+        xr = cand
+        fr = fv
+      } else {
+        sigma = sigma * 0.5
+      }
+    }
+    // Metropolis acceptance (relative temperature, fading)
+    let accept = if fr < fx {
+      true
+    } else {
+      let t_scale = temp * (1.0 + fx.abs())
+      RNG::next(current_rng) < @math.exp(-((fr - fx) / (t_scale + 1.0e-12)))
+    }
+    if accept {
+      x = xr
+      fx = fr
+      jump_cur = jump0
+    } else {
+      // adaptive step: shrink while rejected so the incumbent can dig
+      // deeper into the current basin
+      jump_cur = jump_cur * 0.85
+      if jump_cur < jump_floor {
+        jump_cur = jump_floor
+      }
+    }
+    if fx < best_val {
+      best_val = fx
+      best_pos = x
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

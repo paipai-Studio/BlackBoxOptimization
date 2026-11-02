@@ -1204,6 +1204,10 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       lion_optimization(make_loa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "BHop",
+    run: (e, d, b, r, f) => basin_hopping(make_bhop_config(e, d, b, 25), f, r),
+  })
   entries
 }
 
