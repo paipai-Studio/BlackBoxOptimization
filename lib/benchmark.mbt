@@ -1320,6 +1320,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       sooty_tern_optimization_algorithm(make_stoa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "GKSO",
+    run: (e, d, b, r, f) => {
+      genghis_khan_shark_optimizer(make_gkso_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
