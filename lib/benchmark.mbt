@@ -1464,6 +1464,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       chernobyl_disaster_optimizer(make_cdo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "ILS",
+    run: (e, d, b, r, f) => {
+      iterated_local_search(make_ils_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
