@@ -1422,6 +1422,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       fruit_fly_optimization_algorithm(make_foa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SFO",
+    run: (e, d, b, r, f) => {
+      sunflower_optimization_algorithm(make_sfo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
