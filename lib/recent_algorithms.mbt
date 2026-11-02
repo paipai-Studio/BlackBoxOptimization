@@ -11740,3 +11740,163 @@ pub fn threshold_accepting(
     evaluations,
   }
 }
+
+// ===== ACOR: Ant Colony Optimization for Continuous domains (2008) =====
+
+///|
+pub struct ACORConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_acor_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ACORConfig {
+  ACORConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Ant Colony Optimization for continuous domains (Socha & Dorigo 2008):
+/// a solution archive of size k guides sampling; each new solution picks a
+/// guideline g from the archive with weight w_l (phersu = 1/(q*k*sqrt(2pi)))
+/// and samples per dimension from a Gaussian with mean archive[g][d] and
+/// sigma = evaporation * sum_l |archive[l][d] - archive[g][d]| / (k - 1).
+/// The archive keeps the best k solutions ever evaluated (elite update);
+/// sigma schedule is budget-independent.
+pub fn ant_colony_continuous(
+  config : ACORConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let k = if config.population_size < 4 { 4 } else { config.population_size }
+  let q = 0.2
+  let evap = 0.65
+  let n_new = if k / 2 < 1 { 1 } else { k / 2 }
+
+  // archive init
+  let arch : Array[Array[Double]] = []
+  let arch_vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  arch.push(best_pos)
+  arch_vals.push(best_val)
+  for _i in 1..<k {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    arch.push(p)
+    arch_vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+  // keep archive sorted ascending by value
+  for a in 0..<k {
+    let mut m = a
+    for b2 in (a + 1)..<k {
+      if arch_vals[b2] < arch_vals[m] {
+        m = b2
+      }
+    }
+    if m != a {
+      let tp = arch[a]
+      let tv = arch_vals[a]
+      arch[a] = arch[m]
+      arch_vals[a] = arch_vals[m]
+      arch[m] = tp
+      arch_vals[m] = tv
+    }
+  }
+
+  while evaluations < max_evals {
+    // rank weights w_l = exp(-l^2/(2 q^2 k^2)); flatter q keeps the archive
+    // diverse on multimodal landscapes
+    let weights : Array[Double] = []
+    for l in 0..<k {
+      let w = @math.exp(
+        -(l.to_double() *
+        l.to_double() /
+        (2.0 * q * q * k.to_double() * k.to_double())),
+      )
+      weights.push(w)
+    }
+    let mut wsum = 0.0
+    for l in 0..<k {
+      wsum = wsum + weights[l]
+    }
+    // sample several solutions per generation (classic ACOR uses m > 1)
+    for _n in 0..<n_new {
+      if evaluations >= max_evals {
+        break
+      }
+      let pick_r = RNG::next(current_rng) * wsum
+      let mut g = 0
+      let mut acc = 0.0
+      for l in 0..<k {
+        acc = acc + weights[l]
+        if pick_r <= acc {
+          g = l
+          break
+        }
+      }
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let mut dev = 0.0
+        for l in 0..<k {
+          if l != g {
+            dev = dev + (arch[l][d] - arch[g][d]).abs()
+          }
+        }
+        let sigma = evap * dev / (k - 1).to_double() + range * 1.0e-9
+        let gauss = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+        cand.push(max(bounds.min, min(bounds.max, arch[g][d] + sigma * gauss)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      // elite update: replace the worst archive member if improved
+      let wi = k - 1
+      if fv < arch_vals[wi] {
+        arch[wi] = cand
+        arch_vals[wi] = fv
+        let mut j = wi
+        while j > 0 && arch_vals[j] < arch_vals[j - 1] {
+          let tp = arch[j]
+          let tv = arch_vals[j]
+          arch[j] = arch[j - 1]
+          arch_vals[j] = arch_vals[j - 1]
+          arch[j - 1] = tp
+          arch_vals[j - 1] = tv
+          j = j - 1
+        }
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

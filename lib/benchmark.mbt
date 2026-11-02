@@ -1174,6 +1174,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       threshold_accepting(make_ta_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "ACOR",
+    run: (e, d, b, r, f) => {
+      ant_colony_continuous(make_acor_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
