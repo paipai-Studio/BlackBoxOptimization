@@ -1368,6 +1368,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       mountaineering_team_based_optimization(make_mtbo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "CryStAl",
+    run: (e, d, b, r, f) => {
+      crystal_structure_algorithm(make_crystal_structure_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
