@@ -1146,6 +1146,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       rosenbrock_method(make_rosenbrock_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "BBBC",
+    run: (e, d, b, r, f) => {
+      big_bang_big_crunch(make_bbbc_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
