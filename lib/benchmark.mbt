@@ -1332,6 +1332,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       ficks_law_algorithm(make_fla_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "HO",
+    run: (e, d, b, r, f) => {
+      hippopotamus_optimization_algorithm(make_ho_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

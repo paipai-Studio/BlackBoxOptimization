@@ -16327,3 +16327,130 @@ pub fn ficks_law_algorithm(
     evaluations,
   }
 }
+
+// ===== HO: Hippopotamus Optimization Algorithm (2024) =====
+
+///|
+pub struct HOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ho_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> HOConfig {
+  HOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Hippopotamus Optimization Algorithm (Amiri et al. 2024),
+/// mechanism-faithful variant of the herd's three behaviours.  Each
+/// hippo draws one with random factors r1, r2 ~ U(0,1); the foraging
+/// share follows 0.5 e^{-t/2500}, fading as the search proceeds:
+///   * foraging - drift toward a random herd member,
+///     X_i <- X_i + r2 (X_rand - X_i);
+///   * defense  - retreat toward the safest (best) position,
+///     X_i <- X_i + 2 r2 (gbest - X_i);
+///   * evading  - settle around the best with a self-scaled scatter,
+///     X_i <- gbest + r2 (gbest - X_i) + r3 (2 r4 - 1) gbest.
+/// Greedy acceptance and historical-best tracking are added.
+pub fn hippopotamus_optimization_algorithm(
+  config : HOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      let forage = 0.5 * @math.exp(-evaluations.to_double() / 2500.0)
+      if r1 < forage {
+        // foraging: drift toward a random herd member
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (xj[d] - xi[d])
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < forage + 0.35 {
+        // defense: retreat toward the safest (best) position
+        for d in 0..<dim {
+          let nv = xi[d] + 2.0 * r2 * (best_pos[d] - xi[d])
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // evading: settle around the best with a self-scaled scatter
+        let r3 = RNG::next(current_rng)
+        let r4 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * best_pos[d]
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
