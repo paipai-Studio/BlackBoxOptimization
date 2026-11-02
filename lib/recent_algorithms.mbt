@@ -14280,3 +14280,134 @@ pub fn interior_search(
     evaluations,
   }
 }
+
+// ===== BMO: Barnacles Mating Optimizer (2018) =====
+
+///|
+pub struct BMOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bmo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BMOConfig {
+  BMOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Barnacles Mating Optimizer (Sulaiman et al. 2018): each barnacle
+/// either mates softly with two random parents (per-dimension weighted
+/// blend) or, with complementary probability, mates hard with the
+/// incumbent best (rand*best + (1-rand)*self).  A fading Gaussian jitter
+/// keeps recombination from collapsing onto the best; moves are
+/// greedy-accepted and historical-best tracking is added.
+pub fn barnacles_mating_optimizer(
+  config : BMOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let pop_size = if config.population_size < 4 {
+    4
+  } else {
+    config.population_size
+  }
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let cand : Array[Double] = []
+      if RNG::next(current_rng) < 0.5 {
+        // soft mating: blend of two random parents
+        let p1 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let mut p2 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        while p2 == p1 {
+          p2 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+            pop_size
+        }
+        for d in 0..<dim {
+          let r = RNG::next(current_rng)
+          cand.push(
+            max(
+              bounds.min,
+              min(bounds.max, r * pop[p1][d] + (1.0 - r) * pop[p2][d]),
+            ),
+          )
+        }
+      } else {
+        // hard mating: blend with the incumbent best
+        for d in 0..<dim {
+          let r = RNG::next(current_rng)
+          let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+          cand.push(
+            max(
+              bounds.min,
+              min(
+                bounds.max,
+                r * best_pos[d] + (1.0 - r) * xi[d] + range * 0.06 * rb * g,
+              ),
+            ),
+          )
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

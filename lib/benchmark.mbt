@@ -1256,6 +1256,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
     name: "InS",
     run: (e, d, b, r, f) => interior_search(make_ins_config(e, d, b, 25), f, r),
   })
+  entries.push(AlgoEntry::{
+    name: "BMO",
+    run: (e, d, b, r, f) => {
+      barnacles_mating_optimizer(make_bmo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
