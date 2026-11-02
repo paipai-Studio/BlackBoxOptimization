@@ -13802,3 +13802,191 @@ pub fn controlled_random_search(
     evaluations,
   }
 }
+
+// ===== UPSO: Unified Particle Swarm Optimization (2004) =====
+
+///|
+pub struct UPSOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_upso_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> UPSOConfig {
+  UPSOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Unified Particle Swarm Optimization (Parsopoulos & Vrahatis 2004): a
+/// single velocity update blends the global-best and local-best pulls with
+/// a unification factor u - v = chi*(w*v + c1*r1*(pbest-x) + (1-u)*c2*r2*
+/// (gbest-x) + u*c3*r3*(lbest-x)) over a ring neighbourhood.  Inertia
+/// decays quadratically and velocities are clamped per the house CPSO
+/// rules; one random particle per generation is resampled around its
+/// personal best with a fading Gaussian to prevent late freeze.
+/// Historical-best tracking is added.
+pub fn unified_pso(
+  config : UPSOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let pop_size = if config.population_size < 4 {
+    4
+  } else {
+    config.population_size
+  }
+  let chi = 0.7298
+  let c1 = 1.4962
+  let c2 = 1.4962
+  let c3 = 1.4962
+  let u_mix = 0.3
+  let v_max = range * 0.2
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let pbest : Array[Array[Double]] = []
+  let pbest_vals : Array[Double] = []
+  let vel : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  pbest.push(best_pos)
+  pbest_vals.push(best_val)
+  let v0 : Array[Double] = []
+  for _d in 0..<dim {
+    v0.push(0.0)
+  }
+  vel.push(v0)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    pbest.push(p)
+    pbest_vals.push(v)
+    let vi : Array[Double] = []
+    for _d in 0..<dim {
+      vi.push((RNG::next(current_rng) - 0.5) * v_max)
+    }
+    vel.push(vi)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let w = 0.7298 - 0.3298 * iter * iter
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      // ring neighbourhood best (left, self, right)
+      let l1 = if i == 0 { pop_size - 1 } else { i - 1 }
+      let l2 = if i == pop_size - 1 { 0 } else { i + 1 }
+      let mut li = i
+      let mut lv = vals[i]
+      for nb in [l1, l2] {
+        if vals[nb] < lv {
+          lv = vals[nb]
+          li = nb
+        }
+      }
+      let xi = pop[i]
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let r1 = RNG::next(current_rng)
+        let r2 = RNG::next(current_rng)
+        let r3 = RNG::next(current_rng)
+        let nv = chi *
+          (
+            w * vel[i][d] +
+            c1 * r1 * (pbest[i][d] - xi[d]) +
+            (1.0 - u_mix) * c2 * r2 * (best_pos[d] - xi[d]) +
+            u_mix * c3 * r3 * (pop[li][d] - xi[d])
+          )
+        let nv_clamped = if nv > v_max {
+          v_max
+        } else if nv < -v_max {
+          -v_max
+        } else {
+          nv
+        }
+        vel[i][d] = nv_clamped
+        cand.push(max(bounds.min, min(bounds.max, xi[d] + nv_clamped)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+      }
+      if fv < pbest_vals[i] {
+        pbest[i] = cand
+        pbest_vals[i] = fv
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+    // fading resample of one random particle around its personal best:
+    // once velocities clamp down the swarm can freeze on Ackley-class
+    // landscapes (first version: Ackley 1k~5k at 0.141)
+    if evaluations < max_evals {
+      let wi = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+        let sigma_rs = if range * 0.05 * (1.0 - iter) > range * 0.02 {
+          range * 0.05 * (1.0 - iter)
+        } else {
+          range * 0.02
+        }
+        cand.push(max(bounds.min, min(bounds.max, pbest[wi][d] + sigma_rs * g)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[wi] {
+        pop[wi] = cand
+        vals[wi] = fv
+      }
+      if fv < pbest_vals[wi] {
+        pbest[wi] = cand
+        pbest_vals[wi] = fv
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

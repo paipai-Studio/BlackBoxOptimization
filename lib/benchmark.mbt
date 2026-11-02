@@ -1244,6 +1244,10 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       controlled_random_search(make_crs_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "UPSO",
+    run: (e, d, b, r, f) => unified_pso(make_upso_config(e, d, b, 25), f, r),
+  })
   entries
 }
 
