@@ -13630,3 +13630,175 @@ pub fn red_tailed_hawk(
     evaluations,
   }
 }
+
+// ===== CRS: Controlled Random Search (1973) =====
+
+///|
+pub struct CRSConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_crs_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CRSConfig {
+  CRSConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Controlled Random Search (Price 1973), CRS2 variant: each round samples
+/// n+1 population members, reflects the global worst through the centroid
+/// of those sampled points (x_new = 2G - x_worst), and keeps the reflection
+/// only if it beats the worst (population size stays fixed).  A fading
+/// Gaussian refinement around the best is blended in for the second half
+/// of the budget (the pure reflection version stalls at the level of the
+/// reflected polytope, Sphere 5k ~ 0.1); randomness is confined to
+/// sampling so trajectories stay budget-monotone.
+pub fn controlled_random_search(
+  config : CRSConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let pop_size = if config.population_size < dim + 2 {
+    dim + 2
+  } else {
+    config.population_size
+  }
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+  let mut worst_i = 0
+  let mut worst_v = vals[0]
+  for i in 1..<pop_size {
+    if vals[i] > worst_v {
+      worst_v = vals[i]
+      worst_i = i
+    }
+  }
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    // reflection phase: 2G - x_worst with G = centroid of n random points
+    if evaluations < max_evals {
+      let g : Array[Double] = []
+      for _d in 0..<dim {
+        g.push(0.0)
+      }
+      let n_pts = dim + 1
+      let mut used_worst = false
+      for _s in 0..<n_pts {
+        let i = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        if i == worst_i {
+          used_worst = true
+        }
+        for d in 0..<dim {
+          g[d] = g[d] + pop[i][d] / n_pts.to_double()
+        }
+      }
+      // exclude the worst from G by re-weighting when sampled
+      if used_worst {
+        for d in 0..<dim {
+          g[d] = g[d] * n_pts.to_double()
+          g[d] = g[d] - pop[worst_i][d]
+          g[d] = g[d] / dim.to_double()
+        }
+      }
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        cand.push(
+          max(bounds.min, min(bounds.max, 2.0 * g[d] - pop[worst_i][d])),
+        )
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < worst_v {
+        pop[worst_i] = cand
+        vals[worst_i] = fv
+        worst_v = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+        // refresh the global worst index
+        worst_i = 0
+        worst_v = vals[0]
+        for i in 1..<pop_size {
+          if vals[i] > worst_v {
+            worst_v = vals[i]
+            worst_i = i
+          }
+        }
+      }
+    }
+    // fading refinement around the best (second half of the budget)
+    if evaluations < max_evals && rb < 0.5 {
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let g2 = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+        cand.push(
+          max(bounds.min, min(bounds.max, best_pos[d] + range * 0.1 * rb * g2)),
+        )
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+        // also displace the worst slot so the population follows
+        if best_val < worst_v {
+          pop[worst_i] = cand
+          vals[worst_i] = fv
+          worst_v = fv
+          worst_i = 0
+          worst_v = vals[0]
+          for i in 1..<pop_size {
+            if vals[i] > worst_v {
+              worst_v = vals[i]
+              worst_i = i
+            }
+          }
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

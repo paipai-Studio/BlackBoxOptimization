@@ -1238,6 +1238,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
     name: "RTH",
     run: (e, d, b, r, f) => red_tailed_hawk(make_rth_config(e, d, b, 25), f, r),
   })
+  entries.push(AlgoEntry::{
+    name: "CRS",
+    run: (e, d, b, r, f) => {
+      controlled_random_search(make_crs_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
