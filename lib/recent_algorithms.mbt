@@ -16199,3 +16199,131 @@ pub fn genghis_khan_shark_optimizer(
     evaluations,
   }
 }
+
+// ===== FLA: Fick's Law Algorithm (2023) =====
+
+///|
+pub struct FLAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_fla_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> FLAConfig {
+  FLAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Fick's Law Algorithm (Amer et al. 2023), mechanism-faithful variant
+/// following molecules that diffuse from high- to low-concentration
+/// regions.  Each molecule draws one of three motions with random factors
+/// r1, r2 ~ U(0,1); the diffusion share follows 0.6 e^{-t/3000}, fading as
+/// the search proceeds:
+///   * diffusion    - drift toward a random molecule,
+///     X_i <- X_i + r2 (X_rand - X_i);
+///   * transition   - gradient flux toward the equilibrium (best) position,
+///     X_i <- X_i + 2 r2 (X_eq - X_i);
+///   * steady state - settle around the equilibrium with a self-scaled
+///     scatter, X_i <- X_eq + r2 (X_eq - X_i) + r3 (2 r4 - 1) X_eq.
+/// Greedy acceptance and historical-best tracking are added.
+pub fn ficks_law_algorithm(
+  config : FLAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      let explore = 0.6 * @math.exp(-evaluations.to_double() / 3000.0)
+      if r1 < explore {
+        // diffusion: drift toward a random molecule
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (xj[d] - xi[d])
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < explore + 0.35 {
+        // transition: gradient flux toward the equilibrium position
+        for d in 0..<dim {
+          let nv = xi[d] + 2.0 * r2 * (best_pos[d] - xi[d])
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // steady state: settle around the equilibrium with a self-scaled scatter
+        let r3 = RNG::next(current_rng)
+        let r4 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * best_pos[d]
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

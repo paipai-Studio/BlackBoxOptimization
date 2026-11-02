@@ -1326,6 +1326,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       genghis_khan_shark_optimizer(make_gkso_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "FLA",
+    run: (e, d, b, r, f) => {
+      ficks_law_algorithm(make_fla_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
