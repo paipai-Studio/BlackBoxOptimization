@@ -14411,3 +14411,143 @@ pub fn barnacles_mating_optimizer(
     evaluations,
   }
 }
+
+// ===== NRBO: Newton-Raphson Based Optimization (2024) =====
+
+///|
+pub struct NRBOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_nrbo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> NRBOConfig {
+  NRBOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Newton-Raphson Based Optimization (Sowmya et al. 2024),
+/// mechanism-faithful variant alternating two update rules: the
+/// Newton-Raphson search rule (a three-term differential combining a
+/// random peer, the best and the current point) and the training rule
+/// (a best/mean-centred pull whose magnitude fades with progress).
+/// Moves are greedy-accepted with per-dimension sampling and
+/// historical-best tracking.
+pub fn newton_raphson_based_optimization(
+  config : NRBOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 4 {
+    4
+  } else {
+    config.population_size
+  }
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    // population mean for the training rule
+    let mean : Array[Double] = []
+    for d in 0..<dim {
+      let mut m = 0.0
+      for i in 0..<pop_size {
+        m = m + pop[i][d]
+      }
+      mean.push(m / pop_size.to_double())
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let r = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let xi = pop[i]
+      let cand : Array[Double] = []
+      if RNG::next(current_rng) < 0.5 {
+        // Newton-Raphson search rule: three-term differential
+        for d in 0..<dim {
+          let r1 = RNG::next(current_rng)
+          let r2 = RNG::next(current_rng)
+          cand.push(
+            max(
+              bounds.min,
+              min(
+                bounds.max,
+                pop[r][d] +
+                r1 * (best_pos[d] - pop[r][d]) +
+                r2 * (xi[d] - pop[r][d]),
+              ),
+            ),
+          )
+        }
+      } else {
+        // training rule: best/mean-centred pull with fading magnitude
+        for d in 0..<dim {
+          let r1 = RNG::next(current_rng)
+          let r2 = RNG::next(current_rng)
+          cand.push(
+            max(
+              bounds.min,
+              min(
+                bounds.max,
+                xi[d] - r1 * (mean[d] - xi[d]) - r2 * (best_pos[d] - xi[d]) * rb,
+              ),
+            ),
+          )
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

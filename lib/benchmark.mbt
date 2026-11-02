@@ -1262,6 +1262,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       barnacles_mating_optimizer(make_bmo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "NRBO",
+    run: (e, d, b, r, f) => {
+      newton_raphson_based_optimization(make_nrbo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
