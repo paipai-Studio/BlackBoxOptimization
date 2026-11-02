@@ -13596,11 +13596,18 @@ pub fn red_tailed_hawk(
           )
         }
       } else {
-        // strike: fading Gaussian refinement at the kill site
+        // strike: fading Gaussian refinement at the kill site; the sigma
+        // floor keeps late-stage escapes alive (d5 Levy regressed 2.6x
+        // when sigma decayed to ~0 and the best got trapped in a basin)
+        let sigma_strike = if range * 0.12 * rb > range * 0.01 {
+          range * 0.12 * rb
+        } else {
+          range * 0.01
+        }
         for d in 0..<dim {
           let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
           cand.push(
-            max(bounds.min, min(bounds.max, best_pos[d] + range * 0.1 * rb * g)),
+            max(bounds.min, min(bounds.max, best_pos[d] + sigma_strike * g)),
           )
         }
       }
