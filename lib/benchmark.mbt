@@ -835,95 +835,15 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
     },
   })
   entries.push(AlgoEntry::{
-    name: "GO",
-    run: (e, d, b, r, f) => growth_optimizer(make_go_config(e, d, b, 25), f, r),
-  })
-  entries.push(AlgoEntry::{
-    name: "WaOA",
-    run: (e, d, b, r, f) => {
-      walrus_optimizer(make_waoa_config(e, d, b, 25), f, r)
-    },
-  })
-  entries.push(AlgoEntry::{
-    name: "CLONALG",
-    run: (e, d, b, r, f) => {
-      clonal_selection_algorithm(make_clonalg_config(e, d, b, 25), f, r)
-    },
-  })
-  entries.push(AlgoEntry::{
-    name: "ABC",
-    run: (e, d, b, r, f) => {
-      artificial_bee_colony(make_abc_config(e, d, b, 25), f, r)
-    },
-  })
-  entries.push(AlgoEntry::{
-    name: "EM",
-    run: (e, d, b, r, f) => {
-      electromagnetism_like_mechanism(make_em_config(e, d, b, 25), f, r)
-    },
-  })
-  entries.push(AlgoEntry::{
-    name: "DBO",
-    run: (e, d, b, r, f) => {
-      dung_beetle_optimizer(make_dbo_config(e, d, b, 25), f, r)
-    },
-  })
-  entries.push(AlgoEntry::{
-    name: "TSO",
-    run: (e, d, b, r, f) => {
-      tunicate_swarm_algorithm(make_tso_config(e, d, b, 25), f, r)
-    },
-  })
-  entries.push(AlgoEntry::{
-    name: "KOA",
-    run: (e, d, b, r, f) => {
-      kookaburra_optimization_algorithm(make_koa_config(e, d, b, 25), f, r)
-    },
-  })
-  entries.push(AlgoEntry::{
-    name: "FHO",
-    run: (e, d, b, r, f) => {
-      fire_hawk_optimizer(make_fho_config(e, d, b, 25), f, r)
-    },
-  })
-  entries.push(AlgoEntry::{
-    name: "RIME",
-    run: (e, d, b, r, f) => {
-      rime_optimization_algorithm(make_rime_config(e, d, b, 25), f, r)
-    },
-  })
-  entries.push(AlgoEntry::{
-    name: "INFO",
-    run: (e, d, b, r, f) => {
-      info_optimization_algorithm(make_info_config(e, d, b, 25), f, r)
-    },
-  })
-  entries.push(AlgoEntry::{
-    name: "CPSO",
-    run: (e, d, b, r, f) => {
-      constriction_pso(make_cpso_config(e, d, b, 25), f, r)
-    },
-  })
-  entries.push(AlgoEntry::{
-    name: "LPSO",
-    run: (e, d, b, r, f) => local_best_pso(make_lpso_config(e, d, b, 25), f, r),
-  })
-  entries.push(AlgoEntry::{
-    name: "WWO",
-    run: (e, d, b, r, f) => {
-      water_wave_optimization(make_wwo_config(e, d, b, 25), f, r)
-    },
-  })
-  entries.push(AlgoEntry::{
-    name: "WHO",
-    run: (e, d, b, r, f) => {
-      wild_horse_optimizer(make_who_config(e, d, b, 25), f, r)
-    },
-  })
-  entries.push(AlgoEntry::{
     name: "GD",
     run: (e, d, b, r, f) => {
       great_deluge_algorithm(make_gd_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "VNS",
+    run: (e, d, b, r, f) => {
+      variable_neighborhood_search(make_vns_config(e, d, b, 25), f, r)
     },
   })
   entries

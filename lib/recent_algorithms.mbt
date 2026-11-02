@@ -10598,3 +10598,114 @@ pub fn great_deluge_algorithm(
     evaluations,
   }
 }
+
+// ===== VNS: Variable Neighborhood Search (1997) =====
+
+///|
+pub struct VNSConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_vns_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> VNSConfig {
+  VNSConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Variable Neighborhood Search (1997): the incumbent solution is shaken in
+/// neighbourhood k (k = 1..5, amplitude grows with k) and the shaken point is
+/// refined by a fading-Gaussian local step towards the best.  Improvement
+/// returns to the first neighbourhood, otherwise the next one is tried.
+/// Historical-best tracking is added.
+pub fn variable_neighborhood_search(
+  config : VNSConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let _n = config.population_size
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let k_max = 5
+
+  let mut x = random_solution(dim, bounds, current_rng)
+  let mut fx = evaluate(f, x)
+  let mut evaluations = 1
+  let mut best_pos : Array[Double] = x
+  let mut best_val = fx
+  let mut k = 1
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    let shake_amp = range * 0.05 * k.to_double() * rb
+    let fx_old = fx
+    // shake in neighbourhood k
+    let cand : Array[Double] = []
+    for d in 0..<dim {
+      let pos = x[d] + (2.0 * RNG::next(current_rng) - 1.0) * shake_amp
+      cand.push(max(bounds.min, min(bounds.max, pos)))
+    }
+    let fv = evaluate(f, cand)
+    evaluations = evaluations + 1
+    // local step: fading Gaussian towards the best
+    if evaluations < max_evals {
+      let refined : Array[Double] = []
+      for d in 0..<dim {
+        let gauss = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+        let mid = (cand[d] + best_pos[d]) * 0.5
+        let pos = mid + range * 0.05 * rb * gauss
+        refined.push(max(bounds.min, min(bounds.max, pos)))
+      }
+      let fv2 = evaluate(f, refined)
+      evaluations = evaluations + 1
+      if fv2 < fx {
+        x = refined
+        fx = fv2
+      } else if fv < fx {
+        x = cand
+        fx = fv
+      }
+      if fv2 < best_val {
+        best_val = fv2
+        best_pos = refined
+      }
+    }
+    if fv < best_val {
+      best_val = fv
+      best_pos = cand
+    }
+    if fx < best_val {
+      best_val = fx
+      best_pos = x
+    }
+    // neighbourhood change: an improving sweep restarts from the first
+    // neighbourhood, otherwise the next one is tried
+    if fx < fx_old {
+      k = 1
+    } else {
+      k = if k >= k_max { 1 } else { k + 1 }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
