@@ -1280,6 +1280,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       dividing_rectangles(make_direct_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "Memetic",
+    run: (e, d, b, r, f) => {
+      memetic_algorithm(make_memetic_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
