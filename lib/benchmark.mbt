@@ -1228,6 +1228,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       teamwork_optimization(make_two_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SPO",
+    run: (e, d, b, r, f) => {
+      spiral_optimization(make_spo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
