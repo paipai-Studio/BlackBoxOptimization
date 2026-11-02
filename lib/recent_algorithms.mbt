@@ -11931,11 +11931,12 @@ pub fn make_qpso_config(
 /// is dropped entirely; each particle samples around a per-dimension point
 /// p = phi*pbest + (1-phi)*gbest with a double-exponential spread scaled by
 /// beta * |mbest[d] - x[d]|, where mbest is the mean of all personal bests.
-/// Beta decays linearly from 1.0 to 0.25 and the exponential tail of
-/// ln(1/u) is capped at 4 (the textbook long tail kept the terminal spread
-/// too wide: Sphere 5k=5.2e-3); the schedule is bounded below so the search
-/// never freezes; per-dimension sampling and historical-best tracking
-/// follow the established house rules.
+/// Beta decays linearly from 1.0 to 0.05 and the exponential tail of
+/// ln(1/u) is capped at 4 (the textbook beta in [1.0, 0.5] kept the
+/// terminal spread too wide: Sphere d5 5k=4.7e-2 at 0.25); the schedule
+/// stays bounded above zero so the search never freezes; per-dimension
+/// sampling and historical-best tracking follow the established house
+/// rules.
 pub fn quantum_behaved_pso(
   config : QPSOConfig,
   f : (Array[Double]) -> Double,
@@ -11978,7 +11979,7 @@ pub fn quantum_behaved_pso(
 
   while evaluations < max_evals {
     let iter = evaluations.to_double() / max_evals.to_double()
-    let beta = 1.0 - 0.75 * iter
+    let beta = 1.0 - 0.95 * iter
     // mbest: mean of all personal bests
     let mbest : Array[Double] = []
     for d in 0..<dim {
