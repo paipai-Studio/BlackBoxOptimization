@@ -1452,6 +1452,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       central_force_optimization(make_cfo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "CGO",
+    run: (e, d, b, r, f) => {
+      chaos_game_optimization(make_cgo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
