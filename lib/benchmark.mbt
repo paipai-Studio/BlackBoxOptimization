@@ -1286,6 +1286,10 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       memetic_algorithm(make_memetic_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "JADE",
+    run: (e, d, b, r, f) => jade(make_jade_config(e, d, b, 25), f, r),
+  })
   entries
 }
 

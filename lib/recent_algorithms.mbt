@@ -15102,3 +15102,204 @@ pub fn memetic_algorithm(
     evaluations,
   }
 }
+
+// ===== JADE: Adaptive DE with optional external archive (2009) =====
+
+///|
+pub struct JADEConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_jade_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> JADEConfig {
+  JADEConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// JADE (Zhang & Sanderson 2009): current-to-pbest/1 mutation - the elite
+/// guide is drawn from the top p=5% rather than the single best, and the
+/// second difference vector may come from an external archive of recently
+/// replaced parents (capacity = population size).  F follows a Cauchy
+/// around mu_F, CR a normal around mu_CR; successful values update the
+/// centres each generation via the Lehmer mean (F) and arithmetic mean
+/// (CR) with c=0.1.  Binary crossover and greedy selection per house
+/// rules; historical-best tracking is added.
+pub fn jade(
+  config : JADEConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 6 {
+    6
+  } else {
+    config.population_size
+  }
+  let p_frac = 0.05
+  let c_adapt = 0.1
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+  // external archive of replaced parents
+  let archive : Array[Array[Double]] = []
+  let mut mu_f = 0.5
+  let mut mu_cr = 0.5
+
+  while evaluations < max_evals {
+    let s_f : Array[Double] = []
+    let s_cr : Array[Double] = []
+    // pbest set size
+    let n_pbest = if (pop_size.to_double() * p_frac).to_int() < 1 {
+      1
+    } else {
+      (pop_size.to_double() * p_frac).to_int()
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      // sample F ~ Cauchy(mu_F, 0.1), truncated to (0, 1]
+      let mut fv = 0.5
+      let mut sampled = false
+      while !sampled {
+        let u = RNG::next(current_rng)
+        let cand = mu_f + 0.1 * @math.tan(3.141592653589793 * (u - 0.5))
+        if cand > 0.0 {
+          fv = if cand > 1.0 { 1.0 } else { cand }
+          sampled = true
+        }
+      }
+      let cg = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+      let cr_v = if mu_cr + 0.1 * cg < 0.0 {
+        0.0
+      } else if mu_cr + 0.1 * cg > 1.0 {
+        1.0
+      } else {
+        mu_cr + 0.1 * cg
+      }
+      // pbest: a random member of the top n_pbest (value-ranked)
+      let idx : Array[Int32] = []
+      for j in 0..<pop_size {
+        idx.push(j)
+      }
+      for a in 0..<n_pbest {
+        let mut m = a
+        for b2 in (a + 1)..<pop_size {
+          if vals[idx[b2]] < vals[idx[m]] {
+            m = b2
+          }
+        }
+        if m != a {
+          let t = idx[a]
+          idx[a] = idx[m]
+          idx[m] = t
+        }
+      }
+      let pbest_i = idx[(RNG::next(current_rng) * n_pbest.to_double()).to_int() %
+        n_pbest]
+      let r1 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      // r2 from pop union archive
+      let n_total = pop_size + archive.length()
+      let r2_raw = (RNG::next(current_rng) * n_total.to_double()).to_int() %
+        n_total
+      let x_r2 = if r2_raw < pop_size {
+        pop[r2_raw]
+      } else {
+        archive[r2_raw - pop_size]
+      }
+      // current-to-pbest/1 mutation
+      let mut_trial : Array[Double] = []
+      for d in 0..<dim {
+        mut_trial.push(
+          pop[i][d] +
+          fv * (pop[pbest_i][d] - pop[i][d]) +
+          fv * (pop[r1][d] - x_r2[d]),
+        )
+      }
+      // binary crossover
+      let trial : Array[Double] = []
+      for d in 0..<dim {
+        let use_mut = RNG::next(current_rng) < cr_v ||
+          (RNG::next(current_rng) * dim.to_double()).to_int() % dim == d
+        trial.push(
+          if use_mut {
+            max(bounds.min, min(bounds.max, mut_trial[d]))
+          } else {
+            pop[i][d]
+          },
+        )
+      }
+      let fv_trial = evaluate(f, trial)
+      evaluations = evaluations + 1
+      if fv_trial < vals[i] {
+        archive.push(pop[i])
+        if archive.length() > pop_size {
+          let kill = (RNG::next(current_rng) * archive.length().to_double()).to_int() %
+            archive.length()
+          let _ = archive.remove(kill)
+        }
+        pop[i] = trial
+        vals[i] = fv_trial
+        s_f.push(fv)
+        s_cr.push(cr_v)
+        if fv_trial < best_val {
+          best_val = fv_trial
+          best_pos = trial
+        }
+      }
+    }
+    // Lehmer mean for F, arithmetic for CR
+    if s_f.length() > 0 {
+      let mut sum_f2 = 0.0
+      let mut sum_f = 0.0
+      let mut sum_cr = 0.0
+      for k in 0..<s_f.length() {
+        sum_f2 = sum_f2 + s_f[k] * s_f[k]
+        sum_f = sum_f + s_f[k]
+        sum_cr = sum_cr + s_cr[k]
+      }
+      mu_f = (1.0 - c_adapt) * mu_f + c_adapt * (sum_f2 / (sum_f + 1.0e-12))
+      mu_cr = (1.0 - c_adapt) * mu_cr +
+        c_adapt * (sum_cr / s_f.length().to_double())
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
