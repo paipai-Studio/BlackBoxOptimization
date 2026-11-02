@@ -1392,6 +1392,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       meerkat_optimization_algorithm(make_moa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "AOS",
+    run: (e, d, b, r, f) => {
+      atomic_orbital_search(make_aos_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
