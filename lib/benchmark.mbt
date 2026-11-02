@@ -1362,6 +1362,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       crested_porcupine_optimizer(make_cpo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "MTBO",
+    run: (e, d, b, r, f) => {
+      mountaineering_team_based_optimization(make_mtbo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
