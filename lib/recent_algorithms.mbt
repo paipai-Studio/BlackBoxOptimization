@@ -13990,3 +13990,175 @@ pub fn unified_pso(
     evaluations,
   }
 }
+
+// ===== RGA: Real-coded Genetic Algorithm with SBX (1995) =====
+
+///|
+pub struct RGAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_rga_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> RGAConfig {
+  RGAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Real-coded Genetic Algorithm (Deb & Agrawal 1995): binary tournament
+/// selection, simulated binary crossover (eta_c = 15) and polynomial
+/// mutation (eta_m = 20, per-gene probability 1/dim) build an offspring
+/// population that competes with the parents in a (mu+lambda) truncation.
+/// All operators sample per dimension per the shared-random-number rule;
+/// historical-best tracking is added.
+pub fn real_coded_ga(
+  config : RGAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let pop_size = if config.population_size < 4 {
+    4
+  } else {
+    config.population_size
+  }
+  let eta_c = 15.0
+  let eta_m = 20.0
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  let tour_select = fn() {
+    let a = (RNG::next(current_rng) * pop_size.to_double()).to_int() % pop_size
+    let b2 = (RNG::next(current_rng) * pop_size.to_double()).to_int() % pop_size
+    if vals[a] <= vals[b2] {
+      a
+    } else {
+      b2
+    }
+  }
+
+  while evaluations < max_evals {
+    // build the offspring population pairwise
+    let off : Array[Array[Double]] = []
+    let off_vals : Array[Double] = []
+    let n_pairs = pop_size / 2
+    for _p in 0..<n_pairs {
+      let p1 = tour_select()
+      let mut p2 = tour_select()
+      while p2 == p1 {
+        p2 = tour_select()
+      }
+      let c1 : Array[Double] = []
+      let c2 : Array[Double] = []
+      for d in 0..<dim {
+        // SBX per dimension
+        let u = RNG::next(current_rng)
+        let beta = if u < 0.5 {
+          @math.pow(2.0 * u, 1.0 / (eta_c + 1.0))
+        } else {
+          @math.pow(1.0 / (2.0 * (1.0 - u)), 1.0 / (eta_c + 1.0))
+        }
+        let m1 = 0.5 * ((1.0 + beta) * pop[p1][d] + (1.0 - beta) * pop[p2][d])
+        let m2 = 0.5 * ((1.0 - beta) * pop[p1][d] + (1.0 + beta) * pop[p2][d])
+        c1.push(max(bounds.min, min(bounds.max, m1)))
+        c2.push(max(bounds.min, min(bounds.max, m2)))
+      }
+      // polynomial mutation per gene
+      for child in [c1, c2] {
+        for d in 0..<dim {
+          if RNG::next(current_rng) < 1.0 / dim.to_double() {
+            let u = RNG::next(current_rng)
+            let delta = if u < 0.5 {
+              @math.pow(2.0 * u, 1.0 / (eta_m + 1.0)) - 1.0
+            } else {
+              1.0 - @math.pow(2.0 * (1.0 - u), 1.0 / (eta_m + 1.0))
+            }
+            child[d] = max(
+              bounds.min,
+              min(bounds.max, child[d] + delta * range),
+            )
+          }
+        }
+        let fv = evaluate(f, child)
+        evaluations = evaluations + 1
+        off.push(child)
+        off_vals.push(fv)
+        if fv < best_val {
+          best_val = fv
+          best_pos = child
+        }
+      }
+    }
+    // (mu+lambda) truncation over the combined 2*pop_size pool
+    let pool_p : Array[Array[Double]] = []
+    let pool_v : Array[Double] = []
+    for i in 0..<pop_size {
+      pool_p.push(pop[i])
+      pool_v.push(vals[i])
+    }
+    for i in 0..<off.length() {
+      pool_p.push(off[i])
+      pool_v.push(off_vals[i])
+    }
+    let n_pool = pool_p.length()
+    for a in 0..<pop_size {
+      let mut m = a
+      for b2 in (a + 1)..<n_pool {
+        if pool_v[b2] < pool_v[m] {
+          m = b2
+        }
+      }
+      if m != a {
+        let tp = pool_p[a]
+        let tv = pool_v[a]
+        pool_p[a] = pool_p[m]
+        pool_v[a] = pool_v[m]
+        pool_p[m] = tp
+        pool_v[m] = tv
+      }
+    }
+    for i in 0..<pop_size {
+      pop[i] = pool_p[i]
+      vals[i] = pool_v[i]
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
