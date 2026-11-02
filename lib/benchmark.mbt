@@ -914,6 +914,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       water_wave_optimization(make_wwo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "WHO",
+    run: (e, d, b, r, f) => {
+      wild_horse_optimizer(make_who_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
