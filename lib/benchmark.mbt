@@ -1314,6 +1314,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       dingo_optimization_algorithm(make_doa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "STOA",
+    run: (e, d, b, r, f) => {
+      sooty_tern_optimization_algorithm(make_stoa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

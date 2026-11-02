@@ -15964,3 +15964,112 @@ pub fn dingo_optimization_algorithm(
     evaluations,
   }
 }
+
+// ===== STOA: Sooty Tern Optimization Algorithm (2019) =====
+
+///|
+pub struct STOAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_stoa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> STOAConfig {
+  STOAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Sooty Tern Optimization Algorithm (Dhiman & Kaur 2019),
+/// mechanism-faithful variant.  Each tern first migrates with a collision
+/// avoidance term and a convergence term,
+///   D = S_A X_i + C_B (gbest - X_i),   S_A ~ U(0,2), C_B ~ U(0,1),
+/// then attacks the prey along a spiral around the best,
+///   X_i <- gbest + D e^{k l} cos(2 pi l),   l ~ U(-1,1), k = 1.
+/// Greedy acceptance and historical-best tracking are added.
+pub fn sooty_tern_optimization_algorithm(
+  config : STOAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let k_spiral = 1.0
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let sa = RNG::next(current_rng) * 2.0
+      let cb = RNG::next(current_rng)
+      // migration: collision avoidance + convergence toward the best
+      let dst : Array[Double] = []
+      for d in 0..<dim {
+        dst.push(sa * xi[d] + cb * (best_pos[d] - xi[d]))
+      }
+      // attacking: spiral around the best
+      let l = RNG::next(current_rng) * 2.0 - 1.0
+      let spiral = @math.exp(k_spiral * l) * @math.cos(TWO_PI * l)
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = best_pos[d] + dst[d] * spiral
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
