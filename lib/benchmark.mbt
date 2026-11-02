@@ -1158,6 +1158,10 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       butterfly_optimization(make_boa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "MFA",
+    run: (e, d, b, r, f) => mayfly_algorithm(make_mfa_config(e, d, b, 25), f, r),
+  })
   entries
 }
 

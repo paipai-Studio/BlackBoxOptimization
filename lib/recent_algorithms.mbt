@@ -11228,3 +11228,251 @@ pub fn butterfly_optimization(
     evaluations,
   }
 }
+
+// ===== MFA: Mayfly Algorithm (2020) =====
+
+///|
+pub struct MFAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_mfa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> MFAConfig {
+  MFAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Mayfly Algorithm (Zervoudakis & Tsafaras 2020): males move with PSO-like
+/// pulls toward personal and global bests, the better half of the males adds
+/// a dancing perturbation whose amplitude fades with progress; females are
+/// attracted to a random male.  Top mayflies of both sexes are paired into
+/// offspring via per-dimension crossover plus a fading Gaussian mutation.
+/// Historical-best tracking is added.
+pub fn mayfly_algorithm(
+  config : MFAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let pop_size = if config.population_size < 6 {
+    6
+  } else {
+    config.population_size
+  }
+  let n_male = pop_size / 2
+  let n_female = pop_size - n_male
+  let a1 = 2.0
+  let a2 = 2.0
+  let dance0 = range * 0.1
+  let mut_std = range * 0.05
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  for _i in 0..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    pop.push(p)
+    vals.push(v)
+  }
+  let mut best_pos : Array[Double] = pop[0]
+  let mut best_val = vals[0]
+  let mut evaluations = pop_size
+  for i in 1..<pop_size {
+    if vals[i] < best_val {
+      best_val = vals[i]
+      best_pos = pop[i]
+    }
+  }
+  let pbest : Array[Array[Double]] = []
+  let pbest_vals : Array[Double] = []
+  for i in 0..<n_male {
+    pbest.push(pop[i])
+    pbest_vals.push(vals[i])
+  }
+  let vel : Array[Array[Double]] = []
+  for _i in 0..<n_male {
+    let v : Array[Double] = []
+    for _d in 0..<dim {
+      v.push(0.0)
+    }
+    vel.push(v)
+  }
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    // males: PSO-like move (positions pop[0..n_male))
+    for i in 0..<n_male {
+      if evaluations >= max_evals {
+        break
+      }
+      let v = vel[i]
+      let xi = pop[i]
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let r1 = RNG::next(current_rng)
+        let r2 = RNG::next(current_rng)
+        let nv = a1 * r1 * (pbest[i][d] - xi[d]) +
+          a2 * r2 * (best_pos[d] - xi[d])
+        v[d] = nv
+        cand.push(max(bounds.min, min(bounds.max, xi[d] + nv)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+        pbest[i] = cand
+        pbest_vals[i] = fv
+      } else {
+        pbest_vals[i] = vals[i]
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+    // dancing males: the better half of the males gets a vertical dance
+    // component with fading amplitude
+    if evaluations < max_evals {
+      let idx : Array[Int32] = []
+      for i in 0..<n_male {
+        idx.push(i)
+      }
+      // simple selection sort by value, ascending
+      for a in 0..<n_male {
+        let mut m = a
+        for b in (a + 1)..<n_male {
+          if vals[idx[b]] < vals[idx[m]] {
+            m = b
+          }
+        }
+        let tmp = idx[a]
+        idx[a] = idx[m]
+        idx[m] = tmp
+      }
+      let n_dance = n_male / 2
+      for hi in 0..<n_dance {
+        if evaluations >= max_evals {
+          break
+        }
+        let i = idx[hi]
+        let xi = pop[i]
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+          cand.push(max(bounds.min, min(bounds.max, xi[d] + dance0 * rb * g)))
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        if fv < vals[i] {
+          pop[i] = cand
+          vals[i] = fv
+          pbest[i] = cand
+          if fv < best_val {
+            best_val = fv
+            best_pos = cand
+          }
+        }
+      }
+    }
+    // females: attracted toward a random male
+    for j in 0..<n_female {
+      if evaluations >= max_evals {
+        break
+      }
+      let i = n_male + j
+      let mate = (RNG::next(current_rng) * n_male.to_double()).to_int() % n_male
+      let xi = pop[i]
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let r2 = RNG::next(current_rng)
+        cand.push(
+          max(
+            bounds.min,
+            min(bounds.max, xi[d] + a2 * r2 * (pop[mate][d] - xi[d])),
+          ),
+        )
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+    // mating: pair random top-half mayflies of both sexes
+    if evaluations < max_evals {
+      let n_off = n_male
+      for _o in 0..<n_off {
+        if evaluations >= max_evals {
+          break
+        }
+        let dad = (RNG::next(current_rng) * n_male.to_double()).to_int() %
+          n_male
+        let mom = n_male +
+          (RNG::next(current_rng) * n_female.to_double()).to_int() % n_female
+        let child : Array[Double] = []
+        for d in 0..<dim {
+          let base = if RNG::next(current_rng) < 0.5 {
+            pop[dad][d]
+          } else {
+            pop[mom][d]
+          }
+          let mut v = base
+          if RNG::next(current_rng) < 0.1 {
+            let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+            v = v + mut_std * rb * g
+          }
+          child.push(max(bounds.min, min(bounds.max, v)))
+        }
+        let fv = evaluate(f, child)
+        evaluations = evaluations + 1
+        // offspring replace the worst females
+        let mut wi = n_male
+        let mut wv = vals[n_male]
+        for j in n_male..<pop_size {
+          if vals[j] > wv {
+            wv = vals[j]
+            wi = j
+          }
+        }
+        if fv < vals[wi] {
+          pop[wi] = child
+          vals[wi] = fv
+          if fv < best_val {
+            best_val = fv
+            best_pos = child
+          }
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

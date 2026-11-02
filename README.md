@@ -184,6 +184,7 @@
 | Rosenbrock 旋转坐标搜索 | Rosenbrock | 方向轮换 + Gram-Schmidt 旋转的经典直接搜索 (1960) |
 | 大爆炸-大挤压算法 | BBBC | 精英挤压中心 + 几何收缩双尺度采样 (2006) |
 | 蝴蝶优化算法 | BOA | 香气浓度 f=c·I^a 驱动的全局/局部搜索 (2019) |
+| 蜉蝣算法 | MFA | 雌雄双群 PSO 式移动 + 交配重组 (2020) |
 
 > **通用群体智能参数**: 大部分算法默认 `population_size = 25`。下表列出各算法的特有参数。
 
@@ -213,7 +214,7 @@
 | WCA | `num_rivers` | 4 |
 | MFO | `spiral_constant` | 1.0 |
 | WOA | `spiral_constant` | 1.0 |
-| 其余算法 (GWO, SCA, ALO, HHO, SalpSA, AEO, SOS, GBPSO, MSA, PFA, CPA, BCO, FFOA, FWA, PIO, HBA, POA, TSA, GJO, GOA, SOA, GTO, SMA, AO, ChOA, DO, ZOA, MRFO, HGS, RSA, MPA, GEO, AVOA, WSO, COA, OOA, TDO, PDO, NGO, BWO, GBO, GO, WaOA, CLONALG, ABC, EM, DBO, TSO, KOA, FHO, RIME, INFO, SO, MGO, CHIO, PO, SCSO, SABO, HPO, AHA, BKA, ARO, FOX, DMO, RSO, EVO, EEFO, Golden-SA, YSGA, FBI, CapSA, SWO, GAO, MAO, UMDA, cGA, CA, COY, BES, GOOSE, Powell, TEO, SHO, ROA, HOA, BWA, CPSO, LPSO, WWO, WHO, GD, VNS, Rosenbrock, BBBC, BOA) | 仅需 `population_size` | 25 |
+| 其余算法 (GWO, SCA, ALO, HHO, SalpSA, AEO, SOS, GBPSO, MSA, PFA, CPA, BCO, FFOA, FWA, PIO, HBA, POA, TSA, GJO, GOA, SOA, GTO, SMA, AO, ChOA, DO, ZOA, MRFO, HGS, RSA, MPA, GEO, AVOA, WSO, COA, OOA, TDO, PDO, NGO, BWO, GBO, GO, WaOA, CLONALG, ABC, EM, DBO, TSO, KOA, FHO, RIME, INFO, SO, MGO, CHIO, PO, SCSO, SABO, HPO, AHA, BKA, ARO, FOX, DMO, RSO, EVO, EEFO, Golden-SA, YSGA, FBI, CapSA, SWO, GAO, MAO, UMDA, cGA, CA, COY, BES, GOOSE, Powell, TEO, SHO, ROA, HOA, BWA, CPSO, LPSO, WWO, WHO, GD, VNS, Rosenbrock, BBBC, BOA, MFA) | 仅需 `population_size` | 25 |
 
 ### 📐 确定性直接搜索
 无需梯度信息，通过几何模式进行直接搜索，适合不可导函数。
