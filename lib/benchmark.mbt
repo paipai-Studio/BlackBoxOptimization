@@ -1434,6 +1434,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       neural_network_algorithm(make_nna_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "PBO",
+    run: (e, d, b, r, f) => {
+      polar_bear_optimization(make_pbo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
