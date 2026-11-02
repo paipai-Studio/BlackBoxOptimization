@@ -835,6 +835,300 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
     },
   })
   entries.push(AlgoEntry::{
+    name: "GO",
+    run: (e, d, b, r, f) => growth_optimizer(make_go_config(e, d, b, 25), f, r),
+  })
+  entries.push(AlgoEntry::{
+    name: "WaOA",
+    run: (e, d, b, r, f) => {
+      walrus_optimizer(make_waoa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "CLONALG",
+    run: (e, d, b, r, f) => {
+      clonal_selection_algorithm(make_clonalg_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "ABC",
+    run: (e, d, b, r, f) => {
+      artificial_bee_colony(make_abc_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "EM",
+    run: (e, d, b, r, f) => {
+      electromagnetism_like_mechanism(make_em_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "DBO",
+    run: (e, d, b, r, f) => {
+      dung_beetle_optimizer(make_dbo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "TSO",
+    run: (e, d, b, r, f) => {
+      tunicate_swarm_algorithm(make_tso_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "KOA",
+    run: (e, d, b, r, f) => {
+      kookaburra_optimization_algorithm(make_koa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "FHO",
+    run: (e, d, b, r, f) => {
+      fire_hawk_optimizer(make_fho_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "RIME",
+    run: (e, d, b, r, f) => {
+      rime_optimization_algorithm(make_rime_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "INFO",
+    run: (e, d, b, r, f) => {
+      info_optimization_algorithm(make_info_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SO",
+    run: (e, d, b, r, f) => snake_optimizer(make_so_config(e, d, b, 25), f, r),
+  })
+  entries.push(AlgoEntry::{
+    name: "MGO",
+    run: (e, d, b, r, f) => {
+      mountain_gazelle_optimizer(make_mgo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "CHIO",
+    run: (e, d, b, r, f) => {
+      coronavirus_herd_immunity_optimization(
+        make_chio_config(e, d, b, 25),
+        f,
+        r,
+      )
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "PO",
+    run: (e, d, b, r, f) => {
+      political_optimizer(make_po_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SCSO",
+    run: (e, d, b, r, f) => {
+      sand_cat_swarm_optimization(make_scso_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SABO",
+    run: (e, d, b, r, f) => {
+      subtraction_average_based_optimizer(make_sabo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "HPO",
+    run: (e, d, b, r, f) => {
+      hunter_prey_optimizer(make_hpo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "AHA",
+    run: (e, d, b, r, f) => {
+      artificial_hummingbird_algorithm(make_aha_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "BKA",
+    run: (e, d, b, r, f) => {
+      black_winged_kite_algorithm(make_bka_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "ARO",
+    run: (e, d, b, r, f) => {
+      artificial_rabbits_optimization(make_aro_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "FOX",
+    run: (e, d, b, r, f) => fox_optimizer(make_fox_config(e, d, b, 25), f, r),
+  })
+  entries.push(AlgoEntry::{
+    name: "DMO",
+    run: (e, d, b, r, f) => {
+      dwarf_mongoose_optimization(make_dmo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "RSO",
+    run: (e, d, b, r, f) => {
+      rat_swarm_optimizer(make_rso_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "EVO",
+    run: (e, d, b, r, f) => {
+      egyptian_vulture_optimization(make_evo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "EEFO",
+    run: (e, d, b, r, f) => {
+      electric_eel_foraging_optimization(make_eefo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "Golden-SA",
+    run: (e, d, b, r, f) => {
+      golden_sine_algorithm(make_golden_sa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "YSGA",
+    run: (e, d, b, r, f) => {
+      yellow_saddle_goatfish_algorithm(make_ysga_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "FBI",
+    run: (e, d, b, r, f) => {
+      forensic_based_investigation(make_fbi_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "CapSA",
+    run: (e, d, b, r, f) => {
+      capuchin_search_algorithm(make_capsa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SWO",
+    run: (e, d, b, r, f) => {
+      spider_wasp_optimizer(make_swo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "GAO",
+    run: (e, d, b, r, f) => {
+      green_anaconda_optimization(make_gao_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "MAO",
+    run: (e, d, b, r, f) => {
+      mexican_axolotl_optimization(make_mao_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "UMDA",
+    run: (e, d, b, r, f) => {
+      univariate_marginal_distribution_algorithm(
+        make_umda_config(e, d, b, 25),
+        f,
+        r,
+      )
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "cGA",
+    run: (e, d, b, r, f) => {
+      compact_genetic_algorithm(make_cga_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "CA",
+    run: (e, d, b, r, f) => {
+      cultural_algorithm(make_ca_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "COY",
+    run: (e, d, b, r, f) => {
+      coyote_optimization_algorithm(make_coy_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "BES",
+    run: (e, d, b, r, f) => {
+      bald_eagle_search(make_bes_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "GOOSE",
+    run: (e, d, b, r, f) => {
+      goose_optimization_algorithm(make_goose_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "Powell",
+    run: (e, d, b, r, f) => {
+      powell_conjugate_direction_method(make_powell_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "TEO",
+    run: (e, d, b, r, f) => {
+      thermal_exchange_optimization(make_teo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SHO",
+    run: (e, d, b, r, f) => {
+      spotted_hyena_optimizer(make_sho_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "ROA",
+    run: (e, d, b, r, f) => {
+      remora_optimization_algorithm(make_roa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "HOA",
+    run: (e, d, b, r, f) => {
+      horse_herd_optimization(make_hoa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "BWA",
+    run: (e, d, b, r, f) => {
+      black_widow_optimization_algorithm(make_bwa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "CPSO",
+    run: (e, d, b, r, f) => {
+      constriction_pso(make_cpso_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "LPSO",
+    run: (e, d, b, r, f) => local_best_pso(make_lpso_config(e, d, b, 25), f, r),
+  })
+  entries.push(AlgoEntry::{
+    name: "WWO",
+    run: (e, d, b, r, f) => {
+      water_wave_optimization(make_wwo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "WHO",
+    run: (e, d, b, r, f) => {
+      wild_horse_optimizer(make_who_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
     name: "GD",
     run: (e, d, b, r, f) => {
       great_deluge_algorithm(make_gd_config(e, d, b, 25), f, r)
