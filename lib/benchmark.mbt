@@ -1094,6 +1094,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       remora_optimization_algorithm(make_roa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "HOA",
+    run: (e, d, b, r, f) => {
+      horse_herd_optimization(make_hoa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

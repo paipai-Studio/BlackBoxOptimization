@@ -3704,3 +3704,29 @@ test "ROA improves with more evaluations" {
 
   assert_true(result2.best_value <= result1.best_value)
 }
+
+///|
+test "HOA produces valid result" {
+  let config = @lib.make_hoa_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.horse_herd_optimization(config, @lib.sphere_function, rng)
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "HOA improves with more evaluations" {
+  let config1 = @lib.make_hoa_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.horse_herd_optimization(
+    config1, @lib.sphere_function, rng1,
+  )
+
+  let config2 = @lib.make_hoa_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.horse_herd_optimization(
+    config2, @lib.sphere_function, rng2,
+  )
+
+  assert_true(result2.best_value <= result1.best_value)
+}
