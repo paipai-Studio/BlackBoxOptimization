@@ -1344,6 +1344,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       naked_mole_rat_algorithm(make_nmra_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "FFO",
+    run: (e, d, b, r, f) => {
+      fennec_fox_optimization_algorithm(make_ffo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
