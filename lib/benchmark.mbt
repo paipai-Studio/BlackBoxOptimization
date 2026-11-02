@@ -1198,6 +1198,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       black_hole_algorithm(make_bh_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "LOA",
+    run: (e, d, b, r, f) => {
+      lion_optimization(make_loa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

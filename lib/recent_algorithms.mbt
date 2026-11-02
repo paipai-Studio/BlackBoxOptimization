@@ -12411,3 +12411,137 @@ pub fn black_hole_algorithm(
     evaluations,
   }
 }
+
+// ===== LOA: Lion Optimization Algorithm (2016) =====
+
+///|
+pub struct LOAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_loa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> LOAConfig {
+  LOAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Lion Optimization Algorithm (Wang et al. 2016), mechanism-faithful
+/// variant: the pride splits into the king (territory defence, refined by
+/// a fading Gaussian), lionesses (cooperative encirclement toward the
+/// prey/king with a quadratically decaying move factor) and cubs (half
+/// learn from a random adult blended with the king, half roam).  Greedy
+/// acceptance, historical-best tracking and per-dimension sampling per
+/// house rules.
+pub fn lion_optimization(
+  config : LOAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let pop_size = if config.population_size < 6 {
+    6
+  } else {
+    config.population_size
+  }
+  let n_fem = pop_size / 3
+  let alpha0 = 0.3
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    let alpha = alpha0 * rb * rb
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let cand : Array[Double] = []
+      if i == 0 {
+        // king: fading Gaussian territory defence
+        for d in 0..<dim {
+          let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+          cand.push(
+            max(
+              bounds.min,
+              min(bounds.max, best_pos[d] + range * 0.1 * rb * rb * g),
+            ),
+          )
+        }
+      } else if i <= n_fem {
+        // lioness: cooperative encirclement of the prey (king)
+        for d in 0..<dim {
+          let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+          let mid = (best_pos[d] + pop[i][d]) * 0.5
+          cand.push(max(bounds.min, min(bounds.max, mid * (1.0 + alpha * g))))
+        }
+        // cubs: half learn from a random adult + king, half roam
+      } else if RNG::next(current_rng) < 0.5 {
+        let m = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        for d in 0..<dim {
+          let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+          let mid = (pop[m][d] + best_pos[d]) * 0.5
+          cand.push(max(bounds.min, min(bounds.max, mid * (1.0 + alpha * g))))
+        }
+      } else {
+        for d in 0..<dim {
+          let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+          cand.push(
+            max(bounds.min, min(bounds.max, pop[i][d] + alpha * range * g)),
+          )
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
