@@ -1152,6 +1152,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       big_bang_big_crunch(make_bbbc_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "BOA",
+    run: (e, d, b, r, f) => {
+      butterfly_optimization(make_boa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

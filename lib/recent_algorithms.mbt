@@ -11063,3 +11063,168 @@ pub fn big_bang_big_crunch(
     evaluations,
   }
 }
+
+// ===== BOA: Butterfly Optimization Algorithm (2019) =====
+
+///|
+pub struct BOAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_boa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BOAConfig {
+  BOAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Butterfly Optimization Algorithm (Arora & Singh 2019): each butterfly's
+/// fragrance f = c * I^a with a fitness-normalised intensity I in [0,1] and
+/// a sensory modality c decaying per generation (budget-independent).  With
+/// probability p the butterfly moves toward the global best scaled by its
+/// fragrance (global search), otherwise a difference of two random peers
+/// (local search).  Moves are greedy-accepted; a fading Gaussian jolt on
+/// one random butterfly per generation prevents late stagnation.
+pub fn butterfly_optimization(
+  config : BOAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let pop_size = if config.population_size < 4 {
+    4
+  } else {
+    config.population_size
+  }
+  let a_exp = 0.5
+  let p_switch = 0.8
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  let mut c_mod = 1.0
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    c_mod = c_mod * 0.95
+    if c_mod < 0.05 {
+      c_mod = 0.05
+    }
+    // fitness-normalised intensities
+    let mut v_max = vals[0]
+    let mut v_min = vals[0]
+    for i in 1..<pop_size {
+      if vals[i] > v_max {
+        v_max = vals[i]
+      }
+      if vals[i] < v_min {
+        v_min = vals[i]
+      }
+    }
+    let span = v_max - v_min + 1.0e-12
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let inten = (v_max - vals[i]) / span
+      let frag = c_mod * @math.pow(inten, a_exp)
+      let xi = pop[i]
+      let cand : Array[Double] = []
+      if RNG::next(current_rng) < p_switch {
+        let r2 = RNG::next(current_rng) * RNG::next(current_rng)
+        for d in 0..<dim {
+          cand.push(
+            max(
+              bounds.min,
+              min(bounds.max, xi[d] + r2 * (best_pos[d] - xi[d]) * frag),
+            ),
+          )
+        }
+      } else {
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        for d in 0..<dim {
+          cand.push(
+            max(
+              bounds.min,
+              min(bounds.max, xi[d] + (pop[j][d] - pop[k][d]) * frag),
+            ),
+          )
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+    // fading jolt: keep one random butterfly wandering early on
+    if evaluations < max_evals && rb > 0.0 {
+      let w = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+        cand.push(
+          max(bounds.min, min(bounds.max, pop[w][d] + range * 0.05 * rb * g)),
+        )
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[w] {
+        pop[w] = cand
+        vals[w] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
