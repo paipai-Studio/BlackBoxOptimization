@@ -13476,3 +13476,150 @@ pub fn spiral_optimization(
     evaluations,
   }
 }
+
+// ===== RTH: Red-tailed Hawk Algorithm (2022) =====
+
+///|
+pub struct RTHConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_rth_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> RTHConfig {
+  RTHConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Red-tailed Hawk Algorithm (Abdechiri et al. 2022), mechanism-faithful
+/// variant: the hunt progresses through four stages as the budget
+/// advances - high soar (differential exploration against a random peer),
+/// high scan (broad sampling around the best), swoop (best-attraction
+/// plus peer difference) and strike (fading Gaussian refinement at the
+/// kill site).  Greedy acceptance, historical-best tracking and
+/// per-dimension sampling follow the house rules.
+pub fn red_tailed_hawk(
+  config : RTHConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let pop_size = if config.population_size < 4 {
+    4
+  } else {
+    config.population_size
+  }
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let r = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let cand : Array[Double] = []
+      if rb > 0.7 {
+        // high soar: differential exploration
+        for d in 0..<dim {
+          let r1 = RNG::next(current_rng)
+          let r2 = RNG::next(current_rng)
+          let diff = pop[r][d] - 2.0 * r2 * pop[i][d]
+          cand.push(
+            max(bounds.min, min(bounds.max, pop[r][d] - r1 * diff.abs())),
+          )
+        }
+      } else if rb > 0.55 {
+        // high scan: interpolation toward the best (2x spread burned a
+        // quarter of the budget on multimodal landscapes: Ackley 5k regressed;
+        // the window is narrower now)
+        for d in 0..<dim {
+          let r1 = RNG::next(current_rng)
+          cand.push(
+            max(
+              bounds.min,
+              min(bounds.max, best_pos[d] + r1 * (pop[i][d] - best_pos[d])),
+            ),
+          )
+        }
+      } else if rb > 0.35 {
+        // swoop: best attraction plus peer difference
+        for d in 0..<dim {
+          let r1 = RNG::next(current_rng)
+          let r2 = RNG::next(current_rng)
+          cand.push(
+            max(
+              bounds.min,
+              min(
+                bounds.max,
+                best_pos[d] +
+                r1 * (best_pos[d] - pop[i][d]) +
+                0.5 * r2 * (pop[r][d] - pop[i][d]),
+              ),
+            ),
+          )
+        }
+      } else {
+        // strike: fading Gaussian refinement at the kill site
+        for d in 0..<dim {
+          let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+          cand.push(
+            max(bounds.min, min(bounds.max, best_pos[d] + range * 0.1 * rb * g)),
+          )
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

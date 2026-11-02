@@ -1234,6 +1234,10 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       spiral_optimization(make_spo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "RTH",
+    run: (e, d, b, r, f) => red_tailed_hawk(make_rth_config(e, d, b, 25), f, r),
+  })
   entries
 }
 
