@@ -210,6 +210,7 @@
 | 模因算法 | Memetic | SBX-GA 主体 + Lamarckian 局部精修 (1989) |
 | 自适应差分进化 JADE | JADE | current-to-pbest + 外部档案 + Lehmer 自适应 (2009) |
 | 冠军联赛算法 | LCA | 轮转配对抗衡 + 败者模仿胜者 (2015) |
+| 亨利气体溶解优化 | HGSO | 气体分组亨利常数 + 溶解度步长 (2019) |
 
 > **通用群体智能参数**: 大部分算法默认 `population_size = 25`。下表列出各算法的特有参数。
 
@@ -239,7 +240,7 @@
 | WCA | `num_rivers` | 4 |
 | MFO | `spiral_constant` | 1.0 |
 | WOA | `spiral_constant` | 1.0 |
-| 其余算法 (GWO, SCA, ALO, HHO, SalpSA, AEO, SOS, GBPSO, MSA, PFA, CPA, BCO, FFOA, FWA, PIO, HBA, POA, TSA, GJO, GOA, SOA, GTO, SMA, AO, ChOA, DO, ZOA, MRFO, HGS, RSA, MPA, GEO, AVOA, WSO, COA, OOA, TDO, PDO, NGO, BWO, GBO, GO, WaOA, CLONALG, ABC, EM, DBO, TSO, KOA, FHO, RIME, INFO, SO, MGO, CHIO, PO, SCSO, SABO, HPO, AHA, BKA, ARO, FOX, DMO, RSO, EVO, EEFO, Golden-SA, YSGA, FBI, CapSA, SWO, GAO, MAO, UMDA, cGA, CA, COY, BES, GOOSE, Powell, TEO, SHO, ROA, HOA, BWA, CPSO, LPSO, WWO, WHO, GD, VNS, Rosenbrock, BBBC, BOA, MFA, SBO, TA, ACOR, QPSO, SaDE, BH, LOA, BHop, CoDE, ODE, CBO, TWO, SPO, RTH, CRS, UPSO, RGA, InS, BMO, NRBO, SPSA, DIRECT, Memetic, JADE, LCA) | 仅需 `population_size` | 25 |
+| 其余算法 (GWO, SCA, ALO, HHO, SalpSA, AEO, SOS, GBPSO, MSA, PFA, CPA, BCO, FFOA, FWA, PIO, HBA, POA, TSA, GJO, GOA, SOA, GTO, SMA, AO, ChOA, DO, ZOA, MRFO, HGS, RSA, MPA, GEO, AVOA, WSO, COA, OOA, TDO, PDO, NGO, BWO, GBO, GO, WaOA, CLONALG, ABC, EM, DBO, TSO, KOA, FHO, RIME, INFO, SO, MGO, CHIO, PO, SCSO, SABO, HPO, AHA, BKA, ARO, FOX, DMO, RSO, EVO, EEFO, Golden-SA, YSGA, FBI, CapSA, SWO, GAO, MAO, UMDA, cGA, CA, COY, BES, GOOSE, Powell, TEO, SHO, ROA, HOA, BWA, CPSO, LPSO, WWO, WHO, GD, VNS, Rosenbrock, BBBC, BOA, MFA, SBO, TA, ACOR, QPSO, SaDE, BH, LOA, BHop, CoDE, ODE, CBO, TWO, SPO, RTH, CRS, UPSO, RGA, InS, BMO, NRBO, SPSA, DIRECT, Memetic, JADE, LCA, HGSO) | 仅需 `population_size` | 25 |
 
 ### 📐 确定性直接搜索
 无需梯度信息，通过几何模式进行直接搜索，适合不可导函数。

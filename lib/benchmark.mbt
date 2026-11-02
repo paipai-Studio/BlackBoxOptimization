@@ -1296,6 +1296,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       league_championship_algorithm(make_lca_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "HGSO",
+    run: (e, d, b, r, f) => {
+      henry_gas_solubility_optimization(make_hgso_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

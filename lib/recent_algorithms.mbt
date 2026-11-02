@@ -15477,3 +15477,179 @@ pub fn league_championship_algorithm(
     evaluations,
   }
 }
+
+// ===== HGSO: Henry Gas Solubility Optimization (2019) =====
+
+///|
+pub struct HGSOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_hgso_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> HGSOConfig {
+  HGSOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Henry Gas Solubility Optimization (Hashim et al. 2019),
+/// mechanism-faithful variant: individuals are grouped into gas types,
+/// each carrying a Henry constant H_j that decays with progress (Henry's
+/// law as the temperature rises) and sets the solubility-scaled step.  A
+/// random individual dissolves toward a peer (explore) or toward its
+/// cluster's best (exploit); occasionally the state flips and the
+/// individual re-locates around the cluster best with a fading Gaussian.
+/// Greedy acceptance and historical-best tracking are added.
+pub fn henry_gas_solubility_optimization(
+  config : HGSOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let n_clusters = 5
+  let per_cluster = pop_size / n_clusters
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let cluster : Array[Int32] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  cluster.push(0)
+  for i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    cluster.push(
+      (i.to_double() / per_cluster.to_double()).to_int() % n_clusters,
+    )
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+  // Henry constants per gas type (canonical table range [1, 298])
+  let henry : Array[Double] = []
+  for _j in 0..<n_clusters {
+    henry.push(1.0 + RNG::next(current_rng) * 297.0)
+  }
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    // Henry's law: constants decay as the temperature rises
+    for j in 0..<n_clusters {
+      henry[j] = henry[j] * @math.exp(-rb * 0.01)
+      if henry[j] < 0.01 {
+        henry[j] = 0.01
+      }
+    }
+    // cluster bests
+    let c_best_i : Array[Int32] = []
+    let c_best_v : Array[Double] = []
+    for _j in 0..<n_clusters {
+      c_best_i.push(0)
+      c_best_v.push(1.0e308)
+    }
+    for i in 0..<pop_size {
+      let j = cluster[i]
+      if vals[i] < c_best_v[j] {
+        c_best_v[j] = vals[i]
+        c_best_i[j] = i
+      }
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let j = cluster[i]
+      let solubility = henry[j] / 298.0
+      let xi = pop[i]
+      let cand : Array[Double] = []
+      let roll = RNG::next(current_rng)
+      if roll < 0.1 {
+        // state flip: re-locate around the cluster best
+        for d in 0..<dim {
+          let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+          cand.push(
+            max(
+              bounds.min,
+              min(bounds.max, pop[c_best_i[j]][d] + range * 0.1 * rb * g),
+            ),
+          )
+        }
+      } else if roll < 0.5 {
+        // explore: dissolve toward a random peer scaled by solubility
+        let r = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        for d in 0..<dim {
+          let r1 = RNG::next(current_rng)
+          cand.push(
+            max(
+              bounds.min,
+              min(
+                bounds.max,
+                xi[d] + solubility * r1 * 3.0 * (pop[r][d] - xi[d]),
+              ),
+            ),
+          )
+        }
+      } else {
+        // exploit: converge toward the cluster best scaled by solubility
+        for d in 0..<dim {
+          let r1 = RNG::next(current_rng)
+          cand.push(
+            max(
+              bounds.min,
+              min(
+                bounds.max,
+                xi[d] + solubility * r1 * 3.0 * (pop[c_best_i[j]][d] - xi[d]),
+              ),
+            ),
+          )
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
