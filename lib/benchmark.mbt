@@ -1410,6 +1410,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       social_spider_optimization(make_sso_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SLnO",
+    run: (e, d, b, r, f) => {
+      sea_lion_optimization_algorithm(make_sea_lion_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
