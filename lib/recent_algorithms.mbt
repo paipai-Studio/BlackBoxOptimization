@@ -14162,3 +14162,121 @@ pub fn real_coded_ga(
     evaluations,
   }
 }
+
+// ===== InS: Interior Search (2015) =====
+
+///|
+pub struct InSConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ins_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> InSConfig {
+  InSConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Interior Search (Gandomi 2015): a marked fraction (10%) of the
+/// population performs mirror reflection about the incumbent best
+/// (x' = 2*best - x, stepping to the far side of the current optimum);
+/// the rest recombine toward the best with a per-dimension random pull
+/// plus a fading Gaussian jitter.  Both moves are greedy-accepted and
+/// historical-best tracking is added.
+pub fn interior_search(
+  config : InSConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let pop_size = if config.population_size < 4 {
+    4
+  } else {
+    config.population_size
+  }
+  let mirror_ratio = 0.1
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let cand : Array[Double] = []
+      if RNG::next(current_rng) < mirror_ratio {
+        // global mirror reflection about the best
+        for d in 0..<dim {
+          cand.push(max(bounds.min, min(bounds.max, 2.0 * best_pos[d] - xi[d])))
+        }
+      } else {
+        // local recombination toward the best with fading jitter
+        for d in 0..<dim {
+          let r = RNG::next(current_rng)
+          let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+          cand.push(
+            max(
+              bounds.min,
+              min(
+                bounds.max,
+                xi[d] + r * (best_pos[d] - xi[d]) + range * 0.05 * rb * g,
+              ),
+            ),
+          )
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
