@@ -1208,6 +1208,10 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
     name: "BHop",
     run: (e, d, b, r, f) => basin_hopping(make_bhop_config(e, d, b, 25), f, r),
   })
+  entries.push(AlgoEntry::{
+    name: "CoDE",
+    run: (e, d, b, r, f) => composite_de(make_code_config(e, d, b, 25), f, r),
+  })
   entries
 }
 

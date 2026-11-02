@@ -12668,3 +12668,186 @@ pub fn basin_hopping(
     evaluations,
   }
 }
+
+// ===== CoDE: Composite Differential Evolution (2011) =====
+
+///|
+pub struct CoDEConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_code_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CoDEConfig {
+  CoDEConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Composite Differential Evolution (Wang et al. 2011): each target
+/// generates three candidate trials, one for each parameter set (1.0,0.1),
+/// (1.0,0.9), (0.8,0.2) crossed with the strategy (rand/1/bin or
+/// current-to-rand/1), picked uniformly.  All three trials are evaluated
+/// and the best competes with the target greedily.  Archive of failed
+/// parents is trimmed; per-dimension sampling and historical-best tracking
+/// follow the house rules.
+pub fn composite_de(
+  config : CoDEConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 6 {
+    6
+  } else {
+    config.population_size
+  }
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+  // archive of discarded parents (CoDE's pool of failed individuals)
+  let archive : Array[Array[Double]] = []
+  let archive_cap = pop_size
+
+  // parameter pools from the paper
+  let f_pool : Array[Double] = [1.0, 1.0, 0.8]
+  let cr_pool : Array[Double] = [0.1, 0.9, 0.2]
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      // three trials: strategies alternate rand/1, current-to-rand/1, rand/1
+      let mut trial_best : Array[Double] = pop[i]
+      let mut trial_best_val = vals[i]
+      for t in 0..<3 {
+        if evaluations >= max_evals {
+          break
+        }
+        let r1 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let mut r2 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let mut r3 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        while r2 == r1 {
+          r2 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+            pop_size
+        }
+        while r3 == r1 || r3 == r2 {
+          r3 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+            pop_size
+        }
+        let fv_f = f_pool[t]
+        let cr_v = cr_pool[t]
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let v = if t == 1 {
+            // current-to-rand/1 (applied per-dimension, binomial-ised)
+            pop[i][d] +
+            RNG::next(current_rng) * (pop[r1][d] - pop[i][d]) +
+            fv_f * (pop[r2][d] - pop[r3][d])
+            // rand/1/bin
+          } else if RNG::next(current_rng) < cr_v ||
+            RNG::next(current_rng) * dim.to_double() < 1.0 {
+            pop[r1][d] + fv_f * (pop[r2][d] - pop[r3][d])
+          } else {
+            pop[i][d]
+          }
+          cand.push(max(bounds.min, min(bounds.max, v)))
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        if fv < trial_best_val {
+          trial_best = cand
+          trial_best_val = fv
+        }
+      }
+      // greedy selection against the target
+      if trial_best_val < vals[i] {
+        archive.push(pop[i])
+        if archive.length() > archive_cap {
+          let _ = archive.remove(0)
+        }
+        pop[i] = trial_best
+        vals[i] = trial_best_val
+        if trial_best_val < best_val {
+          best_val = trial_best_val
+          best_pos = trial_best
+        }
+      }
+    }
+    // occasional archive-guided random replacement keeps failed genes alive
+    if archive.length() > 0 && evaluations < max_evals {
+      let a = (RNG::next(current_rng) * archive.length().to_double()).to_int() %
+        archive.length()
+      let w = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let donor = archive[a]
+      let r1 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        cand.push(
+          max(
+            bounds.min,
+            min(
+              bounds.max,
+              donor[d] +
+              RNG::next(current_rng) * (best_pos[d] - donor[d]) +
+              1.0 * (pop[r1][d] - donor[d]),
+            ),
+          ),
+        )
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[w] {
+        archive[w % archive.length()] = pop[w]
+        pop[w] = cand
+        vals[w] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
