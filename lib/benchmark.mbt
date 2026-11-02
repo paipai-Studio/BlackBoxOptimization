@@ -1440,6 +1440,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       polar_bear_optimization(make_pbo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "FSS",
+    run: (e, d, b, r, f) => {
+      fish_school_search(make_fss_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
