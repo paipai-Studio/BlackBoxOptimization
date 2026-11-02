@@ -1428,6 +1428,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       sunflower_optimization_algorithm(make_sfo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "NNA",
+    run: (e, d, b, r, f) => {
+      neural_network_algorithm(make_nna_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
