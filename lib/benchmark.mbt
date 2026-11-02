@@ -1350,6 +1350,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       fennec_fox_optimization_algorithm(make_ffo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "EPO",
+    run: (e, d, b, r, f) => {
+      emperor_penguin_optimization_algorithm(make_epo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

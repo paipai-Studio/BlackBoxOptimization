@@ -16693,3 +16693,130 @@ pub fn fennec_fox_optimization_algorithm(
     evaluations,
   }
 }
+
+// ===== EPO: Emperor Penguin Optimizer (2018) =====
+
+///|
+pub struct EPOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_epo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> EPOConfig {
+  EPOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Emperor Penguin Optimizer (Dhiman & Kumar 2018), mechanism-faithful
+/// variant of the emperor penguins' huddling behaviour.  The colony
+/// temperature T = T0 e^{-t/2500} (T0 = 200) cools as evaluations are
+/// spent; the normalised warmth h = T / T0 ~ 1 -> 0 drives the balance:
+///   * warm (r1 < 0.4 h) - wander, drift toward a random fellow penguin
+///     with a heat-scaled scatter,
+///     X_i <- X_i + r2 (X_rand - X_i) + r3 (2 r4 - 1) range h 0.1;
+///   * cold - huddle around the colony centre (best), alternating between
+///     a spiral step d e^{l theta} cos(2 pi theta) and an encircling sweep
+///     -a (2 r - 1) |d| with a = 2 h, plus a heat-radiation jostle.
+/// Penguins are moved unconditionally while the colony best is tracked
+/// separately (this keeps the huddle from collapsing prematurely).
+pub fn emperor_penguin_optimization_algorithm(
+  config : EPOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // temperature T = T0 e^{-t/2500}, T0 = 200; warmth h decays 1 -> 0
+      let heat = @math.exp(-evaluations.to_double() / 2500.0)
+      let a = 2.0 * heat
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < heat * 0.4 {
+        // warm: wander toward a random fellow penguin, plus heat-scaled scatter
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * heat * 0.1
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // cold: huddle - spiral / encircling step around the colony centre
+        // (best), plus a temperature-scaled heat-radiation jostle
+        let theta = 2.0 * r2 - 1.0
+        for d in 0..<dim {
+          let dist = best_pos[d] - xi[d]
+          let step = if r3 < 0.5 {
+            dist * exp_approx(0.5 * theta) * cos_approx(TWO_PI * theta)
+          } else {
+            -a * (2.0 * r4 - 1.0) * abs_val(dist)
+          }
+          let nv = best_pos[d] + step + (2.0 * r4 - 1.0) * span * heat * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
