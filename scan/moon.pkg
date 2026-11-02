@@ -1,5 +1,0 @@
-import {
-  "IvanAXu/BlackBoxOptimization/lib",
-}
-
-pkgtype(kind: "executable")
