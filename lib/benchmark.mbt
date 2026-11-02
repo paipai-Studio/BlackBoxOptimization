@@ -1106,6 +1106,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       black_widow_optimization_algorithm(make_bwa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "CPSO",
+    run: (e, d, b, r, f) => {
+      constriction_pso(make_cpso_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

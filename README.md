@@ -175,6 +175,7 @@
 | 鮣鱼优化器 | ROA | 吸附宿主/随游/清洁觅食 (2021) |
 | 马群优化 | HOA | 放牧/交配/争斗支配 (2019) |
 | 黑寡妇蜘蛛优化 | BWA | 蛛网收缩/趋雌/交配 (2020) |
+| 收缩因子粒子群 | CPSO | Clerc 收缩因子 + 速度夹持的 PSO (2002) |
 
 > **通用群体智能参数**: 大部分算法默认 `population_size = 25`。下表列出各算法的特有参数。
 
@@ -204,7 +205,7 @@
 | WCA | `num_rivers` | 4 |
 | MFO | `spiral_constant` | 1.0 |
 | WOA | `spiral_constant` | 1.0 |
-| 其余算法 (GWO, SCA, ALO, HHO, SalpSA, AEO, SOS, GBPSO, MSA, PFA, CPA, BCO, FFOA, FWA, PIO, HBA, POA, TSA, GJO, GOA, SOA, GTO, SMA, AO, ChOA, DO, ZOA, MRFO, HGS, RSA, MPA, GEO, AVOA, WSO, COA, OOA, TDO, PDO, NGO, BWO, GBO, GO, WaOA, CLONALG, ABC, EM, DBO, TSO, KOA, FHO, RIME, INFO, SO, MGO, CHIO, PO, SCSO, SABO, HPO, AHA, BKA, ARO, FOX, DMO, RSO, EVO, EEFO, Golden-SA, YSGA, FBI, CapSA, SWO, GAO, MAO, UMDA, cGA, CA, COY, BES, GOOSE, Powell, TEO, SHO, ROA, HOA, BWA) | 仅需 `population_size` | 25 |
+| 其余算法 (GWO, SCA, ALO, HHO, SalpSA, AEO, SOS, GBPSO, MSA, PFA, CPA, BCO, FFOA, FWA, PIO, HBA, POA, TSA, GJO, GOA, SOA, GTO, SMA, AO, ChOA, DO, ZOA, MRFO, HGS, RSA, MPA, GEO, AVOA, WSO, COA, OOA, TDO, PDO, NGO, BWO, GBO, GO, WaOA, CLONALG, ABC, EM, DBO, TSO, KOA, FHO, RIME, INFO, SO, MGO, CHIO, PO, SCSO, SABO, HPO, AHA, BKA, ARO, FOX, DMO, RSO, EVO, EEFO, Golden-SA, YSGA, FBI, CapSA, SWO, GAO, MAO, UMDA, cGA, CA, COY, BES, GOOSE, Powell, TEO, SHO, ROA, HOA, BWA, CPSO) | 仅需 `population_size` | 25 |
 
 ### 📐 确定性直接搜索
 无需梯度信息，通过几何模式进行直接搜索，适合不可导函数。
