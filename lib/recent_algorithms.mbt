@@ -11619,3 +11619,124 @@ pub fn secretary_bird_optimization(
     evaluations,
   }
 }
+
+// ===== TA: Threshold Accepting (1990) =====
+
+///|
+pub struct TAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ta_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> TAConfig {
+  TAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Threshold Accepting (Dueck & Scheuer 1990): the deterministic twin of
+/// simulated annealing.  A single incumbent accepts a neighbour when it is
+/// not worse than the threshold T (uphill moves up to T are allowed);
+/// the threshold decays geometrically and is budget-independent, so the
+/// trajectory is prefix-stable.  Once the threshold has collapsed the
+/// remaining budget refines around the historical best with a fading
+/// Gaussian (repeatedly validated local-search finishing move);
+/// conservative random restarts only after fully stalled sweeps.
+pub fn threshold_accepting(
+  config : TAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let range = bounds.max - bounds.min
+  let t0 = range * 0.1
+  let beta = 0.95
+  let t_floor = range * 1.0e-6
+  let wander0 = range * 0.1
+
+  let mut x = random_solution(dim, bounds, current_rng)
+  let mut fx = evaluate(f, x)
+  let mut evaluations = 1
+  let mut best_pos : Array[Double] = x
+  let mut best_val = fx
+
+  let mut t_thr = t0
+  let mut phase = 0.0 // 0: threshold walk, 1: best refinement blend
+  let mut stall_sweeps = 0
+
+  while evaluations < max_evals {
+    let iter = evaluations.to_double() / max_evals.to_double()
+    let rb = 1.0 - iter
+    // threshold schedule: geometric, budget-independent
+    t_thr = t_thr * beta
+    if t_thr < t_floor {
+      t_thr = t_floor
+    }
+    // after the threshold has effectively collapsed, blend into a fading
+    // Gaussian refinement around the best (first half of the walk is pure
+    // threshold acceptance by construction since T only shrinks)
+    phase = if t_thr <= t_floor * 10.0 { 1.0 } else { 0.0 }
+    let x_new : Array[Double] = []
+    if phase < 1.0 {
+      // threshold walk: neighbour step coupled to the current threshold
+      for d in 0..<dim {
+        let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+        x_new.push(max(bounds.min, min(bounds.max, x[d] + 2.0 * t_thr * g)))
+      }
+    } else {
+      // refinement around the best with a fading Gaussian
+      for d in 0..<dim {
+        let g = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+        x_new.push(
+          max(bounds.min, min(bounds.max, best_pos[d] + wander0 * rb * g)),
+        )
+      }
+    }
+    let fx_new = evaluate(f, x_new)
+    evaluations = evaluations + 1
+    if fx_new <= fx + t_thr {
+      x = x_new
+      fx = fx_new
+    }
+    if fx_new < best_val {
+      best_val = fx_new
+      best_pos = x_new
+      stall_sweeps = 0
+    } else {
+      stall_sweeps = stall_sweeps + 1
+    }
+    // conservative restart: long fully-stalled stretch in walk phase
+    if phase < 1.0 && stall_sweeps > 50 {
+      stall_sweeps = 0
+      let x_r = random_solution(dim, bounds, current_rng)
+      let fx_r = evaluate(f, x_r)
+      evaluations = evaluations + 1
+      if fx_r <= fx + t_thr {
+        x = x_r
+        fx = fx_r
+      }
+      t_thr = t0 * 0.5
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

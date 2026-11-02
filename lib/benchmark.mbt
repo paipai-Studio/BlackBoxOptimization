@@ -1168,6 +1168,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       secretary_bird_optimization(make_sbo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "TA",
+    run: (e, d, b, r, f) => {
+      threshold_accepting(make_ta_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
