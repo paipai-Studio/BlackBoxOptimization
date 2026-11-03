@@ -1530,6 +1530,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       vortex_search_algorithm(make_vsa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "VPL",
+    run: (e, d, b, r, f) => {
+      volleyball_premier_league(make_vpl_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
