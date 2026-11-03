@@ -1506,6 +1506,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       human_learning_optimization(make_hlo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "FDA",
+    run: (e, d, b, r, f) => {
+      flow_direction_algorithm(make_fda_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

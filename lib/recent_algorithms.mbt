@@ -20047,3 +20047,139 @@ pub fn human_learning_optimization(
     evaluations,
   }
 }
+
+// ===== FDA: Flow Direction Algorithm (2021) =====
+
+///|
+pub struct FDAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_fda_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> FDAConfig {
+  FDAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Flow Direction Algorithm (Karami et al. 2021), mechanism-faithful variant
+/// of water flowing toward the lowest point.  A flow factor ff = e^{-t/2500}
+/// decays as evaluations are spent:
+///   * downhill   (r1 < 0.4 ff) - differential flow from a lower neighbour
+///     across the terrain,
+///     X_i <- X_i + r2 (X_low - X_rand) + r3 (2 r4 - 1) range ff 0.12;
+///   * turbulence (r1 < 0.4 ff + 0.28) - fine turbulent step, ff^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range ff^2;
+///   * sink       (rest) - converge to the sink (global best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range ff 0.05.
+/// Streamflow moves unconditionally while elevations and the lowest point are
+/// tracked separately (this keeps the watershed from collapsing prematurely).
+pub fn flow_direction_algorithm(
+  config : FDAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // flow factor ff decays 1 -> 0 as evaluations are spent
+      let ff = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < ff * 0.4 {
+        // downhill: differential flow from a lower neighbour across the terrain
+        let j1 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let j2 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let j = if vals[j1] < vals[j2] { j1 } else { j2 }
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * ff * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < ff * 0.4 + 0.28 {
+        // turbulence: fine turbulent step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * ff * ff
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // sink: converge to the sink (global best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * ff * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      vals[i] = fv
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
