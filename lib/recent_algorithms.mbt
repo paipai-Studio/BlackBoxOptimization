@@ -29625,3 +29625,147 @@ pub fn giza_pyramids_construction(
     evaluations,
   }
 }
+
+// ===== SSD: Social Ski-Driver (2019) =====
+
+///|
+pub struct SSDConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ssd_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SSDConfig {
+  SSDConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Social Ski-Driver (2019), mechanism-faithful variant of the ski-driver
+/// social motion.  Each skier keeps a personal best and is driven by two
+/// references at once: its personal best and the midpoint between the personal
+/// best and the global best.  A driver factor ssf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * ski-drive (r1 < 0.36 ssf) - move under both references with a jitter,
+///     X_i <- X_i + r2 (P_i - X_i) + r3 (0.5 (X_best + P_i) - X_i)
+///            + r4 (2 r5 - 1) range ssf 0.11;
+///   * drift (r1 < 0.36 ssf + 0.41) - fine jitter that keeps the track spread
+///     out, X_i <- X_i + r2 (2 r3 - 1) range ssf^2;
+///   * finish (rest) - contract toward the global best,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range ssf 0.05.
+/// The personal best P_i is refreshed on improvement; the global best is
+/// tracked separately.
+pub fn social_ski_driver(
+  config : SSDConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  // personal best position / value for every skier
+  let pbest : Array[Array[Double]] = []
+  let pbest_fit : Array[Double] = []
+  for i in 0..<pop_size {
+    pbest.push(pop[i])
+    pbest_fit.push(fits[i])
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let pb = pbest[i]
+      // driver factor ssf decays 1 -> 0 as evaluations are spent
+      let ssf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < ssf * 0.36 {
+        // ski-drive: pulled by the personal best and the pbest/gbest midpoint
+        for d in 0..<dim {
+          let mid = 0.5 * (best_pos[d] + pb[d])
+          let nv = xi[d] +
+            r2 * (pb[d] - xi[d]) +
+            r3 * (mid - xi[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * ssf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < ssf * 0.36 + 0.41 {
+        // drift: fine step that keeps the track spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * ssf * ssf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // finish: contract toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * ssf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      let fv = evaluate(f, cand)
+      pop[i] = cand
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < pbest_fit[i] {
+        pbest[i] = cand
+        pbest_fit[i] = fv
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

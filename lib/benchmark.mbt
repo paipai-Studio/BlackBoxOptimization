@@ -1926,6 +1926,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       giza_pyramids_construction(make_gpc_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SSD",
+    run: (e, d, b, r, f) => {
+      social_ski_driver(make_ssd_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
