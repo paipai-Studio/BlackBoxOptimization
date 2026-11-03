@@ -1536,6 +1536,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       volleyball_premier_league(make_vpl_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "WEO",
+    run: (e, d, b, r, f) => {
+      water_evaporation_optimization(make_weo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
