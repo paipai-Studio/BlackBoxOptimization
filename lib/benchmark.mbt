@@ -1664,6 +1664,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       record_to_record_travel(make_rrt_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "NRO",
+    run: (e, d, b, r, f) => {
+      nuclear_reaction_optimization(make_nro_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
