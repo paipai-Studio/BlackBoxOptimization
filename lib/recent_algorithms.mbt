@@ -22615,3 +22615,131 @@ pub fn optics_inspired_optimization(
     evaluations,
   }
 }
+
+// ===== LAPO: Lightning Attachment Procedure Optimization =====
+
+///|
+pub struct LAPOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_lapo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> LAPOConfig {
+  LAPOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Lightning Attachment Procedure Optimization (2019), mechanism-faithful
+/// variant of a lightning discharge.  A discharge factor laf = e^{-t/2500}
+/// decays as evaluations are spent:
+///   * branching (r1 < 0.31 laf) - stepped-leader branching, differential move,
+///     X_i <- X_i + r2 (X_ion1 - X_ion2) + r3 (2 r4 - 1) range laf 0.13;
+///   * leader    (r1 < 0.31 laf + 0.4) - fine upward-leader step, laf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range laf^2;
+///   * attach    (rest) - attachment to the strike point (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range laf 0.05.
+/// Channels move unconditionally while the strike point (global best) is
+/// tracked separately (this keeps the discharge from collapsing prematurely).
+pub fn lightning_attachment_procedure_optimization(
+  config : LAPOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // discharge factor laf decays 1 -> 0 as evaluations are spent
+      let laf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < laf * 0.31 {
+        // branching: stepped-leader branching, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * laf * 0.13
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < laf * 0.31 + 0.4 {
+        // leader: fine upward-leader step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * laf * laf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // attach: attachment to the strike point (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * laf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

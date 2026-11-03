@@ -1626,6 +1626,14 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       optics_inspired_optimization(make_oio_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "LAPO",
+    run: (e, d, b, r, f) => {
+      lightning_attachment_procedure_optimization(
+        make_lapo_config(e, d, b, 25), f, r,
+      )
+    },
+  })
   entries
 }
 
