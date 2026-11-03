@@ -1938,6 +1938,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       fitness_dependent_optimizer(make_fdo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "CFA",
+    run: (e, d, b, r, f) => {
+      cuttlefish_optimization(make_cfa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
