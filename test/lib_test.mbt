@@ -4641,7 +4641,9 @@ test "HGSO improves with more evaluations" {
 test "COOT produces valid result" {
   let config = @lib.make_coot_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.coot_optimization_algorithm(config, @lib.sphere_function, rng)
+  let result = @lib.coot_optimization_algorithm(
+    config, @lib.sphere_function, rng,
+  )
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -4801,9 +4803,7 @@ test "HO improves with more evaluations" {
 test "NMRA produces valid result" {
   let config = @lib.make_nmra_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.naked_mole_rat_algorithm(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.naked_mole_rat_algorithm(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -4940,7 +4940,10 @@ test "MTBO improves with more evaluations" {
 ///|
 test "CryStAl produces valid result" {
   let config = @lib.make_crystal_structure_config(
-    500, 3, @lib.make_bounds(-5.0, 5.0), 25,
+    500,
+    3,
+    @lib.make_bounds(-5.0, 5.0),
+    25,
   )
   let rng = @lib.make_rng(42.0)
   let result = @lib.crystal_structure_algorithm(
@@ -4953,7 +4956,10 @@ test "CryStAl produces valid result" {
 ///|
 test "CryStAl improves with more evaluations" {
   let config1 = @lib.make_crystal_structure_config(
-    100, 3, @lib.make_bounds(-5.0, 5.0), 25,
+    100,
+    3,
+    @lib.make_bounds(-5.0, 5.0),
+    25,
   )
   let rng1 = @lib.make_rng(42.0)
   let result1 = @lib.crystal_structure_algorithm(
@@ -4961,7 +4967,10 @@ test "CryStAl improves with more evaluations" {
   )
 
   let config2 = @lib.make_crystal_structure_config(
-    5000, 3, @lib.make_bounds(-5.0, 5.0), 25,
+    5000,
+    3,
+    @lib.make_bounds(-5.0, 5.0),
+    25,
   )
   let rng2 = @lib.make_rng(42.0)
   let result2 = @lib.crystal_structure_algorithm(
@@ -5059,9 +5068,7 @@ test "MOA improves with more evaluations" {
 test "AOS produces valid result" {
   let config = @lib.make_aos_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.atomic_orbital_search(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.atomic_orbital_search(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -5070,15 +5077,11 @@ test "AOS produces valid result" {
 test "AOS improves with more evaluations" {
   let config1 = @lib.make_aos_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng1 = @lib.make_rng(42.0)
-  let result1 = @lib.atomic_orbital_search(
-    config1, @lib.sphere_function, rng1,
-  )
+  let result1 = @lib.atomic_orbital_search(config1, @lib.sphere_function, rng1)
 
   let config2 = @lib.make_aos_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng2 = @lib.make_rng(42.0)
-  let result2 = @lib.atomic_orbital_search(
-    config2, @lib.sphere_function, rng2,
-  )
+  let result2 = @lib.atomic_orbital_search(config2, @lib.sphere_function, rng2)
 
   assert_true(result2.best_value <= result1.best_value)
 }
@@ -5141,7 +5144,12 @@ test "SSO improves with more evaluations" {
 
 ///|
 test "SLnO produces valid result" {
-  let config = @lib.make_sea_lion_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let config = @lib.make_sea_lion_config(
+    500,
+    3,
+    @lib.make_bounds(-5.0, 5.0),
+    25,
+  )
   let rng = @lib.make_rng(42.0)
   let result = @lib.sea_lion_optimization_algorithm(
     config, @lib.sphere_function, rng,
@@ -5152,13 +5160,23 @@ test "SLnO produces valid result" {
 
 ///|
 test "SLnO improves with more evaluations" {
-  let config1 = @lib.make_sea_lion_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let config1 = @lib.make_sea_lion_config(
+    100,
+    3,
+    @lib.make_bounds(-5.0, 5.0),
+    25,
+  )
   let rng1 = @lib.make_rng(42.0)
   let result1 = @lib.sea_lion_optimization_algorithm(
     config1, @lib.sphere_function, rng1,
   )
 
-  let config2 = @lib.make_sea_lion_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let config2 = @lib.make_sea_lion_config(
+    5000,
+    3,
+    @lib.make_bounds(-5.0, 5.0),
+    25,
+  )
   let rng2 = @lib.make_rng(42.0)
   let result2 = @lib.sea_lion_optimization_algorithm(
     config2, @lib.sphere_function, rng2,
@@ -5227,9 +5245,7 @@ test "SFO improves with more evaluations" {
 test "NNA produces valid result" {
   let config = @lib.make_nna_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.neural_network_algorithm(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.neural_network_algorithm(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -5255,9 +5271,7 @@ test "NNA improves with more evaluations" {
 test "PBO produces valid result" {
   let config = @lib.make_pbo_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.polar_bear_optimization(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.polar_bear_optimization(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -5283,9 +5297,7 @@ test "PBO improves with more evaluations" {
 test "FSS produces valid result" {
   let config = @lib.make_fss_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.fish_school_search(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.fish_school_search(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -5294,15 +5306,11 @@ test "FSS produces valid result" {
 test "FSS improves with more evaluations" {
   let config1 = @lib.make_fss_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng1 = @lib.make_rng(42.0)
-  let result1 = @lib.fish_school_search(
-    config1, @lib.sphere_function, rng1,
-  )
+  let result1 = @lib.fish_school_search(config1, @lib.sphere_function, rng1)
 
   let config2 = @lib.make_fss_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng2 = @lib.make_rng(42.0)
-  let result2 = @lib.fish_school_search(
-    config2, @lib.sphere_function, rng2,
-  )
+  let result2 = @lib.fish_school_search(config2, @lib.sphere_function, rng2)
 
   assert_true(result2.best_value <= result1.best_value)
 }
@@ -5339,9 +5347,7 @@ test "CFO improves with more evaluations" {
 test "CGO produces valid result" {
   let config = @lib.make_cgo_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.chaos_game_optimization(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.chaos_game_optimization(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -5395,9 +5401,7 @@ test "CDO improves with more evaluations" {
 test "ILS produces valid result" {
   let config = @lib.make_ils_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.iterated_local_search(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.iterated_local_search(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -5406,15 +5410,11 @@ test "ILS produces valid result" {
 test "ILS improves with more evaluations" {
   let config1 = @lib.make_ils_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng1 = @lib.make_rng(42.0)
-  let result1 = @lib.iterated_local_search(
-    config1, @lib.sphere_function, rng1,
-  )
+  let result1 = @lib.iterated_local_search(config1, @lib.sphere_function, rng1)
 
   let config2 = @lib.make_ils_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng2 = @lib.make_rng(42.0)
-  let result2 = @lib.iterated_local_search(
-    config2, @lib.sphere_function, rng2,
-  )
+  let result2 = @lib.iterated_local_search(config2, @lib.sphere_function, rng2)
 
   assert_true(result2.best_value <= result1.best_value)
 }
@@ -5479,9 +5479,7 @@ test "GRASP improves with more evaluations" {
 test "BO produces valid result" {
   let config = @lib.make_bo_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.bonobo_optimizer(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.bonobo_optimizer(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -5490,15 +5488,11 @@ test "BO produces valid result" {
 test "BO improves with more evaluations" {
   let config1 = @lib.make_bo_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng1 = @lib.make_rng(42.0)
-  let result1 = @lib.bonobo_optimizer(
-    config1, @lib.sphere_function, rng1,
-  )
+  let result1 = @lib.bonobo_optimizer(config1, @lib.sphere_function, rng1)
 
   let config2 = @lib.make_bo_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng2 = @lib.make_rng(42.0)
-  let result2 = @lib.bonobo_optimizer(
-    config2, @lib.sphere_function, rng2,
-  )
+  let result2 = @lib.bonobo_optimizer(config2, @lib.sphere_function, rng2)
 
   assert_true(result2.best_value <= result1.best_value)
 }
@@ -5507,9 +5501,7 @@ test "BO improves with more evaluations" {
 test "FSA produces valid result" {
   let config = @lib.make_fsa_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.flamingo_search_algorithm(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.flamingo_search_algorithm(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -5591,9 +5583,7 @@ test "HLO improves with more evaluations" {
 test "FDA produces valid result" {
   let config = @lib.make_fda_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.flow_direction_algorithm(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.flow_direction_algorithm(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -5619,9 +5609,7 @@ test "FDA improves with more evaluations" {
 test "CRO produces valid result" {
   let config = @lib.make_cro_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.coral_reefs_optimization(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.coral_reefs_optimization(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -5675,9 +5663,7 @@ test "AAA improves with more evaluations" {
 test "VSA produces valid result" {
   let config = @lib.make_vsa_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.vortex_search_algorithm(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.vortex_search_algorithm(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -5703,9 +5689,7 @@ test "VSA improves with more evaluations" {
 test "VPL produces valid result" {
   let config = @lib.make_vpl_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.volleyball_premier_league(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.volleyball_premier_league(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -5759,9 +5743,7 @@ test "WEO improves with more evaluations" {
 test "SNS produces valid result" {
   let config = @lib.make_sns_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.social_network_search(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.social_network_search(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -5770,15 +5752,11 @@ test "SNS produces valid result" {
 test "SNS improves with more evaluations" {
   let config1 = @lib.make_sns_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng1 = @lib.make_rng(42.0)
-  let result1 = @lib.social_network_search(
-    config1, @lib.sphere_function, rng1,
-  )
+  let result1 = @lib.social_network_search(config1, @lib.sphere_function, rng1)
 
   let config2 = @lib.make_sns_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng2 = @lib.make_rng(42.0)
-  let result2 = @lib.social_network_search(
-    config2, @lib.sphere_function, rng2,
-  )
+  let result2 = @lib.social_network_search(config2, @lib.sphere_function, rng2)
 
   assert_true(result2.best_value <= result1.best_value)
 }
@@ -5815,9 +5793,7 @@ test "TCO improves with more evaluations" {
 test "RO produces valid result" {
   let config = @lib.make_ro_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.ray_optimization(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.ray_optimization(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -5826,15 +5802,11 @@ test "RO produces valid result" {
 test "RO improves with more evaluations" {
   let config1 = @lib.make_ro_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng1 = @lib.make_rng(42.0)
-  let result1 = @lib.ray_optimization(
-    config1, @lib.sphere_function, rng1,
-  )
+  let result1 = @lib.ray_optimization(config1, @lib.sphere_function, rng1)
 
   let config2 = @lib.make_ro_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng2 = @lib.make_rng(42.0)
-  let result2 = @lib.ray_optimization(
-    config2, @lib.sphere_function, rng2,
-  )
+  let result2 = @lib.ray_optimization(config2, @lib.sphere_function, rng2)
 
   assert_true(result2.best_value <= result1.best_value)
 }
@@ -5871,9 +5843,7 @@ test "GbSA improves with more evaluations" {
 test "BA produces valid result" {
   let config = @lib.make_ba_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.bees_algorithm(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.bees_algorithm(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -5882,15 +5852,11 @@ test "BA produces valid result" {
 test "BA improves with more evaluations" {
   let config1 = @lib.make_ba_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng1 = @lib.make_rng(42.0)
-  let result1 = @lib.bees_algorithm(
-    config1, @lib.sphere_function, rng1,
-  )
+  let result1 = @lib.bees_algorithm(config1, @lib.sphere_function, rng1)
 
   let config2 = @lib.make_ba_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng2 = @lib.make_rng(42.0)
-  let result2 = @lib.bees_algorithm(
-    config2, @lib.sphere_function, rng2,
-  )
+  let result2 = @lib.bees_algorithm(config2, @lib.sphere_function, rng2)
 
   assert_true(result2.best_value <= result1.best_value)
 }
@@ -5899,9 +5865,7 @@ test "BA improves with more evaluations" {
 test "CO produces valid result" {
   let config = @lib.make_co_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.cheetah_optimizer(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.cheetah_optimizer(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -5910,15 +5874,11 @@ test "CO produces valid result" {
 test "CO improves with more evaluations" {
   let config1 = @lib.make_co_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng1 = @lib.make_rng(42.0)
-  let result1 = @lib.cheetah_optimizer(
-    config1, @lib.sphere_function, rng1,
-  )
+  let result1 = @lib.cheetah_optimizer(config1, @lib.sphere_function, rng1)
 
   let config2 = @lib.make_co_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng2 = @lib.make_rng(42.0)
-  let result2 = @lib.cheetah_optimizer(
-    config2, @lib.sphere_function, rng2,
-  )
+  let result2 = @lib.cheetah_optimizer(config2, @lib.sphere_function, rng2)
 
   assert_true(result2.best_value <= result1.best_value)
 }
@@ -5927,9 +5887,7 @@ test "CO improves with more evaluations" {
 test "CSS produces valid result" {
   let config = @lib.make_css_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.charged_system_search(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.charged_system_search(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -5938,15 +5896,11 @@ test "CSS produces valid result" {
 test "CSS improves with more evaluations" {
   let config1 = @lib.make_css_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng1 = @lib.make_rng(42.0)
-  let result1 = @lib.charged_system_search(
-    config1, @lib.sphere_function, rng1,
-  )
+  let result1 = @lib.charged_system_search(config1, @lib.sphere_function, rng1)
 
   let config2 = @lib.make_css_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng2 = @lib.make_rng(42.0)
-  let result2 = @lib.charged_system_search(
-    config2, @lib.sphere_function, rng2,
-  )
+  let result2 = @lib.charged_system_search(config2, @lib.sphere_function, rng2)
 
   assert_true(result2.best_value <= result1.best_value)
 }
@@ -5955,9 +5909,7 @@ test "CSS improves with more evaluations" {
 test "MBA produces valid result" {
   let config = @lib.make_mba_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.mine_blast_algorithm(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.mine_blast_algorithm(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -5966,15 +5918,11 @@ test "MBA produces valid result" {
 test "MBA improves with more evaluations" {
   let config1 = @lib.make_mba_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng1 = @lib.make_rng(42.0)
-  let result1 = @lib.mine_blast_algorithm(
-    config1, @lib.sphere_function, rng1,
-  )
+  let result1 = @lib.mine_blast_algorithm(config1, @lib.sphere_function, rng1)
 
   let config2 = @lib.make_mba_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng2 = @lib.make_rng(42.0)
-  let result2 = @lib.mine_blast_algorithm(
-    config2, @lib.sphere_function, rng2,
-  )
+  let result2 = @lib.mine_blast_algorithm(config2, @lib.sphere_function, rng2)
 
   assert_true(result2.best_value <= result1.best_value)
 }
@@ -6011,9 +5959,7 @@ test "PCA improves with more evaluations" {
 test "IMO produces valid result" {
   let config = @lib.make_imo_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.ions_motion_optimization(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.ions_motion_optimization(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -6039,9 +5985,7 @@ test "IMO improves with more evaluations" {
 test "EMA produces valid result" {
   let config = @lib.make_ema_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.exchange_market_algorithm(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.exchange_market_algorithm(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -6067,9 +6011,7 @@ test "EMA improves with more evaluations" {
 test "WCO produces valid result" {
   let config = @lib.make_wco_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.world_cup_optimization(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.world_cup_optimization(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -6078,15 +6020,11 @@ test "WCO produces valid result" {
 test "WCO improves with more evaluations" {
   let config1 = @lib.make_wco_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng1 = @lib.make_rng(42.0)
-  let result1 = @lib.world_cup_optimization(
-    config1, @lib.sphere_function, rng1,
-  )
+  let result1 = @lib.world_cup_optimization(config1, @lib.sphere_function, rng1)
 
   let config2 = @lib.make_wco_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng2 = @lib.make_rng(42.0)
-  let result2 = @lib.world_cup_optimization(
-    config2, @lib.sphere_function, rng2,
-  )
+  let result2 = @lib.world_cup_optimization(config2, @lib.sphere_function, rng2)
 
   assert_true(result2.best_value <= result1.best_value)
 }
@@ -6207,9 +6145,7 @@ test "FGBO improves with more evaluations" {
 test "EA produces valid result" {
   let config = @lib.make_ea_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.earthquake_algorithm(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.earthquake_algorithm(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -6218,15 +6154,11 @@ test "EA produces valid result" {
 test "EA improves with more evaluations" {
   let config1 = @lib.make_ea_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng1 = @lib.make_rng(42.0)
-  let result1 = @lib.earthquake_algorithm(
-    config1, @lib.sphere_function, rng1,
-  )
+  let result1 = @lib.earthquake_algorithm(config1, @lib.sphere_function, rng1)
 
   let config2 = @lib.make_ea_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng2 = @lib.make_rng(42.0)
-  let result2 = @lib.earthquake_algorithm(
-    config2, @lib.sphere_function, rng2,
-  )
+  let result2 = @lib.earthquake_algorithm(config2, @lib.sphere_function, rng2)
 
   assert_true(result2.best_value <= result1.best_value)
 }
@@ -6263,9 +6195,7 @@ test "LAHC improves with more evaluations" {
 test "HuS produces valid result" {
   let config = @lib.make_hus_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.hunting_search_algorithm(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.hunting_search_algorithm(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -6291,9 +6221,7 @@ test "HuS improves with more evaluations" {
 test "RRT produces valid result" {
   let config = @lib.make_rrt_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.record_to_record_travel(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.record_to_record_travel(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -6347,9 +6275,7 @@ test "NRO improves with more evaluations" {
 test "HTS produces valid result" {
   let config = @lib.make_hts_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.heat_transfer_search(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.heat_transfer_search(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -6358,15 +6284,11 @@ test "HTS produces valid result" {
 test "HTS improves with more evaluations" {
   let config1 = @lib.make_hts_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng1 = @lib.make_rng(42.0)
-  let result1 = @lib.heat_transfer_search(
-    config1, @lib.sphere_function, rng1,
-  )
+  let result1 = @lib.heat_transfer_search(config1, @lib.sphere_function, rng1)
 
   let config2 = @lib.make_hts_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng2 = @lib.make_rng(42.0)
-  let result2 = @lib.heat_transfer_search(
-    config2, @lib.sphere_function, rng2,
-  )
+  let result2 = @lib.heat_transfer_search(config2, @lib.sphere_function, rng2)
 
   assert_true(result2.best_value <= result1.best_value)
 }
@@ -6403,9 +6325,7 @@ test "PGO improves with more evaluations" {
 test "IWD produces valid result" {
   let config = @lib.make_iwd_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.intelligent_water_drops(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.intelligent_water_drops(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -6431,9 +6351,7 @@ test "IWD improves with more evaluations" {
 test "RFD produces valid result" {
   let config = @lib.make_rfd_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.river_formation_dynamics(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.river_formation_dynamics(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -6487,9 +6405,7 @@ test "LSA improves with more evaluations" {
 test "SS produces valid result" {
   let config = @lib.make_ss_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.scatter_search(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.scatter_search(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -6498,15 +6414,11 @@ test "SS produces valid result" {
 test "SS improves with more evaluations" {
   let config1 = @lib.make_ss_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng1 = @lib.make_rng(42.0)
-  let result1 = @lib.scatter_search(
-    config1, @lib.sphere_function, rng1,
-  )
+  let result1 = @lib.scatter_search(config1, @lib.sphere_function, rng1)
 
   let config2 = @lib.make_ss_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng2 = @lib.make_rng(42.0)
-  let result2 = @lib.scatter_search(
-    config2, @lib.sphere_function, rng2,
-  )
+  let result2 = @lib.scatter_search(config2, @lib.sphere_function, rng2)
 
   assert_true(result2.best_value <= result1.best_value)
 }
@@ -6515,9 +6427,7 @@ test "SS improves with more evaluations" {
 test "OBA produces valid result" {
   let config = @lib.make_oba_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.old_bachelor_acceptance(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.old_bachelor_acceptance(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -6731,9 +6641,7 @@ test "DSA improves with more evaluations" {
 test "GSK produces valid result" {
   let config = @lib.make_gsk_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.gaining_sharing_knowledge(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.gaining_sharing_knowledge(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -6787,9 +6695,7 @@ test "ALNS improves with more evaluations" {
 test "SGO produces valid result" {
   let config = @lib.make_sgo_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.social_group_optimization(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.social_group_optimization(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -6815,9 +6721,7 @@ test "SGO improves with more evaluations" {
 test "ASO produces valid result" {
   let config = @lib.make_aso_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.atom_search_optimization(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.atom_search_optimization(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }
@@ -6943,9 +6847,7 @@ test "SAR improves with more evaluations" {
 test "ChSA produces valid result" {
   let config = @lib.make_chsa_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng = @lib.make_rng(42.0)
-  let result = @lib.chameleon_swarm_algorithm(
-    config, @lib.sphere_function, rng,
-  )
+  let result = @lib.chameleon_swarm_algorithm(config, @lib.sphere_function, rng)
   assert_true(result.evaluations > 0)
   assert_true(result.best_value >= 0.0)
 }

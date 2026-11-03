@@ -1365,13 +1365,21 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
   entries.push(AlgoEntry::{
     name: "MTBO",
     run: (e, d, b, r, f) => {
-      mountaineering_team_based_optimization(make_mtbo_config(e, d, b, 25), f, r)
+      mountaineering_team_based_optimization(
+        make_mtbo_config(e, d, b, 25),
+        f,
+        r,
+      )
     },
   })
   entries.push(AlgoEntry::{
     name: "CryStAl",
     run: (e, d, b, r, f) => {
-      crystal_structure_algorithm(make_crystal_structure_config(e, d, b, 25), f, r)
+      crystal_structure_algorithm(
+        make_crystal_structure_config(e, d, b, 25),
+        f,
+        r,
+      )
     },
   })
   entries.push(AlgoEntry::{
@@ -1484,9 +1492,7 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
   })
   entries.push(AlgoEntry::{
     name: "BO",
-    run: (e, d, b, r, f) => {
-      bonobo_optimizer(make_bo_config(e, d, b, 25), f, r)
-    },
+    run: (e, d, b, r, f) => bonobo_optimizer(make_bo_config(e, d, b, 25), f, r),
   })
   entries.push(AlgoEntry::{
     name: "FSA",
@@ -1556,9 +1562,7 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
   })
   entries.push(AlgoEntry::{
     name: "RO",
-    run: (e, d, b, r, f) => {
-      ray_optimization(make_ro_config(e, d, b, 25), f, r)
-    },
+    run: (e, d, b, r, f) => ray_optimization(make_ro_config(e, d, b, 25), f, r),
   })
   entries.push(AlgoEntry::{
     name: "GbSA",
@@ -1568,15 +1572,11 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
   })
   entries.push(AlgoEntry::{
     name: "BA",
-    run: (e, d, b, r, f) => {
-      bees_algorithm(make_ba_config(e, d, b, 25), f, r)
-    },
+    run: (e, d, b, r, f) => bees_algorithm(make_ba_config(e, d, b, 25), f, r),
   })
   entries.push(AlgoEntry::{
     name: "CO",
-    run: (e, d, b, r, f) => {
-      cheetah_optimizer(make_co_config(e, d, b, 25), f, r)
-    },
+    run: (e, d, b, r, f) => cheetah_optimizer(make_co_config(e, d, b, 25), f, r),
   })
   entries.push(AlgoEntry::{
     name: "CSS",
@@ -1630,7 +1630,9 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
     name: "LAPO",
     run: (e, d, b, r, f) => {
       lightning_attachment_procedure_optimization(
-        make_lapo_config(e, d, b, 25), f, r,
+        make_lapo_config(e, d, b, 25),
+        f,
+        r,
       )
     },
   })
@@ -1702,9 +1704,7 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
   })
   entries.push(AlgoEntry::{
     name: "SS",
-    run: (e, d, b, r, f) => {
-      scatter_search(make_ss_config(e, d, b, 25), f, r)
-    },
+    run: (e, d, b, r, f) => scatter_search(make_ss_config(e, d, b, 25), f, r),
   })
   entries.push(AlgoEntry::{
     name: "OBA",
@@ -1782,7 +1782,9 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
     name: "BCMO",
     run: (e, d, b, r, f) => {
       balancing_composite_motion_optimization(
-        make_bcmo_config(e, d, b, 25), f, r,
+        make_bcmo_config(e, d, b, 25),
+        f,
+        r,
       )
     },
   })

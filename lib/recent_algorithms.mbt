@@ -15774,7 +15774,11 @@ pub fn coot_optimization_algorithm(
         let cos_term = @math.cos(TWO_PI * r4)
         for d in 0..<dim {
           let step = b_factor * r3 * cos_term * (best_pos[d] - xi[d])
-          let nv = if r5 < 0.5 { step + best_pos[d] } else { step - best_pos[d] }
+          let nv = if r5 < 0.5 {
+            step + best_pos[d]
+          } else {
+            step - best_pos[d]
+          }
           cand.push(max(bounds.min, min(bounds.max, nv)))
         }
       } else if RNG::next(current_rng) < 0.5 {
@@ -19364,9 +19368,11 @@ pub fn shuffled_complex_evolution(
       if r1 < sf * 0.4 {
         // crossover: differential move inside the same complex
         let base = i - i % group_size
-        let j = base + (RNG::next(current_rng) * group_size.to_double()).to_int() %
+        let j = base +
+          (RNG::next(current_rng) * group_size.to_double()).to_int() %
           group_size
-        let k = base + (RNG::next(current_rng) * group_size.to_double()).to_int() %
+        let k = base +
+          (RNG::next(current_rng) * group_size.to_double()).to_int() %
           group_size
         let xj = pop[j % pop_size]
         let xk = pop[k % pop_size]
@@ -25017,10 +25023,9 @@ pub fn electromagnetic_field_optimization(
         // field: attraction to a positive pole, repulsion from a negative pole
         let p_idx = order[(RNG::next(current_rng) * n_pole.to_double()).to_int() %
           n_pole]
-        let n_idx = order[
-          pop_size - 1 - (RNG::next(current_rng) * n_pole.to_double()).to_int() %
-          n_pole
-        ]
+        let n_idx = order[pop_size -
+          1 -
+          (RNG::next(current_rng) * n_pole.to_double()).to_int() % n_pole]
         let xp = pop[p_idx]
         let xn = pop[n_idx]
         let r2 = RNG::next(current_rng)
