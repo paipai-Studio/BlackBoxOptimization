@@ -1968,6 +1968,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       raccoon_optimization(make_racc_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "Monkey",
+    run: (e, d, b, r, f) => {
+      monkey_search_algorithm(make_monkey_search_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
