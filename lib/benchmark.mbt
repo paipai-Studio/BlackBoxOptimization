@@ -1524,6 +1524,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       artificial_algae_algorithm(make_aaa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "VSA",
+    run: (e, d, b, r, f) => {
+      vortex_search_algorithm(make_vsa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
