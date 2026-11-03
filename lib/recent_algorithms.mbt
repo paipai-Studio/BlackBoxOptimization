@@ -25070,3 +25070,136 @@ pub fn electromagnetic_field_optimization(
     evaluations,
   }
 }
+
+// ===== GBMO: Gases Brownian Motion Optimization (2013) =====
+
+///|
+pub struct GBMOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_gbmo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> GBMOConfig {
+  GBMOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Gases Brownian Motion Optimization (2013), mechanism-faithful variant of
+/// molecular motion in a gas.  A gas factor gbf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * Brownian motion (r1 < 0.34 gbf) - random molecular displacement,
+///     X_i <- X_i + r2 (X_p1 - X_p2) + r3 (2 r4 - 1) range gbf 0.11;
+///   * turbulent rotation (r1 < 0.34 gbf + 0.38) - the molecule swirls around a
+///     randomly chosen reference molecule,
+///     X_i <- X_i + r2 gbf (X_ref - X_i) + r3 (2 r4 - 1) range gbf^2;
+///   * eddy collapse (rest) - settle toward the global best,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range gbf 0.09.
+/// Molecules move unconditionally while the global best is tracked separately.
+pub fn gases_brownian_motion_optimization(
+  config : GBMOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // gas factor gbf decays 1 -> 0 as evaluations are spent
+      let gbf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < gbf * 0.34 {
+        // Brownian motion: random molecular displacement (exploration)
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * gbf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < gbf * 0.34 + 0.38 {
+        // turbulent rotation: swirl around a random reference molecule
+        let p = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xr = pop[p]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * gbf * (xr[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * gbf * gbf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // eddy collapse: settle toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * gbf * 0.09
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

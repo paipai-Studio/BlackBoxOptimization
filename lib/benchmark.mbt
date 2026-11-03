@@ -1742,6 +1742,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       electromagnetic_field_optimization(make_efo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "GBMO",
+    run: (e, d, b, r, f) => {
+      gases_brownian_motion_optimization(make_gbmo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
