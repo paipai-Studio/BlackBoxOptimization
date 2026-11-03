@@ -1590,6 +1590,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       mine_blast_algorithm(make_mba_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "PCA",
+    run: (e, d, b, r, f) => {
+      particle_collision_algorithm(make_pca_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
