@@ -1542,6 +1542,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       water_evaporation_optimization(make_weo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SNS",
+    run: (e, d, b, r, f) => {
+      social_network_search(make_sns_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
