@@ -27940,3 +27940,185 @@ pub fn serval_optimization(
     evaluations,
   }
 }
+
+// ===== ChSO: Chicken Swarm Optimization (2014) =====
+
+///|
+pub struct ChSOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_chso_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ChSOConfig {
+  ChSOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Chicken Swarm Optimization (2014), mechanism-faithful variant of a chicken
+/// flock with three roles and a mother-child bond.  Every 10 generations the
+/// flock is sorted by fitness and roles are reassigned: the best `rooster_cnt`
+/// become roosters, the worst `chick_cnt` become chicks, the rest are hens;
+/// hens are grouped round-robin under roosters and chicks under hens.  A
+/// chicken factor csf = e^{-t/2500} decays as evaluations are spent:
+///   * rooster - drift toward a random other rooster with a shrinking jitter;
+///   * hen - follow her group rooster plus a random flock mate;
+///   * chick - follow her mother hen with a random stretch factor in [0, 2].
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn chicken_swarm_optimization(
+  config : ChSOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let rooster_cnt = 3
+  let chick_cnt = pop_size / 4
+  let hen_cnt = pop_size - rooster_cnt - chick_cnt
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  let mut role_order : Array[Int32] = []
+  let mut generations = 0
+  while evaluations < max_evals {
+    if generations % 10 == 0 {
+      // reassign roles: best -> roosters, worst -> chicks, rest -> hens
+      role_order = sort_indices(fits)
+    }
+    // roosters drift toward a random other rooster with a shrinking jitter
+    for rr in 0..<rooster_cnt {
+      if evaluations >= max_evals {
+        break
+      }
+      let p = role_order[rr]
+      let xi = pop[p]
+      let csf = @math.exp(-evaluations.to_double() / 2500.0)
+      let oi = (RNG::next(current_rng) * rooster_cnt.to_double()).to_int() %
+        rooster_cnt
+      let other = if oi == rr { (rr + 1) % rooster_cnt } else { oi }
+      let xo = pop[role_order[other]]
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = xi[d] +
+          r1 * (best_pos[d] - xi[d]) +
+          r2 * (xo[d] - xi[d]) +
+          r3 * (2.0 * RNG::next(current_rng) - 1.0) * span * csf * 0.12
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      pop[p] = cand
+      let fv = evaluate(f, cand)
+      fits[p] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+    // hens follow their group rooster and a random flock mate
+    for hs in 0..<hen_cnt {
+      if evaluations >= max_evals {
+        break
+      }
+      let p = role_order[rooster_cnt + hs]
+      let xi = pop[p]
+      let csf = @math.exp(-evaluations.to_double() / 2500.0)
+      let ro_slot = hs % rooster_cnt
+      let xro = pop[role_order[ro_slot]]
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = xi[d] +
+          r1 * (xro[d] - xi[d]) +
+          r2 * (best_pos[d] - xi[d]) +
+          r3 * (2.0 * RNG::next(current_rng) - 1.0) * span * csf * 0.06
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      pop[p] = cand
+      let fv = evaluate(f, cand)
+      fits[p] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+    // chicks follow their mother hen with a random stretch factor in [0, 2]
+    for cs in 0..<chick_cnt {
+      if evaluations >= max_evals {
+        break
+      }
+      let p = role_order[rooster_cnt + hen_cnt + cs]
+      let xi = pop[p]
+      let csf = @math.exp(-evaluations.to_double() / 2500.0)
+      let mother_slot = cs % hen_cnt
+      let xm = pop[role_order[rooster_cnt + mother_slot]]
+      let stretch = 2.0 * RNG::next(current_rng)
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = xi[d] +
+          stretch * (xm[d] - xi[d]) +
+          r1 * (2.0 * RNG::next(current_rng) - 1.0) * span * csf * 0.05
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      pop[p] = cand
+      let fv = evaluate(f, cand)
+      fits[p] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+    generations = generations + 1
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

@@ -1864,6 +1864,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       serval_optimization(make_serval_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "ChSO",
+    run: (e, d, b, r, f) => {
+      chicken_swarm_optimization(make_chso_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
