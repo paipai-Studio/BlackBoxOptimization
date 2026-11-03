@@ -1640,6 +1640,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       football_game_based_optimization(make_fgbo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "EA",
+    run: (e, d, b, r, f) => {
+      earthquake_algorithm(make_ea_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
