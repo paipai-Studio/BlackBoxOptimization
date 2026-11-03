@@ -1898,6 +1898,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       sea_horse_optimizer(make_seho_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "WBO",
+    run: (e, d, b, r, f) => {
+      wildebeest_herd_optimization(make_wbo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
