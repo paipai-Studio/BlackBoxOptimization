@@ -1760,6 +1760,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       gaining_sharing_knowledge(make_gsk_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "ALNS",
+    run: (e, d, b, r, f) => {
+      adaptive_large_neighborhood_search(make_alns_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

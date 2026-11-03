@@ -25470,3 +25470,170 @@ pub fn gaining_sharing_knowledge(
     evaluations,
   }
 }
+
+// ===== ALNS: Adaptive Large Neighborhood Search (2010) =====
+
+///|
+pub struct ALNSConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_alns_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ALNSConfig {
+  ALNSConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Adaptive Large Neighborhood Search (2010), mechanism-faithful variant for
+/// continuous domains.  Four destroy-repair operators compete; each member
+/// picks one by roulette selection on adaptive weights w = [w0, w1, w2, w3]:
+///   * 0 random relocation  - a large destroy that resamples the whole vector;
+///   * 1 local perturbation - a small destroy,
+///     X_i <- X_i + r (2 r - 1) range alnsF 0.10;
+///   * 2 greedy repair      - move toward the global best;
+///   * 3 peer repair        - move toward a random peer.
+/// An operator that improves a member's own fitness earns a score; after each
+/// sweep the weights are smoothed toward the observed success rate,
+/// w_k <- 0.7 w_k + 0.3 (score_k / count_k), clipped to [0.1, 2.0].
+/// alnsF = e^{-t/2500}; the global best is tracked separately.
+pub fn adaptive_large_neighborhood_search(
+  config : ALNSConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let n_ops = 4
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  let weights : Array[Double] = [1.0, 1.0, 1.0, 1.0]
+  let scores : Array[Double] = [0.0, 0.0, 0.0, 0.0]
+  let counts : Array[Double] = [0.0, 0.0, 0.0, 0.0]
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let old_fit = fits[i]
+      // alnsF decays 1 -> 0 as evaluations are spent
+      let alnsF = @math.exp(-evaluations.to_double() / 2500.0)
+      // roulette selection of a destroy-repair operator
+      let total = weights[0] + weights[1] + weights[2] + weights[3]
+      let r = RNG::next(current_rng) * total
+      let mut op = 0
+      let mut acc = weights[0]
+      while op < n_ops - 1 && r > acc {
+        op = op + 1
+        acc = acc + weights[op]
+      }
+      let cand : Array[Double] = []
+      if op == 0 {
+        // large destroy: random relocation
+        for _d in 0..<dim {
+          cand.push(bounds.min + RNG::next(current_rng) * span)
+        }
+      } else if op == 1 {
+        // small destroy: local perturbation
+        let r1 = RNG::next(current_rng)
+        let r2 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = xi[d] + r1 * (2.0 * r2 - 1.0) * span * alnsF * 0.10
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if op == 2 {
+        // greedy repair: move toward the global best
+        let r1 = RNG::next(current_rng)
+        let r2 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r1 * (best_pos[d] - xi[d]) +
+            r2 * (2.0 * RNG::next(current_rng) - 1.0) * span * alnsF * 0.07
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // peer repair: move toward a random peer
+        let p = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[p]
+        let r1 = RNG::next(current_rng)
+        let r2 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r1 * (xp[d] - xi[d]) +
+            r2 * (2.0 * RNG::next(current_rng) - 1.0) * span * alnsF * 0.08
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      counts[op] = counts[op] + 1.0
+      evaluations = evaluations + 1
+      if fv < old_fit {
+        scores[op] = scores[op] + 1.0
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+    // adapt operator weights toward the observed success rate
+    for k in 0..<n_ops {
+      let rate = if counts[k] > 0.0 {
+        scores[k] / counts[k]
+      } else {
+        weights[k]
+      }
+      weights[k] = max(0.1, min(2.0, 0.7 * weights[k] + 0.3 * rate))
+      scores[k] = 0.0
+      counts[k] = 0.0
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
