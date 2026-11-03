@@ -1494,6 +1494,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       flamingo_search_algorithm(make_fsa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SMO",
+    run: (e, d, b, r, f) => {
+      spider_monkey_optimization(make_smo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
