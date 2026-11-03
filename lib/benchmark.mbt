@@ -1956,6 +1956,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       arctic_puffin_optimization(make_apuf_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "WPA",
+    run: (e, d, b, r, f) => {
+      wolf_pack_algorithm(make_wpa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

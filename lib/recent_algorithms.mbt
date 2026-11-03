@@ -30381,3 +30381,139 @@ pub fn arctic_puffin_optimization(
     evaluations,
   }
 }
+
+// ===== WPA: Wolf Pack Algorithm (2011) =====
+
+///|
+pub struct WPAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_wpa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> WPAConfig {
+  WPAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Wolf Pack Algorithm (2011), mechanism-faithful variant of wolf-pack hunting.
+/// A pack factor wpf = e^{-t/2500} decays as evaluations are spent, and the
+/// pack separates the *scouting* role from the *calling* and *besieging* roles:
+///   * scouting (r1 < 0.33 wpf) - every coordinate takes an independent random
+///     step so scouts sweep the terrain instead of collapsing on the champion,
+///     X_i[d] <- X_i[d] + (2 r2 - 1) range wpf 0.12;
+///   * calling (r1 < 0.33 wpf + 0.40) - the lead wolf summons the pack: pull
+///     toward the champion with a differential kick from two random mates,
+///     X_i <- X_i + r2 (X_best - X_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range wpf 0.10;
+///   * besieging (rest) - close in on the champion in small steps,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range wpf 0.05.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn wolf_pack_algorithm(
+  config : WPAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // pack factor wpf decays 1 -> 0 as evaluations are spent
+      let wpf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < wpf * 0.33 {
+        // scouting: independent random step on every coordinate
+        for d in 0..<dim {
+          let nv = xi[d] + (2.0 * r2 - 1.0) * span * wpf * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < wpf * 0.33 + 0.40 {
+        // calling: the lead wolf summons the pack, plus a differential kick
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * wpf * 0.10
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // besieging: close in on the champion with small steps
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * wpf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
