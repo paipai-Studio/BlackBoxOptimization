@@ -24801,3 +24801,126 @@ pub fn snow_ablation_optimizer(
     evaluations,
   }
 }
+
+// ===== BRO: Battle Royale Optimization (2021) =====
+
+///|
+pub struct BROConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bro_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BROConfig {
+  BROConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Battle Royale Optimization (2021), mechanism-faithful variant of the
+/// battle-royale game metaphor.  Each individual accumulates damage whenever it
+/// fails to beat its own previous fitness:
+///   * shoot (damage[i] < max_damage) - differential move toward the global
+///     best, X_i <- X_i + r1 (X_best - X_i) + r2 (2 r3 - 1) range brf 0.10;
+///   * respawn (damage[i] reaches max_damage) - a badly hurt individual is
+///     randomly relocated in the search space and its damage is reset.
+/// Whenever a candidate improves a member's own fitness its damage counter
+/// resets; the global best is tracked separately.  brf = e^{-t/2500} slows the
+/// shot step as evaluations are spent.
+pub fn battle_royale_optimization(
+  config : BROConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let max_damage : Int32 = 3
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let damage : Array[Int32] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  damage.push(0)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    damage.push(0)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let brf = @math.exp(-evaluations.to_double() / 2500.0)
+      let cand : Array[Double] = []
+      if damage[i] >= max_damage {
+        // respawn: badly hurt individual relocates randomly
+        for _d in 0..<dim {
+          cand.push(bounds.min + RNG::next(current_rng) * span)
+        }
+        damage[i] = 0
+      } else {
+        // shoot: differential move toward the region best
+        let xi = pop[i]
+        let r1 = RNG::next(current_rng)
+        let r2 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r1 * (best_pos[d] - xi[d]) +
+            r2 * (2.0 * RNG::next(current_rng) - 1.0) * span * brf * 0.10
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < fits[i] {
+        fits[i] = fv
+        damage[i] = 0
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      } else {
+        damage[i] = damage[i] + 1
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

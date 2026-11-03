@@ -1730,6 +1730,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       snow_ablation_optimizer(make_sao_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "BRO",
+    run: (e, d, b, r, f) => {
+      battle_royale_optimization(make_bro_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
