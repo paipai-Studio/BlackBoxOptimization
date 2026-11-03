@@ -26477,3 +26477,132 @@ pub fn search_and_rescue_optimization(
     evaluations,
   }
 }
+
+// ===== ChSA: Chameleon Swarm Algorithm (2022) =====
+
+///|
+pub struct ChSAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_chsa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ChSAConfig {
+  ChSAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Chameleon Swarm Algorithm (2022), mechanism-faithful variant of a
+/// chameleon's foraging.  A chameleon factor chf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * search prey (r1 < 0.32 chf) - accelerate toward a randomly chosen prey,
+///     X_i <- X_i + r2 chf (X_prey - X_i) + r3 (2 r4 - 1) range chf 0.10;
+///   * eye rotation (r1 < 0.32 chf + 0.40) - fine jitter that keeps the swarm
+///     spread out, X_i <- X_i + r2 (2 r3 - 1) range chf^2;
+///   * tongue attack (rest) - snap toward the global best,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range chf 0.07.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn chameleon_swarm_algorithm(
+  config : ChSAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // chameleon factor chf decays 1 -> 0 as evaluations are spent
+      let chf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < chf * 0.32 {
+        // search prey: accelerate toward a randomly chosen prey
+        let p = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[p]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * chf * (xp[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * chf * 0.10
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < chf * 0.32 + 0.40 {
+        // eye rotation: fine jitter that keeps the swarm spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * chf * chf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // tongue attack: snap toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * chf * 0.07
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

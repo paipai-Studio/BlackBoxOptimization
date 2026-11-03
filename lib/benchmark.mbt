@@ -1804,6 +1804,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       search_and_rescue_optimization(make_sar_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "ChSA",
+    run: (e, d, b, r, f) => {
+      chameleon_swarm_algorithm(make_chsa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
