@@ -1840,6 +1840,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       swordfish_optimization(make_sfoa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "ABO",
+    run: (e, d, b, r, f) => {
+      african_buffalo_optimization(make_abo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
