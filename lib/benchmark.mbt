@@ -1482,6 +1482,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       greedy_randomized_adaptive_search(make_grasp_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "BO",
+    run: (e, d, b, r, f) => {
+      bonobo_optimizer(make_bo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

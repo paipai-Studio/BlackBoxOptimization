@@ -19535,3 +19535,131 @@ pub fn greedy_randomized_adaptive_search(
     evaluations,
   }
 }
+
+// ===== BO: Bonobo Optimizer (2020) =====
+
+///|
+pub struct BOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BOConfig {
+  BOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Bonobo Optimizer (Das & Pratihar 2020), mechanism-faithful variant of the
+/// bonobo colony's mating strategies.  A reproduction factor bf = e^{-t/2500}
+/// decays as evaluations are spent:
+///   * random   (r1 < 0.4 bf) - random mating with differential dispersal,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range bf 0.12;
+///   * consort  (r1 < 0.4 bf + 0.29) - fine consort adjustment, bf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range bf^2;
+///   * positive (rest) - dominant mating toward the alpha (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range bf 0.05.
+/// Bonobos move unconditionally while the global best is tracked separately
+/// (this keeps the colony from collapsing prematurely).
+pub fn bonobo_optimizer(
+  config : BOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // reproduction factor bf decays 1 -> 0 as evaluations are spent
+      let bf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < bf * 0.4 {
+        // random: random mating with differential dispersal
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * bf * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < bf * 0.4 + 0.29 {
+        // consort: fine consort adjustment
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * bf * bf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // positive: dominant mating toward the alpha (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * bf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
