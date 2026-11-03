@@ -1754,6 +1754,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       differential_search_algorithm(make_dsa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "GSK",
+    run: (e, d, b, r, f) => {
+      gaining_sharing_knowledge(make_gsk_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
