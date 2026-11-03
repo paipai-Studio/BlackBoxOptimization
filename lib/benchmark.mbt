@@ -1688,6 +1688,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       intelligent_water_drops(make_iwd_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "RFD",
+    run: (e, d, b, r, f) => {
+      river_formation_dynamics(make_rfd_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
