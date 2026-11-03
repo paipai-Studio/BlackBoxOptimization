@@ -1920,6 +1920,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       sailfish_optimizer(make_safo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "GPC",
+    run: (e, d, b, r, f) => {
+      giza_pyramids_construction(make_gpc_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
