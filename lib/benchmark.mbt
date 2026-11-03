@@ -1852,6 +1852,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       gannet_optimization(make_gannet_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "Narwhal",
+    run: (e, d, b, r, f) => {
+      narwhal_optimizer(make_narwhal_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

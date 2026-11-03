@@ -27610,3 +27610,178 @@ pub fn gannet_optimization(
     evaluations,
   }
 }
+
+// ===== Narwhal: Narwhal Optimizer (2024) =====
+
+///|
+pub struct NarwhalConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_narwhal_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> NarwhalConfig {
+  NarwhalConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Narwhal Optimizer (2024), mechanism-faithful variant of a narwhal pod split
+/// into two pods that periodically exchange their best tusk-bearer.  A narwhal
+/// factor narf = e^{-t/2500} decays as evaluations are spent; each pod contracts
+/// toward *its own* best rather than the global best, and every 20 generations
+/// the two pods swap their best individuals (migration):
+///   * tusk thrust (r1 < 0.33 narf) - dive toward the pod best with a
+///     differential kick taken from two random pod mates,
+///     X_i <- X_i + r2 (X_pod - X_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range narf 0.12;
+///   * deep jitter (r1 < 0.33 narf + 0.41) - fine step that keeps the pod
+///     spread out, X_i <- X_i + r2 (2 r3 - 1) range narf^2;
+///   * pod gather (rest) - contract toward the pod best,
+///     X_pod + r2 (X_i - X_pod) + r3 (2 r4 - 1) range narf 0.06.
+pub fn narwhal_optimizer(
+  config : NarwhalConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let half = pop_size / 2
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  let mut generations = 0
+  while evaluations < max_evals {
+    // pod (island) bests for this generation
+    let mut b0 = 0
+    for k in 0..<half {
+      if fits[k] < fits[b0] {
+        b0 = k
+      }
+    }
+    let mut b1 = half
+    for k in half..<pop_size {
+      if fits[k] < fits[b1] {
+        b1 = k
+      }
+    }
+    let pod0 = pop[b0]
+    let pod1 = pop[b1]
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let pod = if i < half { pod0 } else { pod1 }
+      // narwhal factor narf decays 1 -> 0 as evaluations are spent
+      let narf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < narf * 0.33 {
+        // tusk thrust: dive toward the pod best + differential kick
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (pod[d] - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * narf * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < narf * 0.33 + 0.41 {
+        // deep jitter: fine step that keeps the pod spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * narf * narf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // pod gather: contract toward the pod best
+        for d in 0..<dim {
+          let nv = pod[d] +
+            r2 * (xi[d] - pod[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * narf * 0.06
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+    generations = generations + 1
+    if generations % 20 == 0 {
+      // migration: swap the best tusk-bearers of the two pods
+      let mut m0 = 0
+      for k in 0..<half {
+        if fits[k] < fits[m0] {
+          m0 = k
+        }
+      }
+      let mut m1 = half
+      for k in half..<pop_size {
+        if fits[k] < fits[m1] {
+          m1 = k
+        }
+      }
+      let tmp_pos = pop[m0]
+      let tmp_fit = fits[m0]
+      pop[m0] = pop[m1]
+      fits[m0] = fits[m1]
+      pop[m1] = tmp_pos
+      fits[m1] = tmp_fit
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
