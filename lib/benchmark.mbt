@@ -1676,6 +1676,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       heat_transfer_search(make_hts_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "PGO",
+    run: (e, d, b, r, f) => {
+      plasma_generation_optimization(make_pgo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
