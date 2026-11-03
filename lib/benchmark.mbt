@@ -1908,6 +1908,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
     name: "OWL",
     run: (e, d, b, r, f) => owl_optimization(make_owl_config(e, d, b, 25), f, r),
   })
+  entries.push(AlgoEntry::{
+    name: "RRO",
+    run: (e, d, b, r, f) => {
+      raven_roosting_optimization(make_rro_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

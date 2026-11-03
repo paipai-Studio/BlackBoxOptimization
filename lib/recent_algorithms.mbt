@@ -29159,3 +29159,157 @@ pub fn owl_optimization(
     evaluations,
   }
 }
+
+// ===== RRO: Raven Roosting Optimization =====
+
+///|
+pub struct RROConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_rro_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> RROConfig {
+  RROConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Raven Roosting Optimization, mechanism-faithful variant of ravens choosing
+/// a roost by quality.  A roost factor rrf = e^{-t/2500} decays as evaluations
+/// are spent, and every generation the flock is ranked so a *rank-weighted
+/// roulette* can pick the roost a raven flies to (any rank can be chosen, but
+/// better ranks are likelier):
+///   * change roost (r1 < 0.36 rrf) - fly toward a roulette-selected roost,
+///     adding a differential kick from two random ravens,
+///     X_i <- X_i + r2 (X_roost - X_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range rrf 0.13;
+///   * roost jitter (r1 < 0.36 rrf + 0.40) - fine step that keeps the flock
+///     spread out, X_i <- X_i + r2 (2 r3 - 1) range rrf^2;
+///   * settle (rest) - contract toward the global best,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range rrf 0.06.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn raven_roosting_optimization(
+  config : RROConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // rank the flock and build a rank-weighted cumulative roulette
+    let order = sort_indices(fits)
+    let cum : Array[Double] = []
+    let mut acc = 0.0
+    for k in 0..<pop_size {
+      acc = acc + (pop_size - k).to_double()
+      cum.push(acc)
+    }
+    let total = acc
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // roost factor rrf decays 1 -> 0 as evaluations are spent
+      let rrf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < rrf * 0.36 {
+        // change roost: fly toward a roulette-selected roost + differential kick
+        let u = RNG::next(current_rng) * total
+        let mut pick_k = 0
+        for k in 0..<pop_size {
+          if cum[k] < u {
+            pick_k = k + 1
+          }
+        }
+        let xref = pop[order[pick_k]]
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let kk = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[kk]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xref[d] - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * rrf * 0.13
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < rrf * 0.36 + 0.40 {
+        // roost jitter: fine step that keeps the flock spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * rrf * rrf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // settle: contract toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * rrf * 0.06
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
