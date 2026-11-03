@@ -1694,6 +1694,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       river_formation_dynamics(make_rfd_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "LSA",
+    run: (e, d, b, r, f) => {
+      lightning_search_algorithm(make_lsa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
