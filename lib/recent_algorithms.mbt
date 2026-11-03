@@ -24262,3 +24262,128 @@ pub fn scatter_search(
     evaluations,
   }
 }
+
+// ===== OBA: Old Bachelor Acceptance =====
+
+///|
+pub struct OBAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_oba_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> OBAConfig {
+  OBAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Old Bachelor Acceptance, mechanism-faithful variant of the adaptive-threshold
+/// acceptance strategy carried by a population.  A cooling factor
+/// heat = e^{-t/2500} decays as evaluations are spent:
+///   a candidate X_i' = X_i + r2 (X_rand1 - X_rand2)
+///     + r3 (2 r4 - 1) range heat 0.12
+///     is accepted when it improves the incumbent or lies within the incumbent
+///     plus a self-adaptive slack threshold heat (1 + |record|) 0.5; the slack
+///     shrinks on every acceptance and grows on every rejection.
+/// The best solution is tracked separately.
+pub fn old_bachelor_acceptance(
+  config : OBAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  let mut threshold = 1.0
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // cooling factor heat decays 1 -> 0 as evaluations are spent
+      let heat = @math.exp(-evaluations.to_double() / 2500.0)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let xj = pop[j]
+      let xk = pop[k]
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = xi[d] +
+          r2 * (xj[d] - xk[d]) +
+          r3 * (2.0 * r4 - 1.0) * span * heat * 0.12
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      let soft = threshold * heat * (1.0 + abs_val(best_val)) * 0.5
+      if fv < vals[i] || fv <= vals[i] + soft {
+        // accept: tighten the self-adaptive slack
+        pop[i] = cand
+        vals[i] = fv
+        threshold = threshold * 0.99
+      } else {
+        // reject: loosen the self-adaptive slack
+        threshold = threshold * 1.01
+      }
+      if threshold > 5.0 {
+        threshold = 5.0
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

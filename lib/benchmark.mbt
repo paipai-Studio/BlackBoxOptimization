@@ -1706,6 +1706,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       scatter_search(make_ss_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "OBA",
+    run: (e, d, b, r, f) => {
+      old_bachelor_acceptance(make_oba_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
