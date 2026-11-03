@@ -1634,6 +1634,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       )
     },
   })
+  entries.push(AlgoEntry::{
+    name: "FGBO",
+    run: (e, d, b, r, f) => {
+      football_game_based_optimization(make_fgbo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

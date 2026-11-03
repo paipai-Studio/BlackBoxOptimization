@@ -1,10 +1,10 @@
 # BlackBoxOptimization
 
-基于 MoonBit 实现的黑盒优化算法框架，支持 231 种经典优化算法，提供统一的接口和基准测试框架。
+基于 MoonBit 实现的黑盒优化算法框架，支持 232 种经典优化算法，提供统一的接口和基准测试框架。
 
 ## 算法分类
 
-本框架实现了 **231 种**黑盒优化算法，按设计灵感和机制分为以下类别：
+本框架实现了 **232 种**黑盒优化算法，按设计灵感和机制分为以下类别：
 
 ### 🔍 单点搜索算法
 最简单的优化策略，从单个初始解出发，通过迭代改进逐步逼近最优值。
@@ -244,6 +244,7 @@
 | 人工电场算法 | AEFA | 库仑场力（差分）/电荷精细步/向最强电荷（最优）吸引三行为 (2019) |
 | 光学启发优化 | OIO | 反射散射（差分）/折射精细步/全反射聚焦至最优三行为 (2016) |
 | 闪电附着过程优化 | LAPO | 阶梯先导分叉（差分）/上行先导精细步/附着至落点（最优）三行为 (2019) |
+| 足球比赛优化 | FGBO | 传球（差分）/带球精细步/射门至球门（最优）三行为 (2021) |
 
 > **通用群体智能参数**: 大部分算法默认 `population_size = 25`。下表列出各算法的特有参数。
 
@@ -273,7 +274,7 @@
 | WCA | `num_rivers` | 4 |
 | MFO | `spiral_constant` | 1.0 |
 | WOA | `spiral_constant` | 1.0 |
-| 其余算法 (GWO, SCA, ALO, HHO, SalpSA, AEO, SOS, GBPSO, MSA, PFA, CPA, BCO, FFOA, FWA, PIO, HBA, POA, TSA, GJO, GOA, SOA, GTO, SMA, AO, ChOA, DO, ZOA, MRFO, HGS, RSA, MPA, GEO, AVOA, WSO, COA, OOA, TDO, PDO, NGO, BWO, GO, WaOA, ABC, DBO, TSO, KOA, FHO, SO, MGO, HPO, AHA, BKA, ARO, FOX, DMO, RSO, EVO, EEFO, YSGA, CapSA, SWO, GAO, MAO, COY, BES, GOOSE, SHO, ROA, HOA, BWA, CPSO, LPSO, WHO, BOA, SBO, ACOR, QPSO, UPSO, RTH, COOT, DOA, STOA, GKSO, FLA, HO, NMRA, FFO, EPO, CPO, MTBO, CryStAl, NOA, ESOA, MOA, AOS, MA, SSO, SLnO, FOA, SFO, NNA, PBO, FSS, CFO, CGO, CDO, ILS, SCE, GRASP, BO, FSA, SMO, HLO, FDA, CRO, AAA, VSA, VPL, WEO, SNS, TCO, RO, GbSA, BA, CO, CSS, MBA, PCA, IMO, EMA, WCO, AEFA, OIO, LAPO) | 仅需 `population_size` | 25 |
+| 其余算法 (GWO, SCA, ALO, HHO, SalpSA, AEO, SOS, GBPSO, MSA, PFA, CPA, BCO, FFOA, FWA, PIO, HBA, POA, TSA, GJO, GOA, SOA, GTO, SMA, AO, ChOA, DO, ZOA, MRFO, HGS, RSA, MPA, GEO, AVOA, WSO, COA, OOA, TDO, PDO, NGO, BWO, GO, WaOA, ABC, DBO, TSO, KOA, FHO, SO, MGO, HPO, AHA, BKA, ARO, FOX, DMO, RSO, EVO, EEFO, YSGA, CapSA, SWO, GAO, MAO, COY, BES, GOOSE, SHO, ROA, HOA, BWA, CPSO, LPSO, WHO, BOA, SBO, ACOR, QPSO, UPSO, RTH, COOT, DOA, STOA, GKSO, FLA, HO, NMRA, FFO, EPO, CPO, MTBO, CryStAl, NOA, ESOA, MOA, AOS, MA, SSO, SLnO, FOA, SFO, NNA, PBO, FSS, CFO, CGO, CDO, ILS, SCE, GRASP, BO, FSA, SMO, HLO, FDA, CRO, AAA, VSA, VPL, WEO, SNS, TCO, RO, GbSA, BA, CO, CSS, MBA, PCA, IMO, EMA, WCO, AEFA, OIO, LAPO, FGBO) | 仅需 `population_size` | 25 |
 
 ### 📐 确定性直接搜索
 无需梯度信息，通过几何模式进行直接搜索，适合不可导函数。
@@ -460,7 +461,7 @@ moon run main
 ### 运行测试
 
 ```bash
-# 运行所有测试（484 个测试用例）
+# 运行所有测试（486 个测试用例）
 moon test
 
 # 代码检查
@@ -920,7 +921,7 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | **🔍 单点搜索** | 随机搜索、爬山法、模拟退火、SPSA、盆地跳跃 | 简单、易于实现，适合低维问题 |
 | **🔧 局部搜索** | 禁忌搜索、引导局部搜索、大洪水、变邻域、阈值接受 | 强化局部开发，避免陷入局部最优 |
 | **🧬 进化算法** | DE、GA、jDE、SHADE、JADE、SaDE、Memetic、CLONALG、ICA、BBO、BSA | 基于种群进化，鲁棒性好 |
-| **🐝 群体智能** | PSO、萤火虫、蚁群、蜂群、灰狼、鲸群、蝙蝠、和声、麻雀搜索、哈里斯鹰、GOA、SOA、CSO、GTO、SMA、AO、ChOA、DO、ZOA、CPSO、LPSO、QPSO、UPSO、ACOR、COOT、DOA、STOA、GKSO、FLA、HO、NMRA、FFO、EPO、CPO、MTBO、CryStAl、NOA、ESOA、MOA、AOS、MA、SSO、SLnO、FOA、SFO、NNA、PBO、FSS、CFO、CGO、CDO、ILS、SCE、GRASP、BO、FSA、SMO、HLO、FDA、CRO、AAA、VSA、VPL、WEO、SNS、TCO、RO、GbSA、BA、CO、CSS、MBA、PCA、IMO、EMA、WCO、AEFA、OIO、LAPO 等 | 基于群体行为，全局搜索能力强 |
+| **🐝 群体智能** | PSO、萤火虫、蚁群、蜂群、灰狼、鲸群、蝙蝠、和声、麻雀搜索、哈里斯鹰、GOA、SOA、CSO、GTO、SMA、AO、ChOA、DO、ZOA、CPSO、LPSO、QPSO、UPSO、ACOR、COOT、DOA、STOA、GKSO、FLA、HO、NMRA、FFO、EPO、CPO、MTBO、CryStAl、NOA、ESOA、MOA、AOS、MA、SSO、SLnO、FOA、SFO、NNA、PBO、FSS、CFO、CGO、CDO、ILS、SCE、GRASP、BO、FSA、SMO、HLO、FDA、CRO、AAA、VSA、VPL、WEO、SNS、TCO、RO、GbSA、BA、CO、CSS、MBA、PCA、IMO、EMA、WCO、AEFA、OIO、LAPO、FGBO 等 | 基于群体行为，全局搜索能力强 |
 | **📐 确定性直接搜索** | Nelder-Mead、Hooke-Jeeves、Powell、Rosenbrock、CRS、DIRECT | 无需梯度，适合不可导函数 |
 | **🧮 进化策略** | CMA-ES、ES | 协方差自适应，适合病态问题 |
 | **📊 估计分布** | CEM、SFS、PBIL、UMDA、cGA | 基于概率分布估计，适合连续优化 |
