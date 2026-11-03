@@ -1512,6 +1512,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       flow_direction_algorithm(make_fda_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "CRO",
+    run: (e, d, b, r, f) => {
+      coral_reefs_optimization(make_cro_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
