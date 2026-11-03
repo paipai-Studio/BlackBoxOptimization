@@ -6342,3 +6342,31 @@ test "NRO improves with more evaluations" {
 
   assert_true(result2.best_value <= result1.best_value)
 }
+
+///|
+test "HTS produces valid result" {
+  let config = @lib.make_hts_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.heat_transfer_search(
+    config, @lib.sphere_function, rng,
+  )
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "HTS improves with more evaluations" {
+  let config1 = @lib.make_hts_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.heat_transfer_search(
+    config1, @lib.sphere_function, rng1,
+  )
+
+  let config2 = @lib.make_hts_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.heat_transfer_search(
+    config2, @lib.sphere_function, rng2,
+  )
+
+  assert_true(result2.best_value <= result1.best_value)
+}

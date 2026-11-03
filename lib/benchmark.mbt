@@ -1670,6 +1670,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       nuclear_reaction_optimization(make_nro_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "HTS",
+    run: (e, d, b, r, f) => {
+      heat_transfer_search(make_hts_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
