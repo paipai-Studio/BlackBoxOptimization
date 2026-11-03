@@ -1614,6 +1614,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       world_cup_optimization(make_wco_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "AEFA",
+    run: (e, d, b, r, f) => {
+      artificial_electric_field_algorithm(make_aefa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
