@@ -1602,6 +1602,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       ions_motion_optimization(make_imo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "EMA",
+    run: (e, d, b, r, f) => {
+      exchange_market_algorithm(make_ema_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

@@ -22103,3 +22103,131 @@ pub fn ions_motion_optimization(
     evaluations,
   }
 }
+
+// ===== EMA: Exchange Market Algorithm (2014) =====
+
+///|
+pub struct EMAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ema_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> EMAConfig {
+  EMAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Exchange Market Algorithm (Ghorbani & Babaei 2014), mechanism-faithful
+/// variant of stock-market trading.  A market factor emf = e^{-t/2500} decays
+/// as evaluations are spent:
+///   * exchange (r1 < 0.36 emf) - trading between shareholders, differential,
+///     X_i <- X_i + r2 (X_share1 - X_share2) + r3 (2 r4 - 1) range emf 0.13;
+///   * adjust   (r1 < 0.36 emf + 0.34) - fine portfolio adjustment, emf^2,
+///     X_i <- X_i + r2 (2 r4 - 1) range emf^2;
+///   * dividend (rest) - attraction to the top shareholder (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range emf 0.05.
+/// Shareholders move unconditionally while the top shareholder (global best)
+/// is tracked separately (this keeps the market from collapsing prematurely).
+pub fn exchange_market_algorithm(
+  config : EMAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // market factor emf decays 1 -> 0 as evaluations are spent
+      let emf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < emf * 0.36 {
+        // exchange: trading between shareholders, differential
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * emf * 0.13
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < emf * 0.36 + 0.34 {
+        // adjust: fine portfolio adjustment
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * emf * emf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // dividend: attraction to the top shareholder (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * emf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
