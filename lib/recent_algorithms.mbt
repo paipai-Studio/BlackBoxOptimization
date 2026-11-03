@@ -24924,3 +24924,149 @@ pub fn battle_royale_optimization(
     evaluations,
   }
 }
+
+// ===== EFO: Electromagnetic Field Optimization (2016) =====
+
+///|
+pub struct EFOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_efo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> EFOConfig {
+  EFOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Electromagnetic Field Optimization (2016), mechanism-faithful variant of
+/// charged particles moving under an electromagnetic field.  Members are ranked
+/// each sweep: the best 10% form the positive pole and the worst 10% the
+/// negative pole.  An electromagnetic factor emf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * field (r1 < 0.36 emf) - a particle is attracted to a positive pole and
+///     repelled from a negative pole simultaneously,
+///     X_i <- X_i + r2 (X_pos - X_i) + r3 (X_i - X_neg) + r4 (2 r5 - 1) range emf 0.12;
+///   * refine (r1 < 0.36 emf + 0.40) - fine local step,
+///     X_i <- X_i + r2 (2 r3 - 1) range emf^2;
+///   * balance (rest) - settle toward the global best,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range emf 0.07.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn electromagnetic_field_optimization(
+  config : EFOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // rank members: best 10% -> positive pole, worst 10% -> negative pole
+    let order = sort_indices(fits)
+    let n_pole = if pop_size / 10 < 1 { 1 } else { pop_size / 10 }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // electromagnetic field factor emf decays 1 -> 0 as evaluations are spent
+      let emf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < emf * 0.36 {
+        // field: attraction to a positive pole, repulsion from a negative pole
+        let p_idx = order[(RNG::next(current_rng) * n_pole.to_double()).to_int() %
+          n_pole]
+        let n_idx = order[
+          pop_size - 1 - (RNG::next(current_rng) * n_pole.to_double()).to_int() %
+          n_pole
+        ]
+        let xp = pop[p_idx]
+        let xn = pop[n_idx]
+        let r2 = RNG::next(current_rng)
+        let r3 = RNG::next(current_rng)
+        let r4 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xp[d] - xi[d]) +
+            r3 * (xi[d] - xn[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * emf * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < emf * 0.36 + 0.40 {
+        // refine: fine local step
+        let r2 = RNG::next(current_rng)
+        let r3 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * emf * emf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // balance: settle toward the global best
+        let r2 = RNG::next(current_rng)
+        let r3 = RNG::next(current_rng)
+        let r4 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * emf * 0.07
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

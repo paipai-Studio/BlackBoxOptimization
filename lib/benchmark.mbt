@@ -1736,6 +1736,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       battle_royale_optimization(make_bro_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "EFO",
+    run: (e, d, b, r, f) => {
+      electromagnetic_field_optimization(make_efo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
