@@ -1858,6 +1858,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       narwhal_optimizer(make_narwhal_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "Serval",
+    run: (e, d, b, r, f) => {
+      serval_optimization(make_serval_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
