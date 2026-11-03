@@ -1646,6 +1646,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       earthquake_algorithm(make_ea_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "LAHC",
+    run: (e, d, b, r, f) => {
+      late_acceptance_hill_climbing(make_lahc_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
