@@ -1950,6 +1950,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       orca_predation_algorithm(make_opa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "APuf",
+    run: (e, d, b, r, f) => {
+      arctic_puffin_optimization(make_apuf_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

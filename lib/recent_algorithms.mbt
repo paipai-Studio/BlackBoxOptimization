@@ -30223,3 +30223,161 @@ pub fn orca_predation_algorithm(
     evaluations,
   }
 }
+
+// ===== APuf: Arctic Puffin Optimization (2023) =====
+
+///|
+pub struct APufConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_apuf_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> APufConfig {
+  APufConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Arctic Puffin Optimization (2023), mechanism-faithful variant of puffin
+/// foraging.  A puffin factor puf = e^{-t/2500} decays as evaluations are
+/// spent, and each *dimension* keeps an adaptive step scale s_d in [0.2, 2]
+/// that expands for the coordinates that moved on a successful move and
+/// shrinks otherwise - a dimension-wise (not per-individual scalar) step
+/// adaptation:
+///   * aerial cruise (r1 < 0.33 puf) - differential exploration between two
+///     random mates with a dimension-scaled jitter,
+///     X_i <- X_i + r2 (X_p - X_q) + r3 (2 r4 - 1) range puf 0.12 s_d;
+///   * dive (r1 < 0.33 puf + 0.40) - fold toward the champion with a
+///     dimension-scaled jitter,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range puf 0.06 s_d;
+///   * surface jitter (rest) - fine step that keeps the colony spread out,
+///     X_i <- X_i + r2 (2 r3 - 1) range puf^2 s_d.
+/// After each move every coordinate that contributed at least 2% of the range
+/// to a successful displacement gets s_d <- min(2, 1.08 s_d); all other
+/// coordinates get s_d <- max(0.2, 0.96 s_d), and a failed move multiplies
+/// every s_d by 0.98.  The global best is tracked separately.
+pub fn arctic_puffin_optimization(
+  config : APufConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  // per-dimension adaptive step scale
+  let dscale : Array[Double] = []
+  for _d in 0..<dim {
+    dscale.push(1.0)
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // puffin factor puf decays 1 -> 0 as evaluations are spent
+      let puf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < puf * 0.33 {
+        // aerial cruise: differential exploration with dimension-scaled jitter
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xp[d] - xq[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * puf * 0.12 * dscale[d]
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < puf * 0.33 + 0.40 {
+        // dive: fold toward the champion with dimension-scaled jitter
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * puf * 0.06 * dscale[d]
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // surface jitter: fine step that keeps the colony spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * puf * puf * dscale[d]
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      let fv = evaluate(f, cand)
+      let improved = fv < fits[i]
+      // dimension-wise step adaptation
+      for d in 0..<dim {
+        if improved {
+          if abs_val(cand[d] - xi[d]) >= 0.02 * span {
+            dscale[d] = min(2.0, dscale[d] * 1.08)
+          } else {
+            dscale[d] = max(0.2, dscale[d] * 0.96)
+          }
+        } else {
+          dscale[d] = max(0.2, dscale[d] * 0.98)
+        }
+      }
+      pop[i] = cand
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
