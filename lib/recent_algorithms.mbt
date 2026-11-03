@@ -28122,3 +28122,162 @@ pub fn chicken_swarm_optimization(
     evaluations,
   }
 }
+
+// ===== PR: Path Relinking (1997) =====
+
+///|
+pub struct PRConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_pr_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> PRConfig {
+  PRConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Path Relinking (1997), mechanism-faithful standalone variant.  A relinking
+/// factor prf = e^{-t/2500} decays as evaluations are spent, and an archive of
+/// the most recent champions (up to 5, round-robin) provides the elite
+/// endpoints of the relinking paths:
+///   * relink (r1 < 0.29 prf) - move toward a random point on the path between
+///     two distinct archived champions, X_target = X_e1 + r2 (X_e2 - X_e1),
+///     X_i <- X_i + r3 (X_target - X_i)
+///            + r4 (2 r5 - 1) range prf 0.13;
+///   * jitter (r1 < 0.29 prf + 0.45) - fine step that keeps the swarm spread
+///     out, X_i <- X_i + r2 (2 r3 - 1) range prf^2;
+///   * converge (rest) - contract toward the current global best,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range prf 0.05.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn path_relinking(
+  config : PRConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let elite_cap = 5
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let elite : Array[Array[Double]] = []
+  let mut elite_n = 0
+  let mut elite_slot = 0
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // relinking factor prf decays 1 -> 0 as evaluations are spent
+      let prf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < prf * 0.29 {
+        // relink toward a random point on the path between two champions
+        if elite_n >= 2 {
+          let ea = (RNG::next(current_rng) * elite_n.to_double()).to_int() %
+            elite_n
+          let mut eb = (RNG::next(current_rng) * elite_n.to_double()).to_int() %
+            elite_n
+          if eb == ea {
+            eb = (ea + 1) % elite_n
+          }
+          let e1 = elite[ea]
+          let e2 = elite[eb]
+          for d in 0..<dim {
+            let tgt = e1[d] + r2 * (e2[d] - e1[d])
+            let nv = xi[d] +
+              r3 * (tgt - xi[d]) +
+              r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * prf * 0.13
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        } else {
+          for d in 0..<dim {
+            let nv = xi[d] +
+              r2 * (best_pos[d] - xi[d]) +
+              r3 * (2.0 * r4 - 1.0) * span * prf * 0.13
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        }
+      } else if r1 < prf * 0.29 + 0.45 {
+        // jitter: fine step that keeps the swarm spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * prf * prf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // converge: contract toward the current global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * prf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        if elite_n < elite_cap {
+          elite.push(best_pos)
+          elite_n = elite_n + 1
+        } else {
+          elite[elite_slot] = best_pos
+          elite_slot = (elite_slot + 1) % elite_cap
+        }
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

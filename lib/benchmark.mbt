@@ -1870,6 +1870,10 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       chicken_swarm_optimization(make_chso_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "PR",
+    run: (e, d, b, r, f) => path_relinking(make_pr_config(e, d, b, 25), f, r),
+  })
   entries
 }
 
