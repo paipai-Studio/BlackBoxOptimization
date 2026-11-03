@@ -1500,6 +1500,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       spider_monkey_optimization(make_smo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "HLO",
+    run: (e, d, b, r, f) => {
+      human_learning_optimization(make_hlo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
