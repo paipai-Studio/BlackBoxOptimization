@@ -1718,6 +1718,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       artificial_physics_optimization(make_apo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "HBO",
+    run: (e, d, b, r, f) => {
+      heap_based_optimizer(make_hbo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

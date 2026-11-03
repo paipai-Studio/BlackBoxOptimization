@@ -24515,3 +24515,150 @@ pub fn artificial_physics_optimization(
     evaluations,
   }
 }
+
+// ===== HBO: Heap-Based Optimizer (2022) =====
+
+///|
+pub struct HBOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_hbo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> HBOConfig {
+  HBOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Heap-Based Optimizer (2022), mechanism-faithful variant inspired by the
+/// corporate rank hierarchy.  The population is kept heap-ordered so that
+/// index 0 is the best member; the supervisor of i is (i-1)/2 and the
+/// grand-supervisor is (i-3)/4.  A hierarchy factor hbf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * hierarchy (r1 < 0.41 hbf) - differential move toward both the supervisor
+///     and the grand-supervisor,
+///     X_i <- X_i + r2 (X_sup - X_i) + r3 (X_gsup - X_i) + r4 (2 r5 - 1) range hbf 0.13;
+///   * refine (r1 < 0.41 hbf + 0.38) - fine local step,
+///     X_i <- X_i + r2 (2 r5 - 1) range hbf^2;
+///   * root (rest) - contract toward the heap root (global best),
+///     X_i <- X_root + r2 (X_i - X_root) + r3 (2 r5 - 1) range hbf 0.06.
+/// After every sweep the population is re-heaped by fitness.
+pub fn heap_based_optimizer(
+  config : HBOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // re-heap: index order by fitness so index 0 is best
+    let order = sort_indices(fits)
+    let tmp_pop : Array[Array[Double]] = []
+    let tmp_fit : Array[Double] = []
+    for i in 0..<pop_size {
+      tmp_pop.push(pop[order[i]])
+      tmp_fit.push(fits[order[i]])
+    }
+    for i in 0..<pop_size {
+      pop[i] = tmp_pop[i]
+      fits[i] = tmp_fit[i]
+    }
+    best_pos = pop[0]
+    best_val = fits[0]
+
+    for i in 1..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let sup = pop[(i - 1) / 2]
+      let gsup = if i >= 3 { pop[(i - 3) / 4] } else { pop[0] }
+      // hierarchy factor hbf decays 1 -> 0 as evaluations are spent
+      let hbf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let r5 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < hbf * 0.41 {
+        // hierarchy: move toward supervisor and grand-supervisor
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (sup[d] - xi[d]) +
+            r3 * (gsup[d] - xi[d]) +
+            r4 * (2.0 * r5 - 1.0) * span * hbf * 0.13
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < hbf * 0.41 + 0.38 {
+        // refine: fine local step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r5 - 1.0) * span * hbf * hbf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // root: contract toward the heap root (global best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r5 - 1.0) * span * hbf * 0.06
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
