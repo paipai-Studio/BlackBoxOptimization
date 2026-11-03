@@ -1584,6 +1584,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       charged_system_search(make_css_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "MBA",
+    run: (e, d, b, r, f) => {
+      mine_blast_algorithm(make_mba_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
