@@ -1792,6 +1792,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       monkey_king_evolution(make_mke_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "RFO",
+    run: (e, d, b, r, f) => {
+      red_fox_optimization(make_rfo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
