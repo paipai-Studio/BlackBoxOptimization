@@ -1824,6 +1824,10 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       squirrel_search_algorithm(make_sqsa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "Puma",
+    run: (e, d, b, r, f) => puma_optimizer(make_puma_config(e, d, b, 25), f, r),
+  })
   entries
 }
 

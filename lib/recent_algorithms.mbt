@@ -26888,3 +26888,157 @@ pub fn squirrel_search_algorithm(
     evaluations,
   }
 }
+
+// ===== Puma: Puma Optimizer (2024) =====
+
+///|
+pub struct PumaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_puma_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> PumaConfig {
+  PumaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Puma Optimizer (2024), mechanism-faithful variant of puma hunting.
+/// A puma factor pumf = e^{-t/2500} decays as evaluations are spent, and each
+/// individual carries a fitness-adaptive step scale
+/// w_i = 0.5 + (fit_i - fit_min) / (fit_max - fit_min) in [0.5, 1.5], so weaker
+/// pumas roam further while stronger pumas converge gently:
+///   * roam (r1 < 0.28 pumf) - drift toward a random peer with a differential
+///     kick taken from two random peers,
+///     X_i <- X_i + r2 (X_j - X_i) + r3 (X_j - X_k)
+///            + r4 (2 r5 - 1) range pumf 0.12 w_i;
+///   * stalk (r1 < 0.28 pumf + 0.45) - fine jitter that keeps the pride spread
+///     out, X_i <- X_i + r2 (2 r3 - 1) range pumf^2;
+///   * pounce (rest) - contract toward the global best,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range pumf 0.06 w_i.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn puma_optimizer(
+  config : PumaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // fitness range drives the adaptive step scale w_i
+    let mut fit_min = fits[0]
+    let mut fit_max = fits[0]
+    for k in 1..<pop_size {
+      if fits[k] < fit_min {
+        fit_min = fits[k]
+      }
+      if fits[k] > fit_max {
+        fit_max = fits[k]
+      }
+    }
+    let fit_span = if fit_max - fit_min < 1.0e-12 {
+      1.0e-12
+    } else {
+      fit_max - fit_min
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // puma factor pumf decays 1 -> 0 as evaluations are spent
+      let pumf = @math.exp(-evaluations.to_double() / 2500.0)
+      let wi = 0.5 + (fits[i] - fit_min) / fit_span
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < pumf * 0.28 {
+        // roam: drift toward a random peer, plus a differential kick
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xi[d]) +
+            r3 * (xj[d] - xk[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * pumf * 0.12 * wi
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < pumf * 0.28 + 0.45 {
+        // stalk: fine jitter that keeps the pride spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * pumf * pumf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // pounce: contract toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * pumf * 0.06 * wi
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
