@@ -1476,6 +1476,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       shuffled_complex_evolution(make_sce_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "GRASP",
+    run: (e, d, b, r, f) => {
+      greedy_randomized_adaptive_search(make_grasp_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
