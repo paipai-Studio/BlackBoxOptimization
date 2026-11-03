@@ -28574,3 +28574,152 @@ pub fn jellyfish_search_optimizer(
     evaluations,
   }
 }
+
+// ===== WSA: Water Strider Algorithm (2020) =====
+
+///|
+pub struct WSAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_wsa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> WSAConfig {
+  WSAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Water Strider Algorithm (2020), mechanism-faithful variant of water strider
+/// territory movement.  A strider factor wsf = e^{-t/2500} decays as
+/// evaluations are spent, and the population is ranked by fitness every
+/// generation so each strider is pulled toward its *rank-adjacent* better
+/// neighbour (forming a chain from the best down the ranks) rather than the
+/// global best:
+///   * territory migration (r1 < 0.33 wsf) - drift toward the immediately
+///     better-ranked strider with a differential kick from two random mates,
+///     X_i <- X_i + r2 (X_better - X_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range wsf 0.11;
+///   * ripple jitter (r1 < 0.33 wsf + 0.42) - fine step that keeps the pond
+///     spread out, X_i <- X_i + r2 (2 r3 - 1) range wsf^2;
+///   * settle (rest) - contract toward the global best,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range wsf 0.06.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn water_strider_algorithm(
+  config : WSAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // rank the pond by fitness for rank-adjacency attraction
+    let order = sort_indices(fits)
+    let rank : Array[Int32] = []
+    for _k in 0..<pop_size {
+      rank.push(0)
+    }
+    for k in 0..<pop_size {
+      rank[order[k]] = k
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // strider factor wsf decays 1 -> 0 as evaluations are spent
+      let wsf = @math.exp(-evaluations.to_double() / 2500.0)
+      let rrk = rank[i]
+      let xbetter = if rrk > 0 { pop[order[rrk - 1]] } else { best_pos }
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < wsf * 0.33 {
+        // territory migration: toward the immediately better-ranked strider
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xbetter[d] - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * wsf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < wsf * 0.33 + 0.42 {
+        // ripple jitter: fine step that keeps the pond spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * wsf * wsf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // settle: contract toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * wsf * 0.06
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

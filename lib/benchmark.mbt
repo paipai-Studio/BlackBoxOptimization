@@ -1886,6 +1886,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       jellyfish_search_optimizer(make_js_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "WSA",
+    run: (e, d, b, r, f) => {
+      water_strider_algorithm(make_wsa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
