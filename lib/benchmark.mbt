@@ -1766,6 +1766,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       adaptive_large_neighborhood_search(make_alns_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SGO",
+    run: (e, d, b, r, f) => {
+      social_group_optimization(make_sgo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

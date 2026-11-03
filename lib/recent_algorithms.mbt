@@ -25637,3 +25637,137 @@ pub fn adaptive_large_neighborhood_search(
     evaluations,
   }
 }
+
+// ===== SGO: Social Group Optimization (2016) =====
+
+///|
+pub struct SGOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_sgo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SGOConfig {
+  SGOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Social Group Optimization (2016), mechanism-faithful variant.  A social
+/// factor sgf = e^{-t/2500} decays as evaluations are spent.  Members improve
+/// through self-introspection and by learning from the group best / worst:
+///   * improving phase (r1 < 0.30 sgf) - keep 20% of self (self-introspection)
+///     and learn from the group best,
+///     X_i <- 0.2 X_i + r2 (X_best - X_i) + r3 (2 r4 - 1) range sgf 0.10;
+///   * acquiring phase (r1 < 0.30 sgf + 0.42) - learn from the best and retreat
+///     from the worst,
+///     X_i <- X_i + r2 (X_best - X_i) + r3 (X_i - X_worst) + r4 (2 r5 - 1) range sgf^2;
+///   * refine (rest) - settle toward the group best,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range sgf 0.07.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn social_group_optimization(
+  config : SGOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // worst member of the current group
+    let order = sort_indices(fits)
+    let worst_pos = pop[order[pop_size - 1]]
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // social factor sgf decays 1 -> 0 as evaluations are spent
+      let sgf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < sgf * 0.30 {
+        // improving phase: self-introspection (keep 20% of self) + learn from best
+        for d in 0..<dim {
+          let nv = 0.2 * xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * sgf * 0.10
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < sgf * 0.30 + 0.42 {
+        // acquiring phase: learn from the best, retreat from the worst
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (xi[d] - worst_pos[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * sgf * sgf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // refine: settle toward the group best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * sgf * 0.07
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
