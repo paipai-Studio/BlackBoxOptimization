@@ -24662,3 +24662,142 @@ pub fn heap_based_optimizer(
     evaluations,
   }
 }
+
+// ===== SAO: Snow Ablation Optimizer (2023) =====
+
+///|
+pub struct SAOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_sao_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SAOConfig {
+  SAOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Snow Ablation Optimizer (2023), mechanism-faithful variant of the snow
+/// ablation process.  An ablation factor saf = e^{-t/2500} decays as evaluations
+/// are spent:
+///   * sublimation (r1 < 0.33 saf) - differential drift exploration,
+///     X_i <- X_i + r2 (X_p1 - X_p2) + r3 (2 r4 - 1) range saf 0.11;
+///   * melting (r1 < 0.33 saf + 0.37) - fine move toward the population mean,
+///     X_i <- X_i + r2 saf (X_mean - X_i) + r3 (2 r4 - 1) range saf^2;
+///   * avalanche (rest) - pack and settle toward the global best,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range saf 0.07.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn snow_ablation_optimizer(
+  config : SAOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // population mean (target of the melting behaviour)
+    let avg : Array[Double] = []
+    for d in 0..<dim {
+      let mut s = 0.0
+      for i in 0..<pop_size {
+        s = s + pop[i][d]
+      }
+      avg.push(s / pop_size.to_double())
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // ablation factor saf decays 1 -> 0 as evaluations are spent
+      let saf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < saf * 0.33 {
+        // sublimation: differential drift exploration
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * saf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < saf * 0.33 + 0.37 {
+        // melting: fine move toward the population mean
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * saf * (avg[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * saf * saf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // avalanche: pack and settle toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * saf * 0.07
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

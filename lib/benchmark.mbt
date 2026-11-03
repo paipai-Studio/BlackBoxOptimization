@@ -1724,6 +1724,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       heap_based_optimizer(make_hbo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SAO",
+    run: (e, d, b, r, f) => {
+      snow_ablation_optimizer(make_sao_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
