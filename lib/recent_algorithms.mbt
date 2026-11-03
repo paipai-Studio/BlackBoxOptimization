@@ -27210,3 +27210,136 @@ pub fn starling_murmuration_optimizer(
     evaluations,
   }
 }
+
+// ===== SFOA: Swordfish Optimization Algorithm (2021) =====
+
+///|
+pub struct SFOAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_sfoa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SFOAConfig {
+  SFOAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Swordfish Optimization Algorithm (2021), mechanism-faithful variant of
+/// swordfish predation.  A swordfish factor swf = e^{-t/2500} decays as
+/// evaluations are spent, and the previous generation's champion position is
+/// kept as `prev_best` so that the champion's one-generation displacement
+/// (X_best - X_prev_best) can be ridden as a velocity direction:
+///   * forward thrust (r1 < 0.35 swf) - chase the prey (global best) while
+///     riding the champion's velocity, plus a jitter,
+///     X_i <- X_i + r2 (X_best - X_i) + r3 (X_best - X_prev_best)
+///            + r4 (2 r5 - 1) range swf 0.12;
+///   * surface patrol (r1 < 0.35 swf + 0.41) - fine step that keeps the school
+///     spread out, X_i <- X_i + r2 (2 r3 - 1) range swf^2;
+///   * deep dive (rest) - contract toward the global best,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range swf 0.05.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn swordfish_optimization(
+  config : SFOAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // previous generation's champion gives the velocity direction
+    let prev_best = best_pos
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // swordfish factor swf decays 1 -> 0 as evaluations are spent
+      let swf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < swf * 0.35 {
+        // forward thrust: chase the prey (best) and ride the champion's velocity
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (best_pos[d] - prev_best[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * swf * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < swf * 0.35 + 0.41 {
+        // surface patrol: fine step that keeps the school spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * swf * swf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // deep dive: contract toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * swf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

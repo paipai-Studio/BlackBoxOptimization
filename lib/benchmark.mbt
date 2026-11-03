@@ -1834,6 +1834,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       starling_murmuration_optimizer(make_stmo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SFOA",
+    run: (e, d, b, r, f) => {
+      swordfish_optimization(make_sfoa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
