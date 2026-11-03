@@ -1904,6 +1904,10 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       wildebeest_herd_optimization(make_wbo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "OWL",
+    run: (e, d, b, r, f) => owl_optimization(make_owl_config(e, d, b, 25), f, r),
+  })
   entries
 }
 

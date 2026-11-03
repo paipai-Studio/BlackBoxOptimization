@@ -28996,3 +28996,166 @@ pub fn wildebeest_herd_optimization(
     evaluations,
   }
 }
+
+// ===== OWL: Owl Optimization Algorithm =====
+
+///|
+pub struct OWLConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_owl_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> OWLConfig {
+  OWLConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Owl Optimization Algorithm, mechanism-faithful variant of owl hunting.  An
+/// owl factor owf = e^{-t/2500} decays as evaluations are spent, and each owl
+/// remembers the direction of its last *successful* move (a pattern-move
+/// memory, unlike BCMO's raw momentum or SAR's best-position memory):
+///   * silent glide (r1 < 0.37 owf) - continue along the remembered success
+///     direction while closing in on the prey (global best), with a
+///     differential kick and a jitter,
+///     X_i <- X_i + r2 (X_best - X_i) + r3 (X_p - X_q) + 0.25 D_i
+///            + r4 (2 r5 - 1) range owf 0.11;
+///   * auditory jitter (r1 < 0.37 owf + 0.39) - fine step that keeps the roost
+///     spread out, X_i <- X_i + r2 (2 r3 - 1) range owf^2;
+///   * swoop (rest) - contract toward the prey (global best),
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range owf 0.05.
+/// The direction memory D_i is refreshed on improvement and forgotten after a
+/// non-improving move.  The global best is tracked separately.
+pub fn owl_optimization(
+  config : OWLConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  // per-owl remembered success direction
+  let dir : Array[Array[Double]] = []
+  for _i in 0..<pop_size {
+    let z : Array[Double] = []
+    for _d in 0..<dim {
+      z.push(0.0)
+    }
+    dir.push(z)
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let di = dir[i]
+      // owl factor owf decays 1 -> 0 as evaluations are spent
+      let owf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      let mut glided = false
+      if r1 < owf * 0.37 {
+        // silent glide: continue the remembered success direction + pull to prey
+        glided = true
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * owf * 0.11 +
+            0.25 * di[d]
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < owf * 0.37 + 0.39 {
+        // auditory jitter: fine step that keeps the roost spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * owf * owf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // swoop: contract toward the prey (global best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * owf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      let fv = evaluate(f, cand)
+      // keep the remembered direction only when a glide improved, else forget
+      let nd : Array[Double] = []
+      if glided && fv < fits[i] {
+        for d in 0..<dim {
+          nd.push(0.5 * (cand[d] - xi[d]))
+        }
+      } else {
+        for _d in 0..<dim {
+          nd.push(0.0)
+        }
+      }
+      dir[i] = nd
+      fits[i] = fv
+      pop[i] = cand
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
