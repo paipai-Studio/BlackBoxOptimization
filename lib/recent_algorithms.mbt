@@ -26063,3 +26063,136 @@ pub fn balancing_composite_motion_optimization(
     evaluations,
   }
 }
+
+// ===== MKE: Monkey King Evolution (2016) =====
+
+///|
+pub struct MKEConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_mke_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> MKEConfig {
+  MKEConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Monkey King Evolution (2016), mechanism-faithful variant of the "kingdom
+/// search" metaphor.  A king factor mkf = e^{-t/2500} decays as evaluations are
+/// spent; the monkey king is the global best:
+///   * territory exploration (r1 < 0.31 mkf) - differential move between two
+///     monkeys,
+///     X_i <- X_i + r2 (X_p - X_q) + r3 (2 r4 - 1) range mkf 0.10;
+///   * restless wandering (r1 < 0.31 mkf + 0.41) - fine local jitter that keeps
+///     the troop spread out, X_i <- X_i + r2 (2 r3 - 1) range mkf^2;
+///   * submit (rest) - contract toward the monkey king,
+///     X_i <- X_king + r2 (X_i - X_king) + r3 (2 r4 - 1) range mkf 0.07.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn monkey_king_evolution(
+  config : MKEConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // king factor mkf decays 1 -> 0 as evaluations are spent
+      let mkf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < mkf * 0.31 {
+        // territory exploration: differential move between two monkeys
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * mkf * 0.10
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < mkf * 0.31 + 0.41 {
+        // restless wandering: fine local jitter that preserves diversity
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * mkf * mkf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // submit: contract toward the monkey king
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * mkf * 0.07
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

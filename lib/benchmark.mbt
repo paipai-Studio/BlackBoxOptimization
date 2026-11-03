@@ -1786,6 +1786,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       )
     },
   })
+  entries.push(AlgoEntry::{
+    name: "MKE",
+    run: (e, d, b, r, f) => {
+      monkey_king_evolution(make_mke_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
