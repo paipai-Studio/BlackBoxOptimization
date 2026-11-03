@@ -1712,6 +1712,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       old_bachelor_acceptance(make_oba_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "APO",
+    run: (e, d, b, r, f) => {
+      artificial_physics_optimization(make_apo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
