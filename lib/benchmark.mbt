@@ -1944,6 +1944,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       cuttlefish_optimization(make_cfa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "OPA",
+    run: (e, d, b, r, f) => {
+      orca_predation_algorithm(make_opa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
