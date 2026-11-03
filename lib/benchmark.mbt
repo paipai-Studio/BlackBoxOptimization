@@ -1548,6 +1548,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       social_network_search(make_sns_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "TCO",
+    run: (e, d, b, r, f) => {
+      termite_colony_optimization(make_tco_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
