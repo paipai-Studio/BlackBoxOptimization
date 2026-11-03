@@ -1652,6 +1652,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       late_acceptance_hill_climbing(make_lahc_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "HuS",
+    run: (e, d, b, r, f) => {
+      hunting_search_algorithm(make_hus_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
