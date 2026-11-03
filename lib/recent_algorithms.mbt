@@ -26330,3 +26330,150 @@ pub fn red_fox_optimization(
     evaluations,
   }
 }
+
+// ===== SAR: Search and Rescue Optimization (2019) =====
+
+///|
+pub struct SARConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_sar_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SARConfig {
+  SARConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Search and Rescue Optimization (2019), mechanism-faithful variant of a
+/// rescue team's search.  Each rescuer keeps a personal "search memory" mem_i
+/// (its own best visited position) which is refreshed whenever the rescuer
+/// improves on it.  A rescue factor sarf = e^{-t/2500} decays as evaluations are
+/// spent:
+///   * individual search (r1 < 0.34 sarf) - move toward the personal search
+///     memory,
+///     X_i <- X_i + r2 (mem_i - X_i) + r3 (2 r4 - 1) range sarf 0.10;
+///   * team patrol (r1 < 0.34 sarf + 0.40) - fine jitter that keeps the rescue
+///     team spread out, X_i <- X_i + r2 (2 r3 - 1) range sarf^2;
+///   * converge (rest) - contract toward the global best,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range sarf 0.07.
+/// The global best is tracked separately.
+pub fn search_and_rescue_optimization(
+  config : SARConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mem : Array[Array[Double]] = []
+  let mem_val : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  mem.push(best_pos)
+  mem_val.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    mem.push(p)
+    mem_val.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // rescue factor sarf decays 1 -> 0 as evaluations are spent
+      let sarf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < sarf * 0.34 {
+        // individual search: move toward the personal search memory plus a
+        // differential kick for diversity
+        let mi = mem[i]
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (mi[d] - xi[d]) +
+            r3 * (xj[d] - xk[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * sarf * 0.08
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < sarf * 0.34 + 0.40 {
+        // team patrol: fine jitter keeps the rescue team spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * sarf * sarf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // converge: contract toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * sarf * 0.07
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < mem_val[i] {
+        mem[i] = cand
+        mem_val[i] = fv
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

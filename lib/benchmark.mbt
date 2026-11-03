@@ -1798,6 +1798,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       red_fox_optimization(make_rfo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SAR",
+    run: (e, d, b, r, f) => {
+      search_and_rescue_optimization(make_sar_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
