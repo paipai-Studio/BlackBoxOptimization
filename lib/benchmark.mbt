@@ -1560,6 +1560,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       ray_optimization(make_ro_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "GbSA",
+    run: (e, d, b, r, f) => {
+      galaxy_based_search_algorithm(make_gbsa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
