@@ -1572,6 +1572,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       bees_algorithm(make_ba_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "CO",
+    run: (e, d, b, r, f) => {
+      cheetah_optimizer(make_co_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
