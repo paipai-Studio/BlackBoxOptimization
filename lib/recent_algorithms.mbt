@@ -25203,3 +25203,128 @@ pub fn gases_brownian_motion_optimization(
     evaluations,
   }
 }
+
+// ===== DSA: Differential Search Algorithm (2012) =====
+
+///|
+pub struct DSAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_dsa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> DSAConfig {
+  DSAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Differential Search Algorithm (2012), mechanism-faithful variant of the
+/// "super organism" migration model.  A search factor dsf = e^{-t/2500} decays
+/// as evaluations are spent.  Members are the super organism leads the herd;
+/// three migration types are chosen at random:
+///   * Brownian migration (r1 < 0.30 dsf) - random step toward the super
+///     organism (global best),
+///     X_i <- X_i + r2 (X_best - X_i) + r3 (2 r4 - 1) range dsf 0.10;
+///   * adaptive migration (r1 < 0.30 dsf + 0.42) - fine local step,
+///     X_i <- X_i + r2 (2 r3 - 1) range dsf^2;
+///   * extreme migration (rest) - extrapolate PAST the super organism,
+///     X_i <- X_best + r2 (X_best - X_i) + r3 (2 r4 - 1) range dsf 0.08,
+///     i.e. overshoot beyond the best instead of settling onto it.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn differential_search_algorithm(
+  config : DSAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // search factor dsf decays 1 -> 0 as evaluations are spent
+      let dsf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < dsf * 0.30 {
+        // Brownian migration: random step toward the super organism (best)
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * dsf * 0.10
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < dsf * 0.30 + 0.42 {
+        // adaptive migration: fine local step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * dsf * dsf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // extreme migration: extrapolate beyond the super organism
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * dsf * 0.08
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

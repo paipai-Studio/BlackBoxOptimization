@@ -1748,6 +1748,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       gases_brownian_motion_optimization(make_gbmo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "DSA",
+    run: (e, d, b, r, f) => {
+      differential_search_algorithm(make_dsa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
