@@ -1818,6 +1818,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       red_deer_algorithm(make_rda_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SqSA",
+    run: (e, d, b, r, f) => {
+      squirrel_search_algorithm(make_sqsa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

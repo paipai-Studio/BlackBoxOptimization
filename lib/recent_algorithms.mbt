@@ -26746,3 +26746,145 @@ pub fn red_deer_algorithm(
     evaluations,
   }
 }
+
+// ===== SqSA: Squirrel Search Algorithm (2019) =====
+
+///|
+pub struct SqSAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_sqsa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SqSAConfig {
+  SqSAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Squirrel Search Algorithm (2019), mechanism-faithful variant of squirrels
+/// gliding among trees.  A squirrel factor sqf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * glide to the oak (r1 < 0.26 sqf) - approach the hickory/oak (global
+///     best) with a differential kick taken from two random peers,
+///     X_i <- X_i + r2 (X_best - X_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range sqf 0.15;
+///   * foraging jitter (r1 < 0.26 sqf + 0.47) - fine step that keeps squirrels
+///     spread across the trees, X_i <- X_i + r2 (2 r3 - 1) range sqf^2;
+///   * predator encounter (rest) - with a fixed predator presence probability
+///     (0.20) a squirrel is randomly repositioned to escape, otherwise it
+///     gathers toward the oak (global best) with an exploratory jitter.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn squirrel_search_algorithm(
+  config : SqSAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // squirrel factor sqf decays 1 -> 0 as evaluations are spent
+      let sqf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < sqf * 0.26 {
+        // glide to the oak: approach the global best, plus a differential kick
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * sqf * 0.15
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < sqf * 0.26 + 0.47 {
+        // foraging jitter: fine step that keeps squirrels spread across trees
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * sqf * sqf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if RNG::next(current_rng) < 0.20 {
+        // predator encounter: escape by random repositioning in the forest
+        let escaped = random_solution(dim, bounds, current_rng)
+        for d in 0..<dim {
+          cand.push(escaped[d])
+        }
+      } else {
+        // gather: contract toward the oak (global best) with a jitter
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * sqf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
