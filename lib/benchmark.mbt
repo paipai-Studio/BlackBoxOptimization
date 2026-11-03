@@ -1772,6 +1772,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       social_group_optimization(make_sgo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "ASO",
+    run: (e, d, b, r, f) => {
+      atom_search_optimization(make_aso_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

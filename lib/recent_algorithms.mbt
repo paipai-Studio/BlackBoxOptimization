@@ -25771,3 +25771,144 @@ pub fn social_group_optimization(
     evaluations,
   }
 }
+
+// ===== ASO: Atom Search Optimization (2019) =====
+
+///|
+pub struct ASOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_aso_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ASOConfig {
+  ASOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Atom Search Optimization (2019), mechanism-faithful variant of the atomic
+/// interaction model.  An atom factor asf = e^{-t/2500} decays as evaluations
+/// are spent:
+///   * attraction (r1 < 0.34 asf) - a Lennard-Jones-like pull toward a random
+///     better atom (chosen by a pairwise tournament),
+///     X_i <- X_i + r2 (X_better - X_i) + r3 (2 r4 - 1) range asf 0.10;
+///   * repulsion (r1 < 0.34 asf + 0.40) - retreat from a random worse atom,
+///     X_i <- X_i + r2 asf (X_i - X_worse) + r3 (2 r4 - 1) range asf^2;
+///   * settle (rest) - drift toward the heaviest atom (global best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range asf 0.07.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn atom_search_optimization(
+  config : ASOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // atom factor asf decays 1 -> 0 as evaluations are spent
+      let asf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < asf * 0.34 {
+        // attraction: pull toward a random better atom (pairwise tournament)
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let better = if fits[j] <= fits[k] { j } else { k }
+        let xb = pop[better]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xb[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * asf * 0.10
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < asf * 0.34 + 0.40 {
+        // repulsion: retreat from a random worse atom
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let worse = if fits[j] >= fits[k] { j } else { k }
+        let xw = pop[worse]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * asf * (xi[d] - xw[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * asf * asf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // settle: drift toward the heaviest atom (global best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * asf * 0.07
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
