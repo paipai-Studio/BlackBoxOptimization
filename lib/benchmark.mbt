@@ -1554,6 +1554,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       termite_colony_optimization(make_tco_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "RO",
+    run: (e, d, b, r, f) => {
+      ray_optimization(make_ro_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
