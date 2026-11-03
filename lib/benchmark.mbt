@@ -1892,6 +1892,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       water_strider_algorithm(make_wsa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SeHO",
+    run: (e, d, b, r, f) => {
+      sea_horse_optimizer(make_seho_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
