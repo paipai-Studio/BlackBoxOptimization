@@ -1846,6 +1846,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       african_buffalo_optimization(make_abo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "Gannet",
+    run: (e, d, b, r, f) => {
+      gannet_optimization(make_gannet_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
