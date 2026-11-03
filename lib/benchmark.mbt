@@ -1658,6 +1658,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       hunting_search_algorithm(make_hus_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "RRT",
+    run: (e, d, b, r, f) => {
+      record_to_record_travel(make_rrt_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
