@@ -1914,6 +1914,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       raven_roosting_optimization(make_rro_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SaFO",
+    run: (e, d, b, r, f) => {
+      sailfish_optimizer(make_safo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

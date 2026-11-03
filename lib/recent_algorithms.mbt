@@ -29313,3 +29313,179 @@ pub fn raven_roosting_optimization(
     evaluations,
   }
 }
+
+// ===== SaFO: Sailfish Optimizer (2019) =====
+
+///|
+pub struct SaFOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_safo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SaFOConfig {
+  SaFOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Sailfish Optimizer (2019), mechanism-faithful variant of sailfish hunting.
+/// A sailfish factor saf = e^{-t/2500} decays as evaluations are spent, and an
+/// *adaptive fitness-distance balance* (FDB) picks the prey among a few random
+/// candidates - trading a good fitness against being far enough away to stay
+/// exploratory:
+///   * attack (r1 < 0.31 saf) - strike toward the FDB-selected prey with a
+///     differential kick from two random mates,
+///     X_i <- X_i + r2 (X_prey - X_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range saf 0.12;
+///   * patrol jitter (r1 < 0.31 saf + 0.43) - fine step that keeps the school
+///     spread out, X_i <- X_i + r2 (2 r3 - 1) range saf^2;
+///   * strike home (rest) - contract toward the global best,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range saf 0.05.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn sailfish_optimizer(
+  config : SaFOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // fitness range for FDB normalization
+    let mut fit_min = fits[0]
+    let mut fit_max = fits[0]
+    for k in 1..<pop_size {
+      if fits[k] < fit_min {
+        fit_min = fits[k]
+      }
+      if fits[k] > fit_max {
+        fit_max = fits[k]
+      }
+    }
+    let fit_span = if fit_max - fit_min < 1.0e-12 {
+      1.0e-12
+    } else {
+      fit_max - fit_min
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // sailfish factor saf decays 1 -> 0 as evaluations are spent
+      let saf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < saf * 0.31 {
+        // FDB: pick a prey balancing a good fitness against being far away
+        let mut pick = i
+        let mut best_score = 1.0e30
+        for _c in 0..<3 {
+          let cj = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+            pop_size
+          let xc = pop[cj]
+          let nf = (fits[cj] - fit_min) / fit_span
+          let mut dsq = 0.0
+          for d in 0..<dim {
+            let diff = xc[d] - xi[d]
+            dsq = dsq + diff * diff
+          }
+          let mut nd = dsq / (span * span)
+          if nd > 1.0 {
+            nd = 1.0
+          }
+          let score = 0.5 * nf + 0.5 * (1.0 - nd)
+          if score < best_score {
+            best_score = score
+            pick = cj
+          }
+        }
+        let xref = pop[pick]
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let kk = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[kk]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xref[d] - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * saf * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < saf * 0.31 + 0.43 {
+        // patrol jitter: fine step that keeps the school spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * saf * saf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // strike home: contract toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * saf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
