@@ -1810,6 +1810,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       chameleon_swarm_algorithm(make_chsa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "RDA",
+    run: (e, d, b, r, f) => {
+      red_deer_algorithm(make_rda_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
