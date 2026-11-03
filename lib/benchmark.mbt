@@ -1682,6 +1682,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       plasma_generation_optimization(make_pgo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "IWD",
+    run: (e, d, b, r, f) => {
+      intelligent_water_drops(make_iwd_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
