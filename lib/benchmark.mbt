@@ -1874,6 +1874,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
     name: "PR",
     run: (e, d, b, r, f) => path_relinking(make_pr_config(e, d, b, 25), f, r),
   })
+  entries.push(AlgoEntry::{
+    name: "CrSO",
+    run: (e, d, b, r, f) => {
+      cockroach_swarm_optimization(make_crso_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
