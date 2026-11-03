@@ -1566,6 +1566,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       galaxy_based_search_algorithm(make_gbsa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "BA",
+    run: (e, d, b, r, f) => {
+      bees_algorithm(make_ba_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
