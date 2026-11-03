@@ -1578,6 +1578,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       cheetah_optimizer(make_co_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "CSS",
+    run: (e, d, b, r, f) => {
+      charged_system_search(make_css_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
