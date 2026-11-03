@@ -1488,6 +1488,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       bonobo_optimizer(make_bo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "FSA",
+    run: (e, d, b, r, f) => {
+      flamingo_search_algorithm(make_fsa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
