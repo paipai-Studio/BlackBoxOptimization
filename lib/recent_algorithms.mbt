@@ -28433,3 +28433,144 @@ pub fn cockroach_swarm_optimization(
     evaluations,
   }
 }
+
+// ===== JS: Jellyfish Search Optimizer (2020) =====
+
+///|
+pub struct JSConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_js_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> JSConfig {
+  JSConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Jellyfish Search Optimizer (2020), mechanism-faithful variant of jellyfish
+/// drifting/following.  A jellyfish factor jf = e^{-t/2500} shrinks the steps,
+/// and a *time control* criterion tc = |(1 - t/T)(2 r - 1)| (re-sampled every
+/// move, hence non-monotonic) switches between two modes:
+///   * ocean current (tc >= 0.35) - drift toward the global best with a
+///     differential kick taken from two random peers,
+///     X_i <- X_i + r2 (X_best - X_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range jf 0.11;
+///   * swarm (tc < 0.35) - passive motion (r1 < 0.5) jitters around itself to
+///     keep the bloom spread out, X_i <- X_i + r2 (2 r3 - 1) range jf 0.06,
+///     otherwise active motion contracts toward the global best,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range jf 0.05.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn jellyfish_search_optimizer(
+  config : JSConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let max_evals_d = max_evals.to_double()
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // jellyfish factor jf shrinks 1 -> 0 as evaluations are spent
+      let jf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      // time control criterion |(1 - t/T)(2r-1)|, re-sampled for every move
+      let tc_raw = (1.0 - evaluations.to_double() / max_evals_d) *
+        (2.0 * RNG::next(current_rng) - 1.0)
+      let tc = if tc_raw < 0.0 { -tc_raw } else { tc_raw }
+      let cand : Array[Double] = []
+      if tc >= 0.35 {
+        // ocean current: drift toward the global best + differential kick
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * jf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < 0.5 {
+        // passive motion: fine jitter around itself, keeps the bloom spread
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * jf * 0.06
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // active motion: contract toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * jf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

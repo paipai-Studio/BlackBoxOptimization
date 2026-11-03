@@ -1880,6 +1880,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       cockroach_swarm_optimization(make_crso_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "JS",
+    run: (e, d, b, r, f) => {
+      jellyfish_search_optimizer(make_js_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
