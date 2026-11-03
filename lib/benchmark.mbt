@@ -1962,6 +1962,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       wolf_pack_algorithm(make_wpa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "Racc",
+    run: (e, d, b, r, f) => {
+      raccoon_optimization(make_racc_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
