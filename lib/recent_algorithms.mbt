@@ -25912,3 +25912,154 @@ pub fn atom_search_optimization(
     evaluations,
   }
 }
+
+// ===== BCMO: Balancing Composite Motion Optimization (2020) =====
+
+///|
+pub struct BCMOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bcmo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BCMOConfig {
+  BCMOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Balancing Composite Motion Optimization (2020), mechanism-faithful variant
+/// built on a per-member momentum (its previous displacement) blended with a
+/// motion term.  A balance factor bcf = e^{-t/2500} decays as evaluations are
+/// spent; the momentum coefficient is 0.35.
+///   * individual composite motion (r1 < 0.33 bcf) - momentum + a differential
+///     exploration term,
+///     X_i <- X_i + 0.35 D_i + r2 (X_p - X_q) + r3 (2 r4 - 1) range bcf 0.10;
+///   * social composite motion (r1 < 0.33 bcf + 0.40) - momentum toward the
+///     global best,
+///     X_i <- X_i + 0.35 D_i + r2 (X_best - X_i) + r3 (2 r4 - 1) range bcf^2;
+///   * balance refine (rest) - fine local step.
+/// After each move the member's momentum D_i is set to the realised
+/// displacement; the global best is tracked separately.
+pub fn balancing_composite_motion_optimization(
+  config : BCMOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let disp : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  let zero : Array[Double] = []
+  for _d in 0..<dim {
+    zero.push(0.0)
+  }
+  disp.push(zero)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    let z : Array[Double] = []
+    for _d in 0..<dim {
+      z.push(0.0)
+    }
+    disp.push(z)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let di = disp[i]
+      // balance factor bcf decays 1 -> 0 as evaluations are spent
+      let bcf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < bcf * 0.33 {
+        // individual composite motion: momentum + differential exploration
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            0.35 * di[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * bcf * 0.10
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < bcf * 0.33 + 0.40 {
+        // social composite motion: momentum toward the global best
+        for d in 0..<dim {
+          let nv = xi[d] +
+            0.35 * di[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * bcf * bcf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // balance refine: fine local step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * bcf * bcf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      for d in 0..<dim {
+        disp[i][d] = cand[d] - xi[d]
+      }
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

@@ -1778,6 +1778,14 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       atom_search_optimization(make_aso_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "BCMO",
+    run: (e, d, b, r, f) => {
+      balancing_composite_motion_optimization(
+        make_bcmo_config(e, d, b, 25), f, r,
+      )
+    },
+  })
   entries
 }
 
