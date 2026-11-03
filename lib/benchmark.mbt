@@ -1700,6 +1700,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       lightning_search_algorithm(make_lsa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SS",
+    run: (e, d, b, r, f) => {
+      scatter_search(make_ss_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
