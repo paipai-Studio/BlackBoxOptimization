@@ -1608,6 +1608,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       exchange_market_algorithm(make_ema_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "WCO",
+    run: (e, d, b, r, f) => {
+      world_cup_optimization(make_wco_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

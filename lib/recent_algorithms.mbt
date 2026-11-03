@@ -22231,3 +22231,131 @@ pub fn exchange_market_algorithm(
     evaluations,
   }
 }
+
+// ===== WCO: World Cup Optimization (2016) =====
+
+///|
+pub struct WCOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_wco_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> WCOConfig {
+  WCOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// World Cup Optimization (Razmjooy et al. 2016), mechanism-faithful variant
+/// of a world cup tournament.  A tournament factor cuf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * match   (r1 < 0.37 cuf) - group-match play, differential move,
+///     X_i <- X_i + r2 (X_team1 - X_team2) + r3 (2 r4 - 1) range cuf 0.11;
+///   * train   (r1 < 0.37 cuf + 0.33) - fine training step, cuf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range cuf^2;
+///   * advance (rest) - advance toward the champion (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range cuf 0.05.
+/// Teams move unconditionally while the champion (global best) is tracked
+/// separately (this keeps the tournament from collapsing prematurely).
+pub fn world_cup_optimization(
+  config : WCOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // tournament factor cuf decays 1 -> 0 as evaluations are spent
+      let cuf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < cuf * 0.37 {
+        // match: group-match play, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * cuf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < cuf * 0.37 + 0.33 {
+        // train: fine training step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * cuf * cuf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // advance: advance toward the champion (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * cuf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
