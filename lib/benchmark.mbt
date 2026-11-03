@@ -1620,6 +1620,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       artificial_electric_field_algorithm(make_aefa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "OIO",
+    run: (e, d, b, r, f) => {
+      optics_inspired_optimization(make_oio_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
