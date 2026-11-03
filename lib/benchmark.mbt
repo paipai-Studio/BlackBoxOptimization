@@ -1596,6 +1596,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       particle_collision_algorithm(make_pca_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "IMO",
+    run: (e, d, b, r, f) => {
+      ions_motion_optimization(make_imo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
