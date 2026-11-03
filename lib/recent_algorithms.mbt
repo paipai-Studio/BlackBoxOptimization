@@ -27042,3 +27042,171 @@ pub fn puma_optimizer(
     evaluations,
   }
 }
+
+// ===== StMO: Starling Murmuration Optimizer (2022) =====
+
+///|
+pub struct StMOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_stmo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> StMOConfig {
+  StMOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Starling Murmuration Optimizer (2022), mechanism-faithful variant of
+/// starling flocking.  A starling factor stmf = e^{-t/2500} decays as
+/// evaluations are spent, and the flock aligns to a *fitness-weighted
+/// centroid* X_wc = sum_i w_i X_i / sum_i w_i with w_i = 1/(1+rel_fit_i) in
+/// [0.5, 1] (better starlings pull the centroid harder):
+///   * flock alignment (r1 < 0.30 stmf) - drift toward the weighted centroid
+///     with a differential kick taken from two random peers,
+///     X_i <- X_i + r2 (X_wc - X_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range stmf 0.11;
+///   * wing jitter (r1 < 0.30 stmf + 0.44) - fine step that keeps the flock
+///     spread out, X_i <- X_i + r2 (2 r3 - 1) range stmf^2;
+///   * settle (rest) - contract toward the global best,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range stmf 0.06.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn starling_murmuration_optimizer(
+  config : StMOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // fitness-weighted centroid of the flock
+    let mut fit_min = fits[0]
+    let mut fit_max = fits[0]
+    for k in 1..<pop_size {
+      if fits[k] < fit_min {
+        fit_min = fits[k]
+      }
+      if fits[k] > fit_max {
+        fit_max = fits[k]
+      }
+    }
+    let fit_span = if fit_max - fit_min < 1.0e-12 {
+      1.0e-12
+    } else {
+      fit_max - fit_min
+    }
+    let weights : Array[Double] = []
+    let mut wsum = 0.0
+    for i in 0..<pop_size {
+      let w = 1.0 / (1.0 + (fits[i] - fit_min) / fit_span)
+      weights.push(w)
+      wsum = wsum + w
+    }
+    let wc : Array[Double] = []
+    for d in 0..<dim {
+      let mut acc = 0.0
+      for i in 0..<pop_size {
+        acc = acc + weights[i] * pop[i][d]
+      }
+      wc.push(acc / wsum)
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // starling factor stmf decays 1 -> 0 as evaluations are spent
+      let stmf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < stmf * 0.30 {
+        // flock alignment: drift toward the weighted centroid + differential kick
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (wc[d] - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * stmf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < stmf * 0.30 + 0.44 {
+        // wing jitter: fine step that keeps the flock spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * stmf * stmf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // settle: contract toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * stmf * 0.06
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
