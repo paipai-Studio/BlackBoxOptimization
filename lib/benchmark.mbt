@@ -1518,6 +1518,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       coral_reefs_optimization(make_cro_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "AAA",
+    run: (e, d, b, r, f) => {
+      artificial_algae_algorithm(make_aaa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
