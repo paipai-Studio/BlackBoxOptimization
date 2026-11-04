@@ -37064,3 +37064,286 @@ pub fn one_plus_one_evolution_strategy(
     evaluations,
   }
 }
+
+// ===== PRAXIS: principal axis search (1973) =====
+
+///|
+pub struct PraxisConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_praxis_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> PraxisConfig {
+  PraxisConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Principal axis of the weighted direction set, by power iteration on
+/// sum_i step_i^2 v_i v_i^T.  This is the distinguishing ingredient of
+/// PRAXIS: the direction set is periodically re-oriented toward its own
+/// principal axis, unlike Powell's method which only adds the total
+/// displacement direction.
+fn praxis_principal_axis(
+  dirs : Array[Array[Double]],
+  steps : Array[Double],
+  dim : Int32,
+  rng : RNG,
+) -> Array[Double] {
+  let u : Array[Double] = []
+  for _d in 0..<dim {
+    u.push(2.0 * RNG::next(rng) - 1.0)
+  }
+  let mut nrm0 = 0.0
+  for d in 0..<dim {
+    nrm0 = nrm0 + u[d] * u[d]
+  }
+  let n0 = nrm0.sqrt()
+  if n0 > 1.0e-12 {
+    for d in 0..<dim {
+      u[d] = u[d] / n0
+    }
+  }
+  for _it in 0..<8 {
+    let acc : Array[Double] = []
+    for _d in 0..<dim {
+      acc.push(0.0)
+    }
+    for i in 0..<dim {
+      let vi = dirs[i]
+      let mut dot = 0.0
+      for d in 0..<dim {
+        dot = dot + vi[d] * u[d]
+      }
+      let w = steps[i] * steps[i] * dot
+      for d in 0..<dim {
+        acc[d] = acc[d] + w * vi[d]
+      }
+    }
+    let mut nrm = 0.0
+    for d in 0..<dim {
+      nrm = nrm + acc[d] * acc[d]
+    }
+    let nn = nrm.sqrt()
+    if nn < 1.0e-12 {
+      break
+    }
+    for d in 0..<dim {
+      u[d] = acc[d] / nn
+    }
+  }
+  u
+}
+
+///|
+/// PRAXIS (Brent 1973): a derivative-free direction-set method. Each sweep
+/// probes both sides of every stored direction with an adaptive step and a
+/// parabolic line minimization along the direction. After a sweep the direction
+/// set is re-oriented: its principal axis is computed by power iteration on the
+/// step-weighted direction covariance and replaces the least productive
+/// direction, while the total displacement of the sweep becomes a new direction.
+/// This periodic principal-axis re-orientation is the defining mechanism,
+/// distinct from Powell's conjugate directions (no eigen-analysis) and from
+/// Nelder-Mead's simplex geometry. A single prefix-stable trajectory is used
+/// (no restarts), so a larger budget strictly continues the same run; a
+/// long-stall jump toward the incumbent best and historical-best tracking
+/// complete the method. population_size is accepted for a uniform config
+/// interface but not used.
+pub fn praxis_optimizer(
+  config : PraxisConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let restarts = 1
+  let seg_budget = max_evals
+
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _r in 0..<restarts {
+    if evaluations >= max_evals {
+      break
+    }
+    let mut x = random_solution(dim, bounds, current_rng)
+    let mut fx = evaluate(f, x)
+    evaluations = evaluations + 1
+    if !have_best || fx < best_val {
+      best_val = fx
+      best_pos = x
+      have_best = true
+    }
+    let dirs : Array[Array[Double]] = []
+    for i in 0..<dim {
+      let v : Array[Double] = []
+      for d in 0..<dim {
+        v.push(if d == i { 1.0 } else { 0.0 })
+      }
+      dirs.push(v)
+    }
+    let steps : Array[Double] = []
+    for _d in 0..<dim {
+      steps.push(span * 0.12)
+    }
+    let mut seg_used = 1
+    let mut stall = 0
+    let mut sweep = 0
+    while seg_used < seg_budget && evaluations < max_evals {
+      let x_start : Array[Double] = []
+      for d in 0..<dim {
+        x_start.push(x[d])
+      }
+      let f_start = fx
+      for i in 0..<dim {
+        if evaluations >= max_evals {
+          break
+        }
+        let si = steps[i]
+        let v = dirs[i]
+        let plus : Array[Double] = []
+        let minus : Array[Double] = []
+        for d in 0..<dim {
+          plus.push(max(bounds.min, min(bounds.max, x[d] + si * v[d])))
+          minus.push(max(bounds.min, min(bounds.max, x[d] - si * v[d])))
+        }
+        let fp = evaluate(f, plus)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        let mut fm = fp
+        if evaluations < max_evals {
+          fm = evaluate(f, minus)
+          evaluations = evaluations + 1
+          seg_used = seg_used + 1
+        }
+        let use_plus = fp <= fm
+        let fbest = if use_plus { fp } else { fm }
+        if fbest < fx {
+          // parabolic line minimization along this direction
+          let denom = 2.0 * (fm - 2.0 * fx + fp)
+          let mut t = if use_plus { si } else { -si }
+          if denom > 1.0e-12 {
+            let tv = si * (fm - fp) / denom
+            t = max(-2.0 * si, min(2.0 * si, tv))
+          }
+          let mut best_x = if use_plus { plus } else { minus }
+          let mut best_f = fbest
+          if evaluations < max_evals && t < 1.8 * si && t > -1.8 * si {
+            let cand : Array[Double] = []
+            for d in 0..<dim {
+              cand.push(max(bounds.min, min(bounds.max, x[d] + t * v[d])))
+            }
+            let fv = evaluate(f, cand)
+            evaluations = evaluations + 1
+            seg_used = seg_used + 1
+            if fv < best_f {
+              best_f = fv
+              best_x = cand
+            }
+          }
+          x = best_x
+          fx = best_f
+          steps[i] = min(si * 1.5, span * 0.5)
+          stall = 0
+          if best_f < best_val {
+            best_val = best_f
+            best_pos = best_x
+          }
+        } else {
+          steps[i] = max(si * 0.6, span * 1.0e-5)
+          stall = stall + 1
+        }
+      }
+      if evaluations >= max_evals {
+        break
+      }
+      let p = praxis_principal_axis(dirs, steps, dim, current_rng)
+      let mut imin = 0
+      for i in 1..<dim {
+        if steps[i] < steps[imin] {
+          imin = i
+        }
+      }
+      dirs[imin] = p
+      steps[imin] = span * 0.04
+      let disp : Array[Double] = []
+      let mut dsq = 0.0
+      for d in 0..<dim {
+        let delta = x[d] - x_start[d]
+        disp.push(delta)
+        dsq = dsq + delta * delta
+      }
+      let dn = dsq.sqrt()
+      if dn > span * 1.0e-6 && dim > 1 && fx < f_start {
+        let dn_safe = if dn > 1.0e-12 { dn } else { 1.0 }
+        for d in 0..<dim {
+          disp[d] = disp[d] / dn_safe
+        }
+        let mut imin2 = if imin == 0 { 1 } else { 0 }
+        for i in 0..<dim {
+          if i != imin && steps[i] < steps[imin2] {
+            imin2 = i
+          }
+        }
+        dirs[imin2] = disp
+        steps[imin2] = max(span * 1.0e-3, min(dn, span * 0.3))
+      }
+      if stall >= 30 && evaluations < max_evals {
+        // whole sweep failed: jump near the incumbent best
+        let jump : Array[Double] = []
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05
+          jump.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fj = evaluate(f, jump)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        x = jump
+        fx = fj
+        for i in 0..<dim {
+          steps[i] = span * 0.03
+        }
+        stall = 0
+        if fj < best_val {
+          best_val = fj
+          best_pos = jump
+        }
+      }
+      sweep = sweep + 1
+      if sweep >= 18 && evaluations < max_evals {
+        // periodic coordinate re-basing keeps refinement directions available
+        for i in 0..<dim {
+          for d in 0..<dim {
+            dirs[i][d] = if d == i { 1.0 } else { 0.0 }
+          }
+          steps[i] = span * 0.012
+        }
+        sweep = 0
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

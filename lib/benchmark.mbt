@@ -2212,6 +2212,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       )
     },
   })
+  entries.push(AlgoEntry::{
+    name: "PRAXIS",
+    run: (e, d, b, r, f) => {
+      praxis_optimizer(make_praxis_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

@@ -1,10 +1,10 @@
 # BlackBoxOptimization
 
-基于 MoonBit 实现的黑盒优化算法框架，支持 327 种经典优化算法，提供统一的接口和基准测试框架。
+基于 MoonBit 实现的黑盒优化算法框架，支持 328 种经典优化算法，提供统一的接口和基准测试框架。
 
 ## 算法分类
 
-本框架实现了 **327 种**黑盒优化算法，按设计灵感和机制分为以下类别：
+本框架实现了 **328 种**黑盒优化算法，按设计灵感和机制分为以下类别：
 
 ### 🔍 单点搜索算法
 最简单的优化策略，从单个初始解出发，通过迭代改进逐步逼近最优值。
@@ -380,12 +380,13 @@
 | 网格自适应直接搜索 | MADS | 动态网格上的轮询（每维 ±坐标方向 + 随机单位方向），成功扩张网格/失败减半，网格耗尽时在最优邻域重启 (2006) |
 | 二次近似信赖域优化 | NEWUOA | 逐维中心差分估计梯度与对角二阶导，信赖域内牛顿步，半径按成败扩张/收缩 + 模型坍塌时最优邻域重启 (2004) |
 | 多层级坐标搜索 | MCS | 维护盒子列表（基点/逐步长/层级），每轮分裂层级最低的盒子：沿坐标 ± 步长采样取优、步长减半、另一侧保留为兄弟盒子；层级耗尽时随机重启 (1999) |
+| 主成分方向搜索 | PRAXIS | 每轮沿各方向做抛物线线搜索，扫掠后以方向集的加权主成分轴置换最不产出的方向，位移方向作为新方向，周期性重置坐标基 (1973) |
 
 | 算法 | 关键参数 | 推荐值 |
 |------|----------|--------|
 | Nelder-Mead | `reflection_coeff` (α), `expansion_coeff` (γ), `contraction_coeff` (ρ), `shrink_coeff` (σ) | 1.0, 2.0, 0.5, 0.5 |
 | Hooke-Jeeves | `initial_step`, `step_reduction`, `min_step` | 0.5, 0.5, 1e-6 |
-| Powell / Rosenbrock / CRS / DIRECT / COBYLA / MADS / NEWUOA / MCS | 仅需 `population_size` | 25 |
+| Powell / Rosenbrock / CRS / DIRECT / COBYLA / MADS / NEWUOA / MCS / PRAXIS | 仅需 `population_size` | 25 |
 
 ### 🧮 进化策略
 基于概率分布的参数自适应优化，适合复杂病态问题。
@@ -559,7 +560,7 @@ moon run main
 ### 运行测试
 
 ```bash
-# 运行所有测试（676 个测试用例）
+# 运行所有测试（678 个测试用例）
 moon test
 
 # 代码检查
@@ -1020,7 +1021,7 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | **🔧 局部搜索** | 禁忌搜索、引导局部搜索、大洪水、变邻域、阈值接受 | 强化局部开发，避免陷入局部最优 |
 | **🧬 进化算法** | DE、GA、jDE、SHADE、LSHADE、JADE、SaDE、Memetic、CLONALG、OAIN、ICA、BBO、BSA | 基于种群进化，鲁棒性好 |
 | **🐝 群体智能** | PSO、萤火虫、蚁群、蜂群、灰狼、鲸群、蝙蝠、和声、麻雀搜索、哈里斯鹰、GOA、SOA、CSO、GTO、SMA、AO、ChOA、DO、ZOA、CPSO、LPSO、QPSO、UPSO、ACOR、COOT、DOA、STOA、GKSO、FLA、HO、NMRA、FFO、EPO、CPO、MTBO、CryStAl、NOA、ESOA、MOA、AOS、MA、SSO、SLnO、FOA、SFO、NNA、PBO、FSS、CFO、CGO、CDO、ILS、SCE、GRASP、BO、FSA、SMO、HLO、FDA、CRO、AAA、VSA、VPL、WEO、SNS、TCO、RO、GbSA、BA、CO、CSS、MBA、PCA、IMO、EMA、WCO、AEFA、OIO、LAPO、FGBO、EA、LAHC、HuS、RRT、NRO、HTS、PGO、IWD、RFD、LSA、SS、OBA、APO、HBO、SAO、BRO、EFO、GBMO、DSA、GSK、ALNS、SGO、ASO、BCMO、MKE、RFO、SAR、ChSA、RDA、SqSA、Puma、StMO、SFOA、ABO、Gannet、Narwhal、Serval、ChSO、PR、CrSO、JS、WSA、SeHO、WBO、OWL、RRO、SaFO、GPC、SSD、FDO、CFA、OPA、APuf、WPA、Racc、Monkey、BSwA、TGA、PPA、HBMO、Crayfish、QSA、Starfish、TBO、Lyrebird、SEOA、GFO、DEO、ManSA、EWA、GrSA、FrOA、ChRO、SPBO、CLPSO、ExtO、SOMA、SDS 等 | 基于群体行为，全局搜索能力强 |
-| **📐 确定性直接搜索** | Nelder-Mead、Hooke-Jeeves、Powell、Rosenbrock、CRS、DIRECT、BFGS、COBYLA、MADS、NEWUOA、MCS | 无需梯度（或数值梯度近似），适合不可导函数 |
+| **📐 确定性直接搜索** | Nelder-Mead、Hooke-Jeeves、Powell、Rosenbrock、CRS、DIRECT、BFGS、COBYLA、MADS、NEWUOA、MCS、PRAXIS | 无需梯度（或数值梯度近似），适合不可导函数 |
 | **🧮 进化策略** | CMA-ES、ES、xNES、1+1ES | 协方差/步长自适应，适合病态问题 |
 | **📊 估计分布** | CEM、SFS、PBIL、UMDA、cGA、NS | 基于概率分布估计，适合连续优化 |
 | **⚛️ 物理启发** | GSA、MVO、EO、WDO、WCA、EM、WWO、TEO、RIME、BBBC、BH、CBO、HGSO | 基于物理规律，自适应搜索 |
