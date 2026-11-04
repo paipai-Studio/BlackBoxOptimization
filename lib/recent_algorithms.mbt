@@ -32106,3 +32106,141 @@ pub fn lyrebird_optimization(
     evaluations,
   }
 }
+
+// ===== Social Emotional Optimization Algorithm (2010) =====
+
+///|
+pub struct SEOAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_seoa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SEOAConfig {
+  SEOAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Social Emotional Optimization Algorithm (2010).  Every individual keeps an
+/// emotional state emotion_i in [0.05, 1] that rises after a successful move
+/// and falls after a failed one, while the social factor esf = e^{-t/2500}
+/// shrinks all strides:
+///   * aggressive - with probability emotion_i the individual attacks toward
+///     the global best, with a differential kick and a jitter;
+///   * defensive - otherwise it retreats from a random peer and jitters, which
+///     keeps the population diverse and lets anxious individuals explore.
+/// Confident (successful) individuals thus exploit more, while anxious ones
+/// keep exploring.
+pub fn social_emotional_optimization(
+  config : SEOAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  // initial emotional states are spread in [0.3, 0.7)
+  let emotion : Array[Double] = []
+  for _i in 0..<pop_size {
+    emotion.push(0.3 + 0.4 * RNG::next(current_rng))
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let old_fit = fits[i]
+      let esf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < emotion[i] {
+        // aggressive behavior: attack toward the global best
+        let j = (r2 * pop_size.to_double()).to_int() % pop_size
+        let k = (r3 * pop_size.to_double()).to_int() % pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            1.6 * esf * (best_pos[d] - xi[d]) +
+            0.45 * r2 * esf * (xj[d] - xk[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05 * esf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // defensive behavior: retreat from a random peer
+        let j = (r2 * pop_size.to_double()).to_int() % pop_size
+        let xj = pop[j]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            0.6 * r2 * esf * (xi[d] - xj[d]) +
+            0.2 * esf * (best_pos[d] - xi[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.06 * esf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      // emotional update from the success or failure of the move
+      if fv < old_fit {
+        emotion[i] = min(1.0, emotion[i] + 0.3)
+      } else {
+        emotion[i] = max(0.05, emotion[i] - 0.2)
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

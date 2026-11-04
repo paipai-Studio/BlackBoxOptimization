@@ -2028,6 +2028,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       lyrebird_optimization(make_lyrebird_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SEOA",
+    run: (e, d, b, r, f) => {
+      social_emotional_optimization(make_seoa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
