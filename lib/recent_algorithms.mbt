@@ -34521,3 +34521,154 @@ pub fn self_organizing_migration(
     evaluations,
   }
 }
+
+// ===== SDS: Stochastic Diffusion Search (1989) =====
+
+///|
+pub struct SdsConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_sds_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SdsConfig {
+  SdsConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Stochastic Diffusion Search (Bishop 1989). Agents are split
+/// asynchronously each generation: a hypothesis-testing agent samples a
+/// candidate around its own hypothesis and only keeps it when it improves
+/// (a failed test leaves the agent exactly where it is), while the remaining
+/// agents communicate - they copy a better agent's whole hypothesis into
+/// their position with a small perturbation, diffusing successful hypotheses
+/// through the population. A low-probability hypothesis reset re-samples the
+/// whole space so that the population cannot lock onto one basin. The
+/// historical best is tracked separately.
+pub fn stochastic_diffusion_search(
+  config : SdsConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let pop_size = if config.population_size <= 0 {
+    1
+  } else {
+    config.population_size
+  }
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _i in 0..<pop_size {
+    let sol = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, sol)
+    evaluations = evaluations + 1
+    pop.push(sol)
+    fits.push(v)
+    if !have_best || v < best_val {
+      best_val = v
+      best_pos = sol
+      have_best = true
+    }
+  }
+
+  while evaluations < max_evals {
+    let sof = @math.exp(-evaluations.to_double() / 2500.0)
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let r1 = RNG::next(current_rng)
+      if r1 < 0.62 {
+        // hypothesis testing: a failed test leaves the agent in place
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.16 * sof
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        if fv < fits[i] {
+          pop[i] = cand
+          fits[i] = fv
+        }
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      } else if r1 < 0.90 {
+        // communication: copy a better agent's whole hypothesis, then perturb
+        let j = (
+            (RNG::next(current_rng) * pop_size.to_double()).to_int() + i + 1
+          ) %
+          pop_size
+        let xj = pop[j]
+        let cand : Array[Double] = []
+        if fits[j] < fits[i] {
+          for d in 0..<dim {
+            let nv = xj[d] +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.025 * sof
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        } else {
+          // no better hypothesis to spread: fine jitter keeps diversity alive
+          for d in 0..<dim {
+            let nv = xi[d] +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.09 * sof * sof
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        if fv < fits[i] {
+          pop[i] = cand
+          fits[i] = fv
+        }
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      } else {
+        // hypothesis reset: re-sample the entire search space
+        let cand = random_solution(dim, bounds, current_rng)
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        pop[i] = cand
+        fits[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

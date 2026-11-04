@@ -2116,6 +2116,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       self_organizing_migration(make_soma_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SDS",
+    run: (e, d, b, r, f) => {
+      stochastic_diffusion_search(make_sds_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
