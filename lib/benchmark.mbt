@@ -1998,6 +1998,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       honey_bee_mating_optimization(make_hbmo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "Crayfish",
+    run: (e, d, b, r, f) => {
+      crayfish_optimization(make_crayfish_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

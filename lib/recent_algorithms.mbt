@@ -31375,3 +31375,150 @@ pub fn honey_bee_mating_optimization(
     evaluations,
   }
 }
+
+// ===== Crayfish Optimization Algorithm (2023) =====
+
+///|
+pub struct CrayfishConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_crayfish_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CrayfishConfig {
+  CrayfishConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Crayfish Optimization Algorithm (2023).  The pond temperature rises from
+/// 20 to 30 degrees as evaluations are spent, which raises the chance of a
+/// summer resort, while the crayfish factor cof = e^{-t/2500} shrinks all
+/// strides:
+///   * foraging - move toward the better of two randomly picked crayfish,
+///     plus a differential kick and a jitter;
+///   * summer resort - contract toward the cave, i.e. the global best, with a
+///     fine jitter that tightens the search;
+///   * competition - the winner keeps refining near the cave while the loser
+///     is pushed away from its rival to stay diverse.
+pub fn crayfish_optimization(
+  config : CrayfishConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let max_evals_d = max_evals.to_double()
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // pond temperature rises 20 -> 30 degrees
+    let temp = 20.0 + 10.0 * evaluations.to_double() / max_evals_d
+    let p_resort = 0.3 + 0.2 * (temp - 20.0) / 10.0
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let cof = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.45 {
+        // foraging: follow the better of two random crayfish
+        let j = (r2 * pop_size.to_double()).to_int() % pop_size
+        let k = (r3 * pop_size.to_double()).to_int() % pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        let xfood = if fits[j] <= fits[k] { xj } else { xk }
+        for d in 0..<dim {
+          let nv = xi[d] +
+            1.8 * cof * (xfood[d] - xi[d]) +
+            0.4 * r3 * cof * (xj[d] - xk[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.012 * cof
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < 0.45 + p_resort {
+        // summer resort: contract toward the cave (global best)
+        for d in 0..<dim {
+          let nv = xi[d] +
+            1.8 * cof * (best_pos[d] - xi[d]) +
+            (2.0 * r2 - 1.0) * span * 0.010 * cof
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // competition: winner refines, loser retreats from its rival
+        let j = (r2 * pop_size.to_double()).to_int() % pop_size
+        let xj = pop[j]
+        if fits[i] <= fits[j] {
+          for d in 0..<dim {
+            let nv = xi[d] +
+              0.8 * cof * (best_pos[d] - xi[d]) +
+              (2.0 * r3 - 1.0) * span * 0.010 * cof
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        } else {
+          for d in 0..<dim {
+            let nv = xi[d] +
+              0.4 * cof * (best_pos[d] - xi[d]) -
+              0.3 * r2 * cof * (xj[d] - xi[d]) +
+              (2.0 * r3 - 1.0) * span * 0.010 * cof
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
