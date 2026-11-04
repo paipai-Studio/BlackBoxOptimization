@@ -33489,3 +33489,137 @@ pub fn chemical_reaction_optimization(
     evaluations,
   }
 }
+
+// ===== SPBO: Student Psychological-Based Optimization (2021) =====
+
+///|
+pub struct StudentPsychConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_spbo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> StudentPsychConfig {
+  StudentPsychConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Student Psychological-Based Optimization (Das & Sultana 2021): every
+/// generation each student draws a psychological type at random - a draw
+/// independent of fitness, unlike rank-based role assignment.  Hard
+/// workers study at full speed toward the top student, ordinary students
+/// absorb only a random fraction of the top student's knowledge (each
+/// learns a different amount), and playful students just fool around with
+/// wide random walks.  The school factor spf = e^{-t/2500} shrinks the
+/// study steps.
+pub fn student_psychological_optimization(
+  config : StudentPsychConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let spf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.42 {
+        // hard working student: full-speed study toward the top student
+        let p_i = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let q_i = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[p_i]
+        let xq = pop[q_i]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            0.9 * spf * (best_pos[d] - xi[d]) +
+            0.3 * (xp[d] - xq[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.09 * spf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < 0.81 {
+        // ordinary student: absorb only a random fraction of the top
+        // student's knowledge, plus partial peer learning
+        let w = RNG::next(current_rng) * 0.5
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let wj = RNG::next(current_rng) * 0.3
+        for d in 0..<dim {
+          let nv = xi[d] +
+            w * (best_pos[d] - xi[d]) +
+            wj * (xj[d] - xi[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.09 * spf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // playful student: just fooling around with wide random walks
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.30 * spf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

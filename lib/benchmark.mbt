@@ -2082,6 +2082,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       chemical_reaction_optimization(make_chro_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SPBO",
+    run: (e, d, b, r, f) => {
+      student_psychological_optimization(make_spbo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
