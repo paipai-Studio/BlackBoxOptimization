@@ -2218,6 +2218,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       praxis_optimizer(make_praxis_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "BOBYQA",
+    run: (e, d, b, r, f) => {
+      bobyqa_optimizer(make_bobyqa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

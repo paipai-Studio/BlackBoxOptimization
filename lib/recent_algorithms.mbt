@@ -37347,3 +37347,446 @@ pub fn praxis_optimizer(
     evaluations,
   }
 }
+
+// ===== BOBYQA: bounded quadratic approximation (2009) =====
+
+///|
+pub struct BobyqaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bobyqa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BobyqaConfig {
+  BobyqaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Solve (hess + ridge*I) d = -grad with Gaussian elimination and partial
+/// pivoting. Returns a zero vector when the matrix is numerically singular.
+fn bobyqa_solve(
+  hess : Array[Double],
+  grad : Array[Double],
+  n : Int32,
+  ridge : Double,
+) -> Array[Double] {
+  let w = n + 1
+  let m : Array[Double] = []
+  for _i in 0..<(n * w) {
+    m.push(0.0)
+  }
+  for i in 0..<n {
+    for j in 0..<n {
+      let add = if i == j { ridge } else { 0.0 }
+      m[i * w + j] = hess[i * n + j] + add
+    }
+    m[i * w + n] = -grad[i]
+  }
+  let mut ok = true
+  for col in 0..<n {
+    let mut piv = col
+    let mut best = 0.0
+    for r in col..<n {
+      let a = m[r * w + col]
+      let aabs = if a < 0.0 { -a } else { a }
+      if aabs > best {
+        best = aabs
+        piv = r
+      }
+    }
+    if best < 1.0e-12 {
+      ok = false
+      break
+    }
+    if piv != col {
+      for j in 0..<w {
+        let tmp = m[col * w + j]
+        m[col * w + j] = m[piv * w + j]
+        m[piv * w + j] = tmp
+      }
+    }
+    let diag = m[col * w + col]
+    for r in 0..<n {
+      if r != col {
+        let factor = m[r * w + col] / diag
+        if factor != 0.0 {
+          for j in col..<w {
+            m[r * w + j] = m[r * w + j] - factor * m[col * w + j]
+          }
+        }
+      }
+    }
+  }
+  let sol : Array[Double] = []
+  for _i in 0..<n {
+    sol.push(0.0)
+  }
+  if ok {
+    for i in 0..<n {
+      sol[i] = m[i * w + n] / m[i * w + i]
+    }
+  }
+  sol
+}
+
+///|
+/// Build the quadratic model around x: central-difference gradient and
+/// diagonal second derivatives (2 evaluations per dimension) plus the
+/// off-diagonal second derivatives from four corner evaluations per pair.
+/// Returns the number of evaluations used, respecting the global budget.
+fn bobyqa_build_model(
+  f : (Array[Double]) -> Double,
+  bounds : Bounds,
+  dim : Int32,
+  x : Array[Double],
+  fx : Double,
+  h : Double,
+  max_evals : Int32,
+  evaluations : Int32,
+  grad : Array[Double],
+  hess : Array[Double],
+) -> Int32 {
+  let mut used = 0
+  for d in 0..<dim {
+    grad[d] = 0.0
+  }
+  for i in 0..<(dim * dim) {
+    hess[i] = 0.0
+  }
+  let mut diag_done = 0
+  for d in 0..<dim {
+    if evaluations + used + 2 > max_evals {
+      break
+    }
+    let xp : Array[Double] = []
+    let xm : Array[Double] = []
+    for k in 0..<dim {
+      let v = x[k]
+      if k == d {
+        xp.push(max(bounds.min, min(bounds.max, v + h)))
+        xm.push(max(bounds.min, min(bounds.max, v - h)))
+      } else {
+        xp.push(v)
+        xm.push(v)
+      }
+    }
+    let fp = f(xp)
+    let fm = f(xm)
+    used = used + 2
+    let dd = xp[d] - xm[d]
+    if dd > 1.0e-12 {
+      grad[d] = (fp - fm) / dd
+      hess[d * dim + d] = 2.0 * (fp - 2.0 * fx + fm) / (dd * dd)
+    }
+    diag_done = diag_done + 1
+  }
+  if diag_done < dim {
+    return used
+  }
+  for i in 0..<dim {
+    for j in 0..<dim {
+      if j > i {
+        if evaluations + used + 4 > max_evals {
+          return used
+        }
+        let xpp : Array[Double] = []
+        let xpm : Array[Double] = []
+        let xmp : Array[Double] = []
+        let xmm : Array[Double] = []
+        for k in 0..<dim {
+          let v = x[k]
+          let pi = if k == i {
+            max(bounds.min, min(bounds.max, v + h))
+          } else {
+            v
+          }
+          let mi = if k == i {
+            max(bounds.min, min(bounds.max, v - h))
+          } else {
+            v
+          }
+          let pj = if k == j {
+            max(bounds.min, min(bounds.max, v + h))
+          } else {
+            v
+          }
+          let mj = if k == j {
+            max(bounds.min, min(bounds.max, v - h))
+          } else {
+            v
+          }
+          if k == i {
+            xpp.push(pi)
+            xpm.push(pi)
+            xmp.push(mi)
+            xmm.push(mi)
+          } else if k == j {
+            xpp.push(pj)
+            xpm.push(mj)
+            xmp.push(pj)
+            xmm.push(mj)
+          } else {
+            xpp.push(v)
+            xpm.push(v)
+            xmp.push(v)
+            xmm.push(v)
+          }
+        }
+        let fpp = f(xpp)
+        let fpm = f(xpm)
+        let fmp = f(xmp)
+        let fmm = f(xmm)
+        used = used + 4
+        let di = xpp[i] - xmp[i]
+        let dj = xpp[j] - xpm[j]
+        if di > 1.0e-12 && dj > 1.0e-12 {
+          let v = (fpp - fpm - fmp + fmm) / (di * dj)
+          hess[i * dim + j] = v
+          hess[j * dim + i] = v
+        }
+      }
+    }
+  }
+  used
+}
+
+///|
+/// BOBYQA-style bound-constrained quadratic approximation (Powell 2009). A
+/// full quadratic model is assembled from central differences: the gradient and
+/// the diagonal second derivatives use two evaluations per dimension, and each
+/// off-diagonal second derivative uses four corner evaluations. A Newton step
+/// from that model is clipped to a trust radius and projected onto the bounds;
+/// the radius expands on success and contracts on failure, the model is rebuilt
+/// periodically, and a repeatedly failed model triggers a jump near the
+/// incumbent best. Unlike NEWUOA (diagonal curvature only) this captures the
+/// cross-curvature of the objective, which is what BOBYQA adds; unlike BFGS it
+/// needs no gradient function and uses a trust region instead of a line search.
+/// The budget is split among random restarts and the historical best is tracked
+/// separately. population_size is accepted for a uniform config interface but
+/// not used.
+pub fn bobyqa_optimizer(
+  config : BobyqaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let restarts = 8
+  let raw_seg = max_evals / restarts
+  let seg_budget = if raw_seg < 30 { 30 } else { raw_seg }
+
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _r in 0..<restarts {
+    if evaluations >= max_evals {
+      break
+    }
+    let mut x = random_solution(dim, bounds, current_rng)
+    let mut fx = evaluate(f, x)
+    evaluations = evaluations + 1
+    if !have_best || fx < best_val {
+      best_val = fx
+      best_pos = x
+      have_best = true
+    }
+    let grad : Array[Double] = []
+    let hess : Array[Double] = []
+    for _i in 0..<dim {
+      grad.push(0.0)
+    }
+    for _i in 0..<(dim * dim) {
+      hess.push(0.0)
+    }
+    let mut rho = span * 0.15
+    let h0 = max(rho * 0.4, span * 1.0e-4)
+    let used0 = bobyqa_build_model(
+      f, bounds, dim, x, fx, h0, max_evals, evaluations, grad, hess,
+    )
+    evaluations = evaluations + used0
+    let mut seg_used = 1 + used0
+    let mut stall = 0
+    let mut steps_since_model = 0
+    while seg_used < seg_budget && evaluations < max_evals {
+      // refresh the gradient at the current point (the Hessian stays frozen
+      // between rebuilds)
+      let hgrad = max(rho * 0.4, span * 1.0e-4)
+      let mut g_ok = true
+      for d in 0..<dim {
+        if evaluations + 2 > max_evals {
+          g_ok = false
+          break
+        }
+        let xp : Array[Double] = []
+        let xm : Array[Double] = []
+        for k in 0..<dim {
+          let v = x[k]
+          if k == d {
+            xp.push(max(bounds.min, min(bounds.max, v + hgrad)))
+            xm.push(max(bounds.min, min(bounds.max, v - hgrad)))
+          } else {
+            xp.push(v)
+            xm.push(v)
+          }
+        }
+        let fp = evaluate(f, xp)
+        let fm = evaluate(f, xm)
+        evaluations = evaluations + 2
+        seg_used = seg_used + 2
+        let dd = xp[d] - xm[d]
+        if dd > 1.0e-12 {
+          grad[d] = (fp - fm) / dd
+        }
+      }
+      if !g_ok {
+        break
+      }
+      let mut step = bobyqa_solve(hess, grad, dim, 1.0e-8)
+      let mut snorm = 0.0
+      for d in 0..<dim {
+        snorm = snorm + step[d] * step[d]
+      }
+      let mut sn = snorm.sqrt()
+      let mut ridge_try = 1.0e-5
+      while sn < 1.0e-12 && ridge_try < 1.0e3 {
+        step = bobyqa_solve(hess, grad, dim, ridge_try)
+        snorm = 0.0
+        for d in 0..<dim {
+          snorm = snorm + step[d] * step[d]
+        }
+        sn = snorm.sqrt()
+        ridge_try = ridge_try * 10.0
+      }
+      if sn < 1.0e-14 {
+        // no model direction: random kick near the best
+        let jump : Array[Double] = []
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10
+          jump.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fj = evaluate(f, jump)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        x = jump
+        fx = fj
+        rho = span * 0.15
+        stall = 0
+        steps_since_model = 0
+        if fj < best_val {
+          best_val = fj
+          best_pos = jump
+        }
+      } else {
+        let scale = if sn > rho { rho / sn } else { 1.0 }
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let nv = x[d] + scale * step[d]
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        if fv < fx {
+          x = cand
+          fx = fv
+          stall = 0
+          rho = min(rho * 1.2, span * 0.5)
+          if fv < best_val {
+            best_val = fv
+            best_pos = cand
+          }
+        } else {
+          // Newton direction failed: retry with a steepest-descent step
+          let mut gsq = 0.0
+          for d in 0..<dim {
+            gsq = gsq + grad[d] * grad[d]
+          }
+          let gn = gsq.sqrt()
+          if gn > 1.0e-12 && evaluations < max_evals {
+            let sdesc = rho / gn
+            let cand2 : Array[Double] = []
+            for d in 0..<dim {
+              let nv = x[d] - sdesc * grad[d]
+              cand2.push(max(bounds.min, min(bounds.max, nv)))
+            }
+            let fv2 = evaluate(f, cand2)
+            evaluations = evaluations + 1
+            seg_used = seg_used + 1
+            if fv2 < fx {
+              x = cand2
+              fx = fv2
+              stall = 0
+              rho = min(rho * 1.2, span * 0.5)
+              if fv2 < best_val {
+                best_val = fv2
+                best_pos = cand2
+              }
+            } else {
+              stall = stall + 1
+              rho = max(rho * 0.5, span * 1.0e-5)
+            }
+          } else {
+            stall = stall + 1
+            rho = max(rho * 0.5, span * 1.0e-5)
+          }
+        }
+      }
+      steps_since_model = steps_since_model + 1
+      if steps_since_model >= 20 && evaluations < max_evals {
+        let hrebuild = max(rho * 0.4, span * 1.0e-4)
+        let u = bobyqa_build_model(
+          f, bounds, dim, x, fx, hrebuild, max_evals, evaluations, grad, hess,
+        )
+        evaluations = evaluations + u
+        seg_used = seg_used + u
+        if u > 0 {
+          steps_since_model = 0
+        }
+      }
+      if stall >= 6 && evaluations < max_evals {
+        let jump : Array[Double] = []
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.15
+          jump.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fj = evaluate(f, jump)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        x = jump
+        fx = fj
+        rho = span * 0.15
+        stall = 0
+        steps_since_model = 0
+        if fj < best_val {
+          best_val = fj
+          best_pos = jump
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
