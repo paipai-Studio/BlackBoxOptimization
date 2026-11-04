@@ -1,10 +1,10 @@
 # BlackBoxOptimization
 
-基于 MoonBit 实现的黑盒优化算法框架，支持 321 种经典优化算法，提供统一的接口和基准测试框架。
+基于 MoonBit 实现的黑盒优化算法框架，支持 322 种经典优化算法，提供统一的接口和基准测试框架。
 
 ## 算法分类
 
-本框架实现了 **321 种**黑盒优化算法，按设计灵感和机制分为以下类别：
+本框架实现了 **322 种**黑盒优化算法，按设计灵感和机制分为以下类别：
 
 ### 🔍 单点搜索算法
 最简单的优化策略，从单个初始解出发，通过迭代改进逐步逼近最优值。
@@ -389,11 +389,13 @@
 |------|------|------|
 | 协方差矩阵自适应进化策略 | CMA-ES | 协方差矩阵自适应调整，适合病态问题 |
 | (μ+λ) 进化策略 | ES | μ 父代产生 λ 高斯变异子代，择优存活 |
+| 指数自然进化策略 | xNES | 秩基自然梯度（指数坐标），均值/变换矩阵/步长联合自适应 (2010) |
 
 | 算法 | 关键参数 | 推荐值 |
 |------|----------|--------|
 | CMA-ES | `sigma` (初始标准差), `lambda` (种群大小), `mu` (父代数量) | 0.5, 20, 10 |
 | ES | `mu` (父代数量), `lambda` (子代数量), `sigma_init` (初始步长) | 30, 100, 0.3 |
+| xNES | 仅需 `population_size` | 25 |
 
 ### 📊 估计分布算法
 基于概率分布估计的迭代优化方法。
@@ -550,7 +552,7 @@ moon run main
 ### 运行测试
 
 ```bash
-# 运行所有测试（664 个测试用例）
+# 运行所有测试（666 个测试用例）
 moon test
 
 # 代码检查
@@ -1012,7 +1014,7 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | **🧬 进化算法** | DE、GA、jDE、SHADE、JADE、SaDE、Memetic、CLONALG、OAIN、ICA、BBO、BSA | 基于种群进化，鲁棒性好 |
 | **🐝 群体智能** | PSO、萤火虫、蚁群、蜂群、灰狼、鲸群、蝙蝠、和声、麻雀搜索、哈里斯鹰、GOA、SOA、CSO、GTO、SMA、AO、ChOA、DO、ZOA、CPSO、LPSO、QPSO、UPSO、ACOR、COOT、DOA、STOA、GKSO、FLA、HO、NMRA、FFO、EPO、CPO、MTBO、CryStAl、NOA、ESOA、MOA、AOS、MA、SSO、SLnO、FOA、SFO、NNA、PBO、FSS、CFO、CGO、CDO、ILS、SCE、GRASP、BO、FSA、SMO、HLO、FDA、CRO、AAA、VSA、VPL、WEO、SNS、TCO、RO、GbSA、BA、CO、CSS、MBA、PCA、IMO、EMA、WCO、AEFA、OIO、LAPO、FGBO、EA、LAHC、HuS、RRT、NRO、HTS、PGO、IWD、RFD、LSA、SS、OBA、APO、HBO、SAO、BRO、EFO、GBMO、DSA、GSK、ALNS、SGO、ASO、BCMO、MKE、RFO、SAR、ChSA、RDA、SqSA、Puma、StMO、SFOA、ABO、Gannet、Narwhal、Serval、ChSO、PR、CrSO、JS、WSA、SeHO、WBO、OWL、RRO、SaFO、GPC、SSD、FDO、CFA、OPA、APuf、WPA、Racc、Monkey、BSwA、TGA、PPA、HBMO、Crayfish、QSA、Starfish、TBO、Lyrebird、SEOA、GFO、DEO、ManSA、EWA、GrSA、FrOA、ChRO、SPBO、CLPSO、ExtO、SOMA、SDS 等 | 基于群体行为，全局搜索能力强 |
 | **📐 确定性直接搜索** | Nelder-Mead、Hooke-Jeeves、Powell、Rosenbrock、CRS、DIRECT、BFGS、COBYLA、MADS、NEWUOA | 无需梯度（或数值梯度近似），适合不可导函数 |
-| **🧮 进化策略** | CMA-ES、ES | 协方差自适应，适合病态问题 |
+| **🧮 进化策略** | CMA-ES、ES、xNES | 协方差自适应，适合病态问题 |
 | **📊 估计分布** | CEM、SFS、PBIL、UMDA、cGA、NS | 基于概率分布估计，适合连续优化 |
 | **⚛️ 物理启发** | GSA、MVO、EO、WDO、WCA、EM、WWO、TEO、RIME、BBBC、BH、CBO、HGSO | 基于物理规律，自适应搜索 |
 | **🎓 教学模型** | TLBO | 无需算法特定参数，收敛速度快 |

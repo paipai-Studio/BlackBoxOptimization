@@ -2168,6 +2168,16 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
     name: "OAIN",
     run: (e, d, b, r, f) => opt_ainet(make_oain_config(e, d, b, 25), f, r),
   })
+  entries.push(AlgoEntry::{
+    name: "xNES",
+    run: (e, d, b, r, f) => {
+      exponential_natural_evolution_strategy(
+        make_xnes_config(e, d, b, 25),
+        f,
+        r,
+      )
+    },
+  })
   entries
 }
 

@@ -35968,3 +35968,205 @@ pub fn opt_ainet(
     evaluations,
   }
 }
+
+// ===== xNES: exponential natural evolution strategy (2010) =====
+
+///|
+fn xnes_randn(rng : RNG) -> Double {
+  let u1 = max(RNG::next(rng), 1.0e-12)
+  let u2 = RNG::next(rng)
+  (-2.0 * @math.ln(u1)).sqrt() * @math.cos(2.0 * PI * u2)
+}
+
+///|
+pub struct XnesConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_xnes_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> XnesConfig {
+  XnesConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Exponential Natural Evolution Strategy (Glasmachers, Schaul, Sun, Wierstra
+/// & Schmidhuber 2010). A Gaussian search distribution N(mean, sigma^2 A A^T)
+/// is adapted by the rank-based natural gradient in exponential coordinates:
+/// samples are sorted and shaped with log-rank utilities, then the mean, the
+/// transformation matrix A and the step size sigma are moved along the
+/// estimated natural gradient. Unlike CMA-ES there is no evolution path, no
+/// covariance accumulation and no Cholesky decomposition; A is updated
+/// multiplicatively by the rank-weighted second-moment matrix (hence the
+/// exponential parameterisation), and sigma follows the average squared length
+/// of the sampled z vectors. The historical best is tracked separately.
+pub fn exponential_natural_evolution_strategy(
+  config : XnesConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let lambda = if config.population_size < 4 {
+    4
+  } else {
+    config.population_size
+  }
+
+  let mu = random_solution(dim, bounds, current_rng)
+  let mut sigma = span * 0.20
+  let a : Array[Array[Double]] = []
+  for i in 0..<dim {
+    let row : Array[Double] = []
+    for j in 0..<dim {
+      row.push(if i == j { 1.0 } else { 0.0 })
+    }
+    a.push(row)
+  }
+
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  while evaluations < max_evals {
+    let cur_lambda = if evaluations + lambda > max_evals {
+      max_evals - evaluations
+    } else {
+      lambda
+    }
+    if cur_lambda <= 0 {
+      break
+    }
+    let zs : Array[Array[Double]] = []
+    let fs : Array[Double] = []
+    for _i in 0..<cur_lambda {
+      let z : Array[Double] = []
+      for _d in 0..<dim {
+        z.push(xnes_randn(current_rng))
+      }
+      let az : Array[Double] = []
+      for i in 0..<dim {
+        let mut s = 0.0
+        for j in 0..<dim {
+          s = s + a[i][j] * z[j]
+        }
+        az.push(s)
+      }
+      let x : Array[Double] = []
+      for d in 0..<dim {
+        x.push(max(bounds.min, min(bounds.max, mu[d] + sigma * az[d])))
+      }
+      let fx = evaluate(f, x)
+      evaluations = evaluations + 1
+      zs.push(z)
+      fs.push(fx)
+      if !have_best || fx < best_val {
+        best_val = fx
+        best_pos = x
+        have_best = true
+      }
+    }
+    let order = sort_indices(fs)
+    let lam_d = cur_lambda.to_double()
+    let util : Array[Double] = []
+    let mut util_sum = 0.0
+    for k in 0..<cur_lambda {
+      let raw = @math.ln(lam_d / 2.0 + 1.0) - @math.ln(k.to_double() + 1.0)
+      let value = if raw > 0.0 { raw } else { 0.0 }
+      util.push(value)
+      util_sum = util_sum + value
+    }
+    let safe_sum = if util_sum > 1.0e-12 { util_sum } else { 1.0 }
+    let gmu : Array[Double] = []
+    for _d in 0..<dim {
+      gmu.push(0.0)
+    }
+    let second : Array[Double] = []
+    for _i in 0..<(dim * dim) {
+      second.push(0.0)
+    }
+    let mut gsig = 0.0
+    for k in 0..<cur_lambda {
+      let wk = util[k] / safe_sum
+      if wk > 0.0 {
+        let z = zs[order[k]]
+        for d in 0..<dim {
+          gmu[d] = gmu[d] + wk * z[d]
+        }
+        let mut zsq = 0.0
+        for d in 0..<dim {
+          zsq = zsq + z[d] * z[d]
+          for e in 0..<dim {
+            second[d * dim + e] = second[d * dim + e] + wk * z[d] * z[e]
+          }
+        }
+        gsig = gsig + wk * (zsq / dim.to_double() - 1.0)
+      }
+    }
+    for d in 0..<dim {
+      for e in 0..<dim {
+        let target = if d == e { 1.0 } else { 0.0 }
+        second[d * dim + e] = second[d * dim + e] - target
+      }
+    }
+    let raw_frac = evaluations.to_double() / max_evals.to_double()
+    let frac = if raw_frac > 1.0 { 1.0 } else { raw_frac }
+    let decay = 1.0 - frac
+    let eta_mu = 0.12 * (0.3 + 0.7 * decay)
+    let eta_a = 0.10 * (0.3 + 0.7 * decay)
+    let eta_s = 0.10 * (0.3 + 0.7 * decay)
+    let agmu : Array[Double] = []
+    for i in 0..<dim {
+      let mut s = 0.0
+      for j in 0..<dim {
+        s = s + a[i][j] * gmu[j]
+      }
+      agmu.push(s)
+    }
+    for d in 0..<dim {
+      mu[d] = max(bounds.min, min(bounds.max, mu[d] + eta_mu * sigma * agmu[d]))
+    }
+    let am : Array[Double] = []
+    for _i in 0..<(dim * dim) {
+      am.push(0.0)
+    }
+    for i in 0..<dim {
+      for j in 0..<dim {
+        let mut s = 0.0
+        for k in 0..<dim {
+          s = s + a[i][k] * second[k * dim + j]
+        }
+        am[i * dim + j] = s
+      }
+    }
+    for i in 0..<dim {
+      for j in 0..<dim {
+        a[i][j] = a[i][j] + eta_a * am[i * dim + j]
+      }
+    }
+    sigma = sigma * @math.exp(eta_s * 0.5 * gsig)
+    sigma = max(span * 1.0e-5, min(span * 0.5, sigma))
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
