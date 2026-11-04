@@ -2088,6 +2088,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       student_psychological_optimization(make_spbo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "PTO",
+    run: (e, d, b, r, f) => {
+      parallel_tempering_optimization(make_pto_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

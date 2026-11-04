@@ -33623,3 +33623,152 @@ pub fn student_psychological_optimization(
     evaluations,
   }
 }
+
+// ===== PTO: Parallel Tempering Optimization (1986) =====
+
+///|
+pub struct ParallelTemperingConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_pto_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ParallelTemperingConfig {
+  ParallelTemperingConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Parallel Tempering Optimization (Swendsen & Wang 1986): pop_size
+/// replicas of the incumbent run Metropolis moves in parallel, each at its
+/// own fixed temperature - cold replicas make fine greedy descents while
+/// hot replicas wander over wide basins, paying for uphill moves out of
+/// their thermal budget.  Every generation one adjacent temperature pair
+/// is swapped with Metropolis probability, so solutions discovered by hot
+/// replicas are handed to cold ones for refinement (the defining mechanism
+/// that separates tempering from single-temperature annealing).  The
+/// quench factor ptf = e^{-t/2500} shrinks the move amplitudes.
+pub fn parallel_tempering_optimization(
+  config : ParallelTemperingConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  // temperatures: linear ramp from a cold floor to a hot ceiling
+  let temps : Array[Double] = []
+  for i in 0..<pop_size {
+    let frac = i.to_double() / (pop_size - 1).to_double()
+    temps.push(span * 0.02 + (span * 0.6 - span * 0.02) * frac)
+  }
+
+  while evaluations < max_evals {
+    let heat = @math.exp(-evaluations.to_double() / 2500.0)
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let fx = fits[i]
+      // amplitude grows with the replica's temperature, while the pull
+      // toward the global best shrinks with it - cold replicas climb
+      // greedily, hot replicas keep wandering for diversity
+      let frac = i.to_double() / (pop_size - 1).to_double()
+      let step = span * 0.08 * heat * (1.0 + 6.0 * frac)
+      let pull = 0.45 * (1.0 - frac)
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = xi[d] +
+          pull * (best_pos[d] - xi[d]) +
+          (2.0 * RNG::next(current_rng) - 1.0) * step
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fp = evaluate(f, cand)
+      evaluations = evaluations + 1
+      let dE = fp - fx
+      if dE <= 0.0 {
+        pop[i] = cand
+        fits[i] = fp
+        if fp < best_val {
+          best_val = fp
+          best_pos = cand
+        }
+      } else {
+        // thermal acceptance: hot replicas tolerate large uphill moves,
+        // cold replicas stay near-greedy (the scale factor keeps the
+        // effective temperature moderate even when |fx| is large)
+        let ax = if fx < 0.0 { -fx } else { fx }
+        let p_acc = @math.exp(-dE / (temps[i] * (0.3 + ax * 0.05) + 1.0e-300))
+        if RNG::next(current_rng) < p_acc {
+          pop[i] = cand
+          fits[i] = fp
+        }
+      }
+    }
+    // Metropolis exchange over every adjacent temperature pair: when a hot
+    // replica has found something better, the swap passes it to the cold
+    // one for fine refinement
+    if evaluations < max_evals {
+      for k in 0..<(pop_size - 1) {
+        let dE = fits[k + 1] - fits[k]
+        let dInv = 1.0 / temps[k] - 1.0 / temps[k + 1]
+        let a1 = if fits[k] < 0.0 { -fits[k] } else { fits[k] }
+        let a2 = if fits[k + 1] < 0.0 { -fits[k + 1] } else { fits[k + 1] }
+        let p_swap = @math.exp(-dE * dInv * 0.4 / (1.0 + a1 + a2 + 1.0e-300))
+        if RNG::next(current_rng) < p_swap {
+          let tmp = pop[k]
+          pop[k] = pop[k + 1]
+          pop[k + 1] = tmp
+          let tv = fits[k]
+          fits[k] = fits[k + 1]
+          fits[k + 1] = tv
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
