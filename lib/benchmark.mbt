@@ -1980,6 +1980,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       bird_swarm_algorithm(make_bswa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "TGA",
+    run: (e, d, b, r, f) => {
+      tree_growth_algorithm(make_tga_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

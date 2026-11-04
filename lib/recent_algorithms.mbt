@@ -30959,3 +30959,151 @@ pub fn bird_swarm_algorithm(
     evaluations,
   }
 }
+
+// ===== Tree Growth Algorithm (2018) =====
+
+///|
+pub struct TGAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_tga_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> TGAConfig {
+  TGAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Tree Growth Algorithm (2018).  Every round the forest is ranked by fitness
+/// and split into roles, with the growth factor tgf = e^{-t/2500} shrinking
+/// all strides as evaluations are spent:
+///   * the best third (well-lit trees) grows toward the light, i.e. toward
+///     the global best, with a differential kick from two random trees;
+///   * the middle trees absorb water from the soil around the better of two
+///     neighbouring trees plus a weak pull toward the best, a local
+///     differential exploration at tgf^2 scale;
+///   * the worst tenth (crowded-out trees) are replaced by a random seedling
+///     grafted halfway onto the best-lit tree, so competition keeps the
+///     forest diverse instead of letting it collapse.
+pub fn tree_growth_algorithm(
+  config : TGAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 20 {
+    20
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let n_lit = if pop_size / 3 < 3 { 3 } else { pop_size / 3 }
+  let n_crowded = if pop_size / 10 < 2 { 2 } else { pop_size / 10 }
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // rank the forest by fitness: order[0] is the best-lit tree
+    let order = sort_indices(fits)
+    let rank : Array[Int32] = []
+    for _k in 0..<pop_size {
+      rank.push(0)
+    }
+    for k in 0..<pop_size {
+      rank[order[k]] = k
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let tgf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if rank[i] < n_lit {
+        // growth toward the light (global best) with a differential kick
+        let j = (r2 * pop_size.to_double()).to_int() % pop_size
+        let k = (r3 * pop_size.to_double()).to_int() % pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            2.0 * r1 * tgf * (best_pos[d] - xi[d]) +
+            0.5 * r3 * (xj[d] - xk[d]) * tgf +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.04 * tgf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if rank[i] < pop_size - n_crowded {
+        // water absorption: local exploration around the better of two trees
+        let j = (r2 * pop_size.to_double()).to_int() % pop_size
+        let k = (r3 * pop_size.to_double()).to_int() % pop_size
+        let xj = if fits[j] <= fits[k] { pop[j] } else { pop[k] }
+        for d in 0..<dim {
+          let nv = xi[d] +
+            0.9 * r1 * tgf * (xj[d] - xi[d]) +
+            0.3 * tgf * (best_pos[d] - xi[d]) +
+            (2.0 * r3 - 1.0) * span * 0.08 * tgf * tgf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // competition: a crowded-out tree is replaced by a seedling that is a
+        // random draw grafted halfway onto the best-lit tree
+        let seedling = random_solution(dim, bounds, current_rng)
+        for d in 0..<dim {
+          let nv = 0.5 * seedling[d] +
+            0.5 * best_pos[d] +
+            (2.0 * r2 - 1.0) * span * 0.03 * tgf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
