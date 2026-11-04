@@ -2040,6 +2040,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       guineafowl_optimization(make_guineafowl_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "DEO",
+    run: (e, d, b, r, f) => {
+      dolphin_optimization(make_dolphin_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
