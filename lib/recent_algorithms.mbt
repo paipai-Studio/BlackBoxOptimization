@@ -31522,3 +31522,149 @@ pub fn crayfish_optimization(
     evaluations,
   }
 }
+
+// ===== Queuing Search Algorithm (2019) =====
+
+///|
+pub struct QSAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_qsa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> QSAConfig {
+  QSAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Queuing Search Algorithm (2019).  The queue factor qsf = e^{-t/2500}
+/// shrinks all strides as evaluations are spent.  Each round the population
+/// is ranked and the best few become service windows (leaders):
+///   * a leader improves its service efficiency by contracting toward the
+///     global best with a fine jitter;
+///   * the other individuals join the window chosen by their index, moving
+///     toward that window's leader with a differential kick and a jitter;
+///   * some customers spend the round waiting and only perform a fine jitter,
+///     which keeps the queue diverse.
+/// Leaders are re-elected from the ranked population every round.
+pub fn queuing_search_algorithm(
+  config : QSAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let n_windows = if pop_size / 8 < 2 { 2 } else { pop_size / 8 }
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // rank the queue: order[0] is the best served individual
+    let order = sort_indices(fits)
+    let rank : Array[Int32] = []
+    for _k in 0..<pop_size {
+      rank.push(0)
+    }
+    for k in 0..<pop_size {
+      rank[order[k]] = k
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let qsf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if rank[i] < n_windows {
+        // service window: contract toward the global best
+        for d in 0..<dim {
+          let nv = xi[d] +
+            1.4 * qsf * (best_pos[d] - xi[d]) +
+            (2.0 * r2 - 1.0) * span * 0.03 * qsf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < 0.55 {
+        // join the queue: move toward the assigned window leader
+        let leader = pop[order[i % n_windows]]
+        let j = (r2 * pop_size.to_double()).to_int() % pop_size
+        let k = (r3 * pop_size.to_double()).to_int() % pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            1.5 * qsf * (leader[d] - xi[d]) +
+            0.7 * r2 * qsf * (xj[d] - xk[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.03 * qsf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        // waiting: usually a fine jitter, occasionally a queue jump into a
+        // fresh region so the search can escape multi-modal traps
+      } else if r2 < 0.15 {
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.35 * qsf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        for d in 0..<dim {
+          let nv = xi[d] + (2.0 * r3 - 1.0) * span * 0.12 * qsf * qsf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

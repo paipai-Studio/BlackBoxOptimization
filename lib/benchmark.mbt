@@ -2004,6 +2004,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       crayfish_optimization(make_crayfish_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "QSA",
+    run: (e, d, b, r, f) => {
+      queuing_search_algorithm(make_qsa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
