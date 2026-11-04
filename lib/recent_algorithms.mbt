@@ -35793,3 +35793,178 @@ pub fn population_annealing(
     evaluations,
   }
 }
+
+// ===== OAIN: opt-aiNet artificial immune network (2002) =====
+
+///|
+pub struct OainConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_oain_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> OainConfig {
+  OainConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// opt-aiNet (de Castro & Von Zuben 2002): an artificial immune network that
+/// extends clonal selection with network suppression. Each round antibodies
+/// are cloned proportionally to their rank and the clones are mutated with a
+/// rank-scaled step (better antibodies mutate less); a clone replaces its
+/// parent only when it improves. Then a similarity-based suppression step
+/// removes redundant antibodies: whenever two antibodies are closer than the
+/// normalized suppression threshold, the worse one is re-seeded as a fresh
+/// random antibody. Unlike plain CLONALG this keeps the repertoire diverse
+/// instead of letting all antibodies collapse onto one peak. The historical
+/// best is tracked separately.
+pub fn opt_ainet(
+  config : OainConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let pop_size = if config.population_size < 2 {
+    2
+  } else {
+    config.population_size
+  }
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let clone_count = 3
+  let suppress = 0.18
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _i in 0..<pop_size {
+    let sol = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, sol)
+    evaluations = evaluations + 1
+    pop.push(sol)
+    fits.push(v)
+    if !have_best || v < best_val {
+      best_val = v
+      best_pos = sol
+      have_best = true
+    }
+  }
+
+  while evaluations < max_evals {
+    let raw_frac = evaluations.to_double() / max_evals.to_double()
+    let frac = if raw_frac > 1.0 { 1.0 } else { raw_frac }
+    let decay = 1.0 - frac
+    let order = sort_indices(fits)
+    let rank : Array[Int32] = []
+    for _i in 0..<pop_size {
+      rank.push(0)
+    }
+    for k in 0..<pop_size {
+      rank[order[k]] = k
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let rk = rank[i]
+      let nc = if rk < pop_size / 2 { clone_count + 1 } else { 1 }
+      let mut_scale = span *
+        (0.10 * decay + 0.01) *
+        (1.0 + rk.to_double() / pop_size.to_double())
+      let mut best_cand = xi
+      let mut best_fv = fits[i]
+      let mut improved = false
+      for _c in 0..<nc {
+        if evaluations >= max_evals {
+          break
+        }
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let nv = xi[d] + (2.0 * RNG::next(current_rng) - 1.0) * mut_scale
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        if fv < best_fv {
+          best_fv = fv
+          best_cand = cand
+          improved = true
+        }
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+      if improved {
+        pop[i] = best_cand
+        fits[i] = best_fv
+      }
+    }
+    let marked : Array[Bool] = []
+    for _i in 0..<pop_size {
+      marked.push(false)
+    }
+    for i in 0..<pop_size {
+      for j in 0..<pop_size {
+        if j > i {
+          let mut dsq = 0.0
+          for d in 0..<dim {
+            let delta = pop[i][d] - pop[j][d]
+            dsq = dsq + delta * delta
+          }
+          let dist = dsq.sqrt() / span
+          if dist < suppress {
+            if fits[i] <= fits[j] {
+              marked[j] = true
+            } else {
+              marked[i] = true
+            }
+          }
+        }
+      }
+    }
+    let mut resampled = 0
+    for i in 0..<pop_size {
+      if resampled >= 3 || evaluations >= max_evals {
+        break
+      }
+      if marked[i] && fits[i] > best_val {
+        let fresh = random_solution(dim, bounds, current_rng)
+        let fv = evaluate(f, fresh)
+        evaluations = evaluations + 1
+        pop[i] = fresh
+        fits[i] = fv
+        resampled = resampled + 1
+        if fv < best_val {
+          best_val = fv
+          best_pos = fresh
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

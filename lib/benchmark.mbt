@@ -2164,6 +2164,10 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       population_annealing(make_population_annealing_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "OAIN",
+    run: (e, d, b, r, f) => opt_ainet(make_oain_config(e, d, b, 25), f, r),
+  })
   entries
 }
 
