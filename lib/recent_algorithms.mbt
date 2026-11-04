@@ -35274,3 +35274,171 @@ pub fn nested_sampling(
     evaluations,
   }
 }
+
+// ===== MADS: Mesh Adaptive Direct Search (2006) =====
+
+///|
+pub struct MadsConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_mads_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> MadsConfig {
+  MadsConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Mesh Adaptive Direct Search (Audet & Dennis 2006). A single incumbent is
+/// polled on a dynamically sized mesh: the two coordinate directions per
+/// dimension plus two random unit directions are evaluated each iteration and
+/// the best poll point is adopted, expanding the mesh on success and halving it
+/// on failure. Unlike Hooke-Jeeves pattern search, the polling directions are a
+/// mix of fixed coordinate axes and random directions, and the mesh size is the
+/// adaptive convergence control. When the mesh collapses to the resolution
+/// limit the search restarts near the incumbent best with a random kick, and
+/// the outer loop splits the budget among several starting points. Note that
+/// this is a single-point method (population_size is accepted for a uniform
+/// config interface but not used), matching the SPSA/BAS/BFGS convention.
+pub fn mesh_adaptive_direct_search(
+  config : MadsConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let restarts = 8
+  let raw_seg = max_evals / restarts
+  let seg_budget = if raw_seg < 24 { 24 } else { raw_seg }
+
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _r in 0..<restarts {
+    if evaluations >= max_evals {
+      break
+    }
+    let mut x = random_solution(dim, bounds, current_rng)
+    let mut fx = evaluate(f, x)
+    evaluations = evaluations + 1
+    if !have_best || fx < best_val {
+      best_val = fx
+      best_pos = x
+      have_best = true
+    }
+    let mut mesh = span * 0.10
+    let mut seg_used = 1
+    while seg_used < seg_budget && evaluations < max_evals {
+      let mut best_cand : Array[Double] = []
+      let mut best_fv = fx
+      let mut found = false
+      // fixed coordinate directions on the mesh
+      for d in 0..<dim {
+        for sg in 0..<2 {
+          if evaluations >= max_evals || seg_used >= seg_budget {
+            break
+          }
+          let step = if sg == 0 { mesh } else { -mesh }
+          let cand : Array[Double] = []
+          for k in 0..<dim {
+            let v = if k == d {
+              max(bounds.min, min(bounds.max, x[k] + step))
+            } else {
+              x[k]
+            }
+            cand.push(v)
+          }
+          let fv = evaluate(f, cand)
+          evaluations = evaluations + 1
+          seg_used = seg_used + 1
+          if fv < best_fv {
+            best_fv = fv
+            best_cand = cand
+            found = true
+          }
+        }
+      }
+      // random unit directions (the opportunistic part of MADS)
+      for _s in 0..<2 {
+        if evaluations >= max_evals || seg_used >= seg_budget {
+          break
+        }
+        let dir : Array[Double] = []
+        let mut norm = 0.0
+        for _d in 0..<dim {
+          let rv = 2.0 * RNG::next(current_rng) - 1.0
+          dir.push(rv)
+          norm = norm + rv * rv
+        }
+        let nrm = norm.sqrt()
+        let safe = if nrm < 1.0e-12 { 1.0 } else { nrm }
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let v = x[d] + mesh * dir[d] / safe
+          cand.push(max(bounds.min, min(bounds.max, v)))
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        if fv < best_fv {
+          best_fv = fv
+          best_cand = cand
+          found = true
+        }
+      }
+      if found {
+        x = best_cand
+        fx = best_fv
+        mesh = min(mesh * 1.5, span * 0.40)
+        if fx < best_val {
+          best_val = fx
+          best_pos = x
+        }
+      } else {
+        mesh = mesh * 0.5
+      }
+      if mesh < span * 1.0e-4 && evaluations < max_evals {
+        // mesh exhausted: restart near the incumbent best with a random kick
+        let cand : Array[Double] = []
+        let kick = span * 0.20
+        for d in 0..<dim {
+          let nv = best_pos[d] + (2.0 * RNG::next(current_rng) - 1.0) * kick
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        x = cand
+        fx = fv
+        mesh = span * 0.10
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
