@@ -2052,6 +2052,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       beetle_antennae_search(make_bas_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "ManSA",
+    run: (e, d, b, r, f) => {
+      mantis_search_algorithm(make_mantis_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

@@ -32675,3 +32675,151 @@ pub fn beetle_antennae_search(
     evaluations,
   }
 }
+
+// ===== ManSA: Mantis Search Algorithm (2023) =====
+
+///|
+pub struct MantisConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_mantis_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> MantisConfig {
+  MantisConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Mantis Search Algorithm (2023): every generation each mantis is paired
+/// with a random rival and the predation factor mnf = e^{-t/2500} decays
+/// with the evaluation budget:
+///   * ambush - the fitter mantis feeds on the loser, refining toward the
+///     global best while absorbing a weak pull along the rival's direction;
+///     the loser is assimilated, i.e. relocated straight into the winner's
+///     neighbourhood (with a differential kick) instead of crawling there;
+///   * camouflage - fine jitter keeps the swarm diverse;
+///   * egg case - contract around the global best where the female lays.
+pub fn mantis_search_algorithm(
+  config : MantisConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let mnf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.30 {
+        // ambush: pair with a random rival; the winner feeds on the loser
+        let j = (
+            (RNG::next(current_rng) * pop_size.to_double()).to_int() + i + 1
+          ) %
+          pop_size
+        let xj = pop[j]
+        if fits[i] <= fits[j] {
+          // winner feeds on the loser: refine toward the global best while
+          // absorbing a weak pull along the rival's direction
+          for d in 0..<dim {
+            let nv = xi[d] +
+              0.9 * mnf * (best_pos[d] - xi[d]) +
+              0.22 * mnf * (xj[d] - xi[d]) +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.11 * mnf
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        } else {
+          // loser is assimilated: relocate straight into the winner's
+          // neighbourhood with a differential kick from random partners
+          let p_i = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+            pop_size
+          let q_i = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+            pop_size
+          let xp = pop[p_i]
+          let xq = pop[q_i]
+          for d in 0..<dim {
+            let nv = xj[d] +
+              0.40 * mnf * (xj[d] - xi[d]) +
+              0.3 * (xp[d] - xq[d]) +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.11 * mnf
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        }
+      } else if r1 < 0.71 {
+        // camouflage: fine jitter keeps the swarm diverse
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * mnf * mnf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // egg case: contract around the global best
+        let r2 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * mnf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
