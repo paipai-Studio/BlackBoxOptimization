@@ -2236,6 +2236,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       golden_section_search(make_gss_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "Subplex",
+    run: (e, d, b, r, f) => {
+      subplex_optimizer(make_subplex_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

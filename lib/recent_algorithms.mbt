@@ -38122,3 +38122,258 @@ pub fn golden_section_search(
     evaluations,
   }
 }
+
+// ===== Subplex (1990) =====
+
+///|
+pub struct SubplexConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_subplex_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SubplexConfig {
+  SubplexConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Subplex (Rowan 1990): split the coordinates into small groups (here pairs)
+/// and run a Nelder-Mead simplex inside each subspace while the other
+/// coordinates are held fixed, cycling through the groups and rotating the
+/// partition every cycle. Each dimension keeps its own simplex edge length,
+/// expanded on group success and shrunk on failure. A cycle without any
+/// improvement triggers a jump near the incumbent best. The schedule depends
+/// only on the cycle count, not on the total budget, so a larger budget
+/// strictly continues the same run and the historical best is monotone.
+/// Unlike full-space Nelder-Mead this performs simplex moves in coordinate
+/// subspaces; unlike Powell/PRAXIS it has no direction set. population_size is
+/// accepted for a uniform config interface but not used.
+pub fn subplex_optimizer(
+  config : SubplexConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+
+  let mut x = random_solution(dim, bounds, current_rng)
+  let mut fx = evaluate(f, x)
+  let mut evaluations = 1
+  let mut best_pos = x
+  let mut best_val = fx
+
+  let dstep : Array[Double] = []
+  for _d in 0..<dim {
+    dstep.push(span * 0.05)
+  }
+  let mut stall = 0
+  let mut cycle = 0
+
+  while evaluations < max_evals {
+    let order : Array[Int32] = []
+    for j in 0..<dim {
+      order.push((cycle + j) % dim)
+    }
+    let fx_cycle = fx
+    let mut gi = 0
+    while gi < dim && evaluations < max_evals {
+      let remaining = dim - gi
+      let k = if remaining < 2 { remaining } else { 2 }
+      if evaluations + k > max_evals {
+        gi = dim
+      } else {
+        let idx : Array[Int32] = []
+        for j in 0..<k {
+          idx.push(order[gi + j])
+        }
+        gi = gi + k
+        let simplex : Array[Array[Double]] = []
+        let sf : Array[Double] = []
+        let base : Array[Double] = []
+        for d in 0..<dim {
+          base.push(x[d])
+        }
+        simplex.push(base)
+        sf.push(fx)
+        for j in 0..<k {
+          let v : Array[Double] = []
+          for d in 0..<dim {
+            if d == idx[j] {
+              v.push(max(bounds.min, min(bounds.max, x[d] + dstep[d])))
+            } else {
+              v.push(x[d])
+            }
+          }
+          let fv = evaluate(f, v)
+          evaluations = evaluations + 1
+          simplex.push(v)
+          sf.push(fv)
+        }
+        let mut it = 0
+        while it < 10 && evaluations < max_evals {
+          let ord = sort_indices(sf)
+          let len = simplex.length()
+          if len < 2 {
+            break
+          }
+          let best_i = ord[0]
+          let worst_i = ord[len - 1]
+          let second_i = ord[len - 2]
+          let cent : Array[Double] = []
+          for d in 0..<dim {
+            let mut s = 0.0
+            for m in 0..<len {
+              if m != worst_i {
+                s = s + simplex[m][d]
+              }
+            }
+            cent.push(s / (len - 1).to_double())
+          }
+          let worst_v = simplex[worst_i]
+          let refl : Array[Double] = []
+          for d in 0..<dim {
+            let nv = 2.0 * cent[d] - worst_v[d]
+            refl.push(max(bounds.min, min(bounds.max, nv)))
+          }
+          let fr = evaluate(f, refl)
+          evaluations = evaluations + 1
+          let fbest = sf[best_i]
+          let fworst = sf[worst_i]
+          let fsecond = sf[second_i]
+          if fr < fbest {
+            let exp : Array[Double] = []
+            for d in 0..<dim {
+              let nv = 3.0 * cent[d] - 2.0 * worst_v[d]
+              exp.push(max(bounds.min, min(bounds.max, nv)))
+            }
+            let fe = evaluate(f, exp)
+            evaluations = evaluations + 1
+            if fe < fr {
+              simplex[worst_i] = exp
+              sf[worst_i] = fe
+            } else {
+              simplex[worst_i] = refl
+              sf[worst_i] = fr
+            }
+          } else if fr < fsecond {
+            simplex[worst_i] = refl
+            sf[worst_i] = fr
+          } else {
+            let mut do_shrink = false
+            if fr < fworst {
+              let con : Array[Double] = []
+              for d in 0..<dim {
+                let nv = cent[d] + 0.5 * (refl[d] - cent[d])
+                con.push(max(bounds.min, min(bounds.max, nv)))
+              }
+              let fc = evaluate(f, con)
+              evaluations = evaluations + 1
+              if fc <= fr {
+                simplex[worst_i] = con
+                sf[worst_i] = fc
+              } else {
+                do_shrink = true
+              }
+            } else {
+              let con : Array[Double] = []
+              for d in 0..<dim {
+                let nv = cent[d] + 0.5 * (worst_v[d] - cent[d])
+                con.push(max(bounds.min, min(bounds.max, nv)))
+              }
+              let fc = evaluate(f, con)
+              evaluations = evaluations + 1
+              if fc < fworst {
+                simplex[worst_i] = con
+                sf[worst_i] = fc
+              } else {
+                do_shrink = true
+              }
+            }
+            if do_shrink && evaluations < max_evals {
+              for m in 0..<len {
+                if m != best_i && evaluations < max_evals {
+                  let v : Array[Double] = []
+                  for d in 0..<dim {
+                    let nv = simplex[best_i][d] +
+                      0.5 * (simplex[m][d] - simplex[best_i][d])
+                    v.push(max(bounds.min, min(bounds.max, nv)))
+                  }
+                  let fv = evaluate(f, v)
+                  evaluations = evaluations + 1
+                  simplex[m] = v
+                  sf[m] = fv
+                }
+              }
+            }
+          }
+          it = it + 1
+        }
+        let ord2 = sort_indices(sf)
+        let bi = ord2[0]
+        let improved = sf[bi] < fx
+        if improved {
+          x = simplex[bi]
+          fx = sf[bi]
+          if fx < best_val {
+            best_val = fx
+            best_pos = x
+          }
+        }
+        for j in 0..<k {
+          if improved {
+            dstep[idx[j]] = min(dstep[idx[j]] * 1.2, span * 0.3)
+          } else {
+            dstep[idx[j]] = max(dstep[idx[j]] * 0.6, span * 1.0e-5)
+          }
+        }
+      }
+    }
+    cycle = cycle + 1
+    if fx < fx_cycle {
+      stall = 0
+    } else {
+      stall = stall + 1
+    }
+    if stall >= 3 && evaluations < max_evals {
+      let jump : Array[Double] = []
+      for d in 0..<dim {
+        let nv = best_pos[d] +
+          (2.0 * RNG::next(current_rng) - 1.0) * span * 0.15
+        jump.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fj = evaluate(f, jump)
+      evaluations = evaluations + 1
+      x = jump
+      fx = fj
+      for d in 0..<dim {
+        dstep[d] = span * 0.05
+      }
+      stall = 0
+      if fj < best_val {
+        best_val = fj
+        best_pos = jump
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
