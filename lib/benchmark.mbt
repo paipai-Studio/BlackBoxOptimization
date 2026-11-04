@@ -2106,6 +2106,10 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       extremal_optimization(make_exto_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "BFGS",
+    run: (e, d, b, r, f) => bfgs_optimizer(make_bfgs_config(e, d, b, 25), f, r),
+  })
   entries
 }
 

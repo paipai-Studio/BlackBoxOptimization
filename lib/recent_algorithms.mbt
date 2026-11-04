@@ -33915,6 +33915,280 @@ pub fn comprehensive_learning_pso(
   }
 }
 
+// ===== BFGS: Broyden-Fletcher-Goldfarb-Shanno quasi-Newton (1970) =====
+
+///|
+pub struct BfgsConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bfgs_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BfgsConfig {
+  BfgsConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// BFGS quasi-Newton method (Broyden, Fletcher, Goldfarb & Shanno 1970):
+/// a second-order method made black-box via forward-difference gradients.
+/// Unlike all zero-order algorithms here it accumulates curvature - the
+/// inverse Hessian approximation is rebuilt from (s, y) pairs with BFGS
+/// updates, candidates move along the quasi-Newton direction with an
+/// Armijo backtracking line search, and the budget is split into random
+/// restarts so the method can escape from single-basin traps on multimodal
+/// landscapes.  The historical best is tracked separately.
+pub fn bfgs_optimizer(
+  config : BfgsConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let grad_h = span * 1.0e-4
+  let restarts = 10
+  let seg_budget = max_evals / restarts
+
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _r in 0..<restarts {
+    if evaluations >= max_evals {
+      break
+    }
+    let mut x = random_solution(dim, bounds, current_rng)
+    let mut fx = evaluate(f, x)
+    evaluations = evaluations + 1
+    let mut seg_used = 1
+    if !have_best || fx < best_val {
+      best_val = fx
+      best_pos = x
+      have_best = true
+    }
+    // gradient at the starting point
+    let g : Array[Double] = []
+    for _d in 0..<dim {
+      g.push(0.0)
+    }
+    for d in 0..<dim {
+      let xt : Array[Double] = []
+      for k in 0..<dim {
+        let v = if k == d {
+          max(bounds.min, min(bounds.max, x[k] + grad_h))
+        } else {
+          x[k]
+        }
+        xt.push(v)
+      }
+      g[d] = (evaluate(f, xt) - fx) / grad_h
+      evaluations = evaluations + 1
+      seg_used = seg_used + 1
+    }
+    // inverse Hessian approximation starts as the identity
+    let h_mat : Array[Array[Double]] = []
+    for i in 0..<dim {
+      let row : Array[Double] = []
+      for j in 0..<dim {
+        row.push(if i == j { 1.0 } else { 0.0 })
+      }
+      h_mat.push(row)
+    }
+    // stagnation-triggered dynamic restart: once the quasi-Newton steps
+    // stop making real progress (oscillation-noisy or numerically flat
+    // regions), the remaining budget is handed to a fresh random restart
+    // instead of being burned in place
+    let mut stall = 0
+    let mut fx_prev = fx
+    while seg_used < seg_budget && evaluations < max_evals {
+      // quasi-Newton direction p = -H g
+      let p : Array[Double] = []
+      for i in 0..<dim {
+        let mut v = 0.0
+        for k in 0..<dim {
+          v = v - h_mat[i][k] * g[k]
+        }
+        p.push(v)
+      }
+      // Armijo backtracking line search along p
+      let mut gd = 0.0
+      for d in 0..<dim {
+        gd = gd + g[d] * p[d]
+      }
+      let mut alpha = 1.0
+      let mut accepted = false
+      let mut trial : Array[Double] = []
+      let mut f_trial = 0.0
+      let mut tries = 0
+      while tries < 20 && seg_used < seg_budget {
+        trial = []
+        for d in 0..<dim {
+          let nv = x[d] + alpha * p[d]
+          trial.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        f_trial = evaluate(f, trial)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        if f_trial <= fx + 0.1 * alpha * gd {
+          accepted = true
+          break
+        }
+        alpha = alpha * 0.5
+        tries = tries + 1
+      }
+      if !accepted {
+        // informed stochastic escape: a failed line search means the local
+        // model is uninformative (oscillatory or flat terrain) - jump
+        // toward the global best mixed with a wide perturbation, so the
+        // next quasi-Newton run starts in a more promising basin instead
+        // of giving up the whole segment
+        let esc : Array[Double] = []
+        for d in 0..<dim {
+          let nv = x[d] +
+            0.5 * (best_pos[d] - x[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10
+          esc.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fe = evaluate(f, esc)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        let ax_esc = if fx_prev < 0.0 { -fx_prev } else { fx_prev }
+        if fe < fx_prev - 1.0e-12 * (1.0 + ax_esc) {
+          stall = 0
+        } else {
+          stall = stall + 1
+          if stall >= 15 {
+            break
+          }
+        }
+        fx_prev = fe
+        if fe < best_val {
+          best_val = fe
+          best_pos = esc
+        }
+        // the incumbent moves unconditionally and curvature info goes stale
+        x = esc
+        fx = fe
+        for i in 0..<dim {
+          for j in 0..<dim {
+            h_mat[i][j] = if i == j { 1.0 } else { 0.0 }
+          }
+        }
+        for d in 0..<dim {
+          let xt : Array[Double] = []
+          for k in 0..<dim {
+            let v = if k == d {
+              max(bounds.min, min(bounds.max, x[k] + grad_h))
+            } else {
+              x[k]
+            }
+            xt.push(v)
+          }
+          g[d] = (evaluate(f, xt) - fx) / grad_h
+          evaluations = evaluations + 1
+          seg_used = seg_used + 1
+        }
+      } else {
+        let ax_prev = if fx_prev < 0.0 { -fx_prev } else { fx_prev }
+        if f_trial < fx_prev - 1.0e-12 * (1.0 + ax_prev) {
+          stall = 0
+        } else {
+          stall = stall + 1
+          if stall >= 15 {
+            break
+          }
+        }
+        fx_prev = f_trial
+        // gradient at the accepted point
+        let g_new : Array[Double] = []
+        for _d in 0..<dim {
+          g_new.push(0.0)
+        }
+        for d in 0..<dim {
+          let xt : Array[Double] = []
+          for k in 0..<dim {
+            let v = if k == d {
+              max(bounds.min, min(bounds.max, trial[k] + grad_h))
+            } else {
+              trial[k]
+            }
+            xt.push(v)
+          }
+          g_new[d] = (evaluate(f, xt) - f_trial) / grad_h
+          evaluations = evaluations + 1
+          seg_used = seg_used + 1
+        }
+        // BFGS update of the inverse Hessian approximation from (s, y)
+        let s : Array[Double] = []
+        let y : Array[Double] = []
+        for d in 0..<dim {
+          s.push(alpha * p[d])
+          y.push(g_new[d] - g[d])
+        }
+        let mut sy = 0.0
+        for d in 0..<dim {
+          sy = sy + s[d] * y[d]
+        }
+        if sy > 1.0e-10 {
+          let rho = 1.0 / sy
+          let hy : Array[Double] = []
+          for i in 0..<dim {
+            let mut v = 0.0
+            for k in 0..<dim {
+              v = v + h_mat[i][k] * y[k]
+            }
+            hy.push(v)
+          }
+          let mut yhy = 0.0
+          for i in 0..<dim {
+            yhy = yhy + y[i] * hy[i]
+          }
+          for i in 0..<dim {
+            for j in 0..<dim {
+              let upd = h_mat[i][j] -
+                rho * (s[i] * hy[j] + hy[i] * s[j]) +
+                rho * rho * yhy * s[i] * s[j] +
+                rho * s[i] * s[j]
+              h_mat[i][j] = upd
+            }
+          }
+        }
+        // move the incumbent to the accepted point
+        x = trial
+        fx = f_trial
+        for d in 0..<dim {
+          g[d] = g_new[d]
+        }
+        if fx < best_val {
+          best_val = fx
+          best_pos = x
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
 // ===== ExtO: Extremal Optimization (1999) =====
 
 ///|
