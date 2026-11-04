@@ -1986,6 +1986,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       tree_growth_algorithm(make_tga_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "PPA",
+    run: (e, d, b, r, f) => {
+      plant_propagation_algorithm(make_ppa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

@@ -31107,3 +31107,142 @@ pub fn tree_growth_algorithm(
     evaluations,
   }
 }
+
+// ===== Plant Propagation Algorithm (2014) =====
+
+///|
+pub struct PPAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ppa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> PPAConfig {
+  PPAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Plant Propagation Algorithm (2014).  Each round the plants are ranked by
+/// fitness and reproduce through runners, with the propagation factor
+/// ppf = e^{-t/2500} shrinking all distances as evaluations are spent:
+///   * a well-adapted plant (low rank ratio rn) sends out many runners over a
+///     short distance, so it refines its own neighbourhood;
+///   * a poorly adapted plant sends out fewer runners that travel far, which
+///     spreads the species into unexplored ground;
+///   * 35% of the runners head toward the best plant instead of a random
+///     direction, giving the population a pull toward the global optimum, and
+///     a runner replaces its parent only when it is better (competition).
+pub fn plant_propagation_algorithm(
+  config : PPAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  let denom = if pop_size > 1 { (pop_size - 1).to_double() } else { 1.0 }
+
+  while evaluations < max_evals {
+    // rank the plants: order[0] is the best adapted
+    let order = sort_indices(fits)
+    let rank : Array[Int32] = []
+    for _k in 0..<pop_size {
+      rank.push(0)
+    }
+    for k in 0..<pop_size {
+      rank[order[k]] = k
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let ppf = @math.exp(-evaluations.to_double() / 2500.0)
+      let rn = rank[i].to_double() / denom
+      // well-adapted plants send many short runners, poor ones few long ones
+      let runner_count = 1 + ((1.0 - rn) * 2.0).to_int()
+      let reach = span * (0.02 + 0.30 * rn) * ppf
+      let mut child_pos : Array[Double] = xi
+      let mut child_fit = fits[i]
+      for _c in 0..<runner_count {
+        if evaluations >= max_evals {
+          break
+        }
+        let cand : Array[Double] = []
+        if RNG::next(current_rng) < 0.35 {
+          // runner growing toward the best plant
+          let w = RNG::next(current_rng) * 0.5 + 0.3
+          for d in 0..<dim {
+            let nv = xi[d] +
+              w * (best_pos[d] - xi[d]) +
+              (2.0 * RNG::next(current_rng) - 1.0) * reach * 0.25
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        } else {
+          // runner in a random direction
+          for d in 0..<dim {
+            let nv = xi[d] + (2.0 * RNG::next(current_rng) - 1.0) * reach
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        if fv < child_fit {
+          child_fit = fv
+          child_pos = cand
+        }
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+      pop[i] = child_pos
+      fits[i] = child_fit
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
