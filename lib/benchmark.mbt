@@ -2034,6 +2034,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       social_emotional_optimization(make_seoa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "GFO",
+    run: (e, d, b, r, f) => {
+      guineafowl_optimization(make_guineafowl_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
