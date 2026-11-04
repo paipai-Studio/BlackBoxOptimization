@@ -2022,6 +2022,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       tiger_beetle_optimization(make_tbo_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "Lyrebird",
+    run: (e, d, b, r, f) => {
+      lyrebird_optimization(make_lyrebird_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

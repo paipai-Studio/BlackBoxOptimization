@@ -31964,3 +31964,145 @@ pub fn tiger_beetle_optimization(
     evaluations,
   }
 }
+
+// ===== Lyrebird Optimization Algorithm (2023) =====
+
+///|
+pub struct LyrebirdConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_lyrebird_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> LyrebirdConfig {
+  LyrebirdConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Lyrebird Optimization Algorithm (2023).  The mimicry factor
+/// lbf = e^{-t/2500} shrinks all strides as evaluations are spent:
+///   * mimicry - a contiguous block of the song (a random half of the
+///     dimensions) is imitated from the better of two random tutors, while
+///     the remaining dimensions keep a pull toward the global best, so the
+///     song is assembled from a borrowed phrase plus its own best phrase;
+///   * escape - flee a randomly chosen threat, which keeps the flock diverse;
+///   * refine - a fine jitter around the global best tightens the search.
+pub fn lyrebird_optimization(
+  config : LyrebirdConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let block_len = if dim / 2 < 1 { 1 } else { dim / 2 }
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let lbf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.55 {
+        // mimicry: borrow a contiguous phrase from a random tutor
+        let j = (r2 * pop_size.to_double()).to_int() % pop_size
+        let k = (r3 * pop_size.to_double()).to_int() % pop_size
+        let tutor = if fits[j] <= fits[k] { pop[j] } else { pop[k] }
+        let start = (r2 * dim.to_double()).to_int() % dim
+        for d in 0..<dim {
+          let in_block = if start + block_len <= dim {
+            d >= start && d < start + block_len
+          } else {
+            d >= start || d < start + block_len - dim
+          }
+          if in_block {
+            let nv = xi[d] +
+              1.1 * lbf * (tutor[d] - xi[d]) +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.08 * lbf
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          } else {
+            let nv = xi[d] +
+              0.9 * lbf * (best_pos[d] - xi[d]) +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.04 * lbf
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        }
+      } else if r1 < 0.80 {
+        // escape: flee a random threat
+        let j = (r2 * pop_size.to_double()).to_int() % pop_size
+        let xt = pop[j]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            0.5 * r2 * lbf * (xi[d] - xt[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.06 * lbf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // refine: a fine jitter around the global best
+        for d in 0..<dim {
+          let nv = xi[d] +
+            1.3 * lbf * (best_pos[d] - xi[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.02 * lbf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
