@@ -33914,3 +33914,179 @@ pub fn comprehensive_learning_pso(
     evaluations,
   }
 }
+
+// ===== ExtO: Extremal Optimization (1999) =====
+
+///|
+pub struct ExtremalConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_exto_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ExtremalConfig {
+  ExtremalConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Extremal Optimization (Boettcher & Percus 1999): inspired by the
+/// Bak-Sneppen self-organised criticality model.  Every generation the
+/// worst-ranked individual is replaced by a wide resample seeded from the
+/// second-worst one, and its two rank neighbours take collateral
+/// perturbations (an avalanche), while all survivors follow a single
+/// shared update rule - forage / fine step / contract - instead of being
+/// split into role groups.  The criticality factor eof = e^{-t/2500}
+/// shrinks the amplitudes.
+pub fn extremal_optimization(
+  config : ExtremalConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    let order = sort_indices(fits)
+    let eof = @math.exp(-evaluations.to_double() / 2500.0)
+    let w1 = order[pop_size - 1]
+    let w2 = order[pop_size - 2]
+    let w3 = order[pop_size - 3]
+    // Bak-Sneppen critical update: the worst individual is replaced by a
+    // wide resample seeded from the second-worst, and its two rank
+    // neighbours take collateral perturbations (an avalanche)
+    let seed_w : Array[Double] = []
+    for d in 0..<dim {
+      let nv = pop[w2][d] +
+        (2.0 * RNG::next(current_rng) - 1.0) * span * 0.36 * eof
+      seed_w.push(max(bounds.min, min(bounds.max, nv)))
+    }
+    pop[w1] = seed_w
+    let f_w = evaluate(f, seed_w)
+    fits[w1] = f_w
+    evaluations = evaluations + 1
+    if f_w < best_val {
+      best_val = f_w
+      best_pos = seed_w
+    }
+    for nb_idx in [w2, w3] {
+      if evaluations >= max_evals {
+        break
+      }
+      let xn = pop[nb_idx]
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = xn[d] +
+          (2.0 * RNG::next(current_rng) - 1.0) * span * 0.12 * eof
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      pop[nb_idx] = cand
+      let fv = evaluate(f, cand)
+      fits[nb_idx] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+    // survivors: one shared rule for everyone (no role groups)
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      if i != w1 && i != w2 && i != w3 {
+        let xi = pop[i]
+        let r1 = RNG::next(current_rng)
+        let cand : Array[Double] = []
+        if r1 < 0.40 {
+          // forage: toward the global best with a differential kick
+          let j = (
+              (RNG::next(current_rng) * pop_size.to_double()).to_int() + i + 1
+            ) %
+            pop_size
+          let k = (
+              (RNG::next(current_rng) * pop_size.to_double()).to_int() + i + 2
+            ) %
+            pop_size
+          let xj = pop[j]
+          let xk = pop[k]
+          for d in 0..<dim {
+            let nv = xi[d] +
+              0.9 * eof * (best_pos[d] - xi[d]) +
+              0.45 * (xj[d] - xk[d]) +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10 * eof
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        } else if r1 < 0.75 {
+          // fine local step
+          for d in 0..<dim {
+            let nv = xi[d] +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * eof * eof
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        } else {
+          // contract toward the global best
+          let r2 = RNG::next(current_rng)
+          for d in 0..<dim {
+            let nv = best_pos[d] +
+              r2 * (xi[d] - best_pos[d]) +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * eof * 0.04
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        }
+        pop[i] = cand
+        let fv = evaluate(f, cand)
+        fits[i] = fv
+        evaluations = evaluations + 1
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

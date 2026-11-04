@@ -2100,6 +2100,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       comprehensive_learning_pso(make_clpso_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "ExtO",
+    run: (e, d, b, r, f) => {
+      extremal_optimization(make_exto_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
