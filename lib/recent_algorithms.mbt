@@ -36691,3 +36691,238 @@ pub fn wang_landau_sampling(
     evaluations,
   }
 }
+
+// ===== LSHADE: Linear Population Size Reduction SHADE (2014) =====
+
+///|
+pub struct LSHADEConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_lshade_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> LSHADEConfig {
+  LSHADEConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// LSHADE (Tanabe & Fukunaga 2014): SHADE's current-to-pbest/1 mutation with
+/// success-history memories M_F / M_CR and an external archive of replaced
+/// parents, extended with **linear population size reduction (LPSR)**.  After
+/// every generation the population size is recomputed as
+/// `NP = round(NP_min + (NP_init - NP_min) * remaining / budget)` and the worst
+/// individuals are discarded, so the population shrinks linearly from NP_init
+/// to NP_min as the budget is consumed.  This dynamic population-size schedule
+/// is the defining difference from fixed-size SHADE; shrinking lets the late
+/// search spend its evaluations on the most promising individuals instead of
+/// maintaining a large swarm.  The historical best is tracked separately.
+pub fn lshade_algorithm(
+  config : LSHADEConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let h_mem = 5
+  let np_min = 4
+
+  let mut np_init = config.population_size
+  if np_init < np_min {
+    np_init = np_min
+  }
+
+  let m_f : Array[Double] = []
+  let m_cr : Array[Double] = []
+  for _i in 0..<h_mem {
+    m_f.push(0.5)
+    m_cr.push(0.5)
+  }
+  let archive : Array[Array[Double]] = []
+  let mut mem_idx = 0
+
+  let mut population : Array[Array[Double]] = []
+  let mut fitness : Array[Double] = []
+  for _i in 0..<np_init {
+    let sol = random_solution(dim, bounds, current_rng)
+    population.push(sol)
+    fitness.push(evaluate(f, sol))
+  }
+  let mut evaluations = np_init
+  let sorted0 = sort_indices(fitness)
+  let mut best_pos = population[sorted0[0]]
+  let mut best_val = fitness[sorted0[0]]
+
+  while evaluations < max_evals {
+    let cur_np = population.length()
+    let order = sort_indices(fitness)
+
+    let p_min = 2.0 / cur_np.to_double()
+    let p = p_min + RNG::next(current_rng) * (0.2 - p_min)
+    let mut pnum = (p * cur_np.to_double()).to_int()
+    if pnum < 2 {
+      pnum = 2
+    }
+    if pnum > cur_np {
+      pnum = cur_np
+    }
+
+    let s_f : Array[Double] = []
+    let s_cr : Array[Double] = []
+    let s_df : Array[Double] = []
+
+    for i in 0..<cur_np {
+      if evaluations >= max_evals {
+        break
+      }
+
+      let mem_k = (RNG::next(current_rng) * h_mem.to_double()).to_int() % h_mem
+      let mut cr_i = m_cr[mem_k] +
+        0.1 * box_muller(RNG::next(current_rng), RNG::next(current_rng))
+      if cr_i < 0.0 {
+        cr_i = 0.0
+      } else if cr_i > 1.0 {
+        cr_i = 1.0
+      }
+      let mut f_i = 0.0
+      let mut tries = 0
+      while f_i <= 0.0 && tries < 10 {
+        f_i = m_f[mem_k] + 0.1 * shade_cauchy(current_rng)
+        tries = tries + 1
+      }
+      if f_i <= 0.0 {
+        f_i = 0.5
+      }
+      if f_i > 1.0 {
+        f_i = 1.0
+      }
+
+      let pbest_rank = (RNG::next(current_rng) * pnum.to_double()).to_int() %
+        pnum
+      let pbest = population[order[pbest_rank]]
+
+      let mut r1 = (RNG::next(current_rng) * cur_np.to_double()).to_int() %
+        cur_np
+      while r1 == i {
+        r1 = (RNG::next(current_rng) * cur_np.to_double()).to_int() % cur_np
+      }
+
+      let union_size = cur_np + archive.length()
+      let mut r2 = (RNG::next(current_rng) * union_size.to_double()).to_int() %
+        union_size
+      while r2 == i || r2 == r1 {
+        r2 = (RNG::next(current_rng) * union_size.to_double()).to_int() %
+          union_size
+      }
+      let r2_pos : Array[Double] = if r2 < cur_np {
+        population[r2]
+      } else {
+        archive[r2 - cur_np]
+      }
+
+      let jrand = (RNG::next(current_rng) * dim.to_double()).to_int() % dim
+      let trial : Array[Double] = []
+      for j in 0..<dim {
+        let mutant = population[i][j] +
+          f_i * (pbest[j] - population[i][j]) +
+          f_i * (population[r1][j] - r2_pos[j])
+        let clamped = max(bounds.min, min(bounds.max, mutant))
+        if RNG::next(current_rng) < cr_i || j == jrand {
+          trial.push(clamped)
+        } else {
+          trial.push(population[i][j])
+        }
+      }
+
+      let trial_fit = evaluate(f, trial)
+      evaluations = evaluations + 1
+      if trial_fit < fitness[i] {
+        s_f.push(f_i)
+        s_cr.push(cr_i)
+        s_df.push(abs_val(fitness[i] - trial_fit))
+        if archive.length() < np_init {
+          archive.push(population[i])
+        } else {
+          let ridx = (RNG::next(current_rng) * archive.length().to_double()).to_int() %
+            archive.length()
+          archive[ridx] = population[i]
+        }
+        population[i] = trial
+        fitness[i] = trial_fit
+        if trial_fit < best_val {
+          best_val = trial_fit
+          best_pos = trial
+        }
+      }
+    }
+
+    let m = s_df.length()
+    if m > 0 {
+      let mut sum_w = 0.0
+      let mut sum_wf = 0.0
+      let mut sum_wf2 = 0.0
+      let mut sum_wcr = 0.0
+      for t in 0..<m {
+        let w = s_df[t]
+        sum_w = sum_w + w
+        sum_wf = sum_wf + w * s_f[t]
+        sum_wf2 = sum_wf2 + w * s_f[t] * s_f[t]
+        sum_wcr = sum_wcr + w * s_cr[t]
+      }
+      if sum_wf > 1.0e-12 {
+        m_f[mem_idx] = sum_wf2 / sum_wf
+        m_cr[mem_idx] = sum_wcr / sum_w
+      } else {
+        m_f[mem_idx] = 0.5
+        m_cr[mem_idx] = 0.5
+      }
+      mem_idx = (mem_idx + 1) % h_mem
+    }
+
+    // Linear population size reduction: shrink toward NP_min as budget is used
+    let remain = if evaluations < max_evals {
+      max_evals - evaluations
+    } else {
+      0
+    }
+    let ratio = remain.to_double() / max_evals.to_double()
+    let shrink = ((np_init - np_min).to_double() * ratio).to_int()
+    let mut new_np = np_min + shrink
+    if new_np < np_min {
+      new_np = np_min
+    }
+    if new_np > cur_np {
+      new_np = cur_np
+    }
+    if new_np < cur_np {
+      let ord2 = sort_indices(fitness)
+      let npop : Array[Array[Double]] = []
+      let nfit : Array[Double] = []
+      for k in 0..<new_np {
+        npop.push(population[ord2[k]])
+        nfit.push(fitness[ord2[k]])
+      }
+      population = npop
+      fitness = nfit
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
