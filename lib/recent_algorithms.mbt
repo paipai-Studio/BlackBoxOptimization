@@ -32823,3 +32823,129 @@ pub fn mantis_search_algorithm(
     evaluations,
   }
 }
+
+// ===== EWA: Earthworm Optimization Algorithm (2015) =====
+
+///|
+pub struct EarthwormConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ewa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> EarthwormConfig {
+  EarthwormConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Earthworm Optimization Algorithm (Yang 2015): earthworms regenerate from
+/// a cut - at a random splice point the head segment of a random parent is
+/// spliced onto the tail segment of the incumbent (discrete-dimension
+/// splicing, unlike the arithmetic crossover of SBX or interpolation
+/// schemes), and the offspring is pulled weakly toward the global best.
+/// A fixed jumping probability relocates an individual wholesale to a fresh
+/// point (population diffusion), while the residual phase contracts around
+/// the global best.  The decay factor ewf = e^{-t/2500} shrinks all steps.
+pub fn earthworm_optimization(
+  config : EarthwormConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let ewf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.55 {
+        // regeneration: splice the head of a random parent onto the tail
+        // of the incumbent at a random cut, then pull toward the best
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let cut = (RNG::next(current_rng) * dim.to_double()).to_int() % dim
+        for d in 0..<dim {
+          let base = if d < cut { xj[d] } else { xi[d] }
+          let nv = base +
+            0.4 * ewf * (best_pos[d] - base) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.08 * ewf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < 0.67 {
+        // jumping diffusion: relocate wholesale to a fresh point
+        let p = random_solution(dim, bounds, current_rng)
+        for d in 0..<dim {
+          cand.push(p[d])
+        }
+      } else {
+        // residual: contract around the global best with fine jitter
+        let r2 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * ewf * 0.06
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

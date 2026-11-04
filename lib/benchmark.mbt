@@ -2058,6 +2058,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       mantis_search_algorithm(make_mantis_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "EWA",
+    run: (e, d, b, r, f) => {
+      earthworm_optimization(make_ewa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
