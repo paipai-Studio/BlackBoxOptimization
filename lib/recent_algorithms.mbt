@@ -36170,3 +36170,172 @@ pub fn exponential_natural_evolution_strategy(
     evaluations,
   }
 }
+
+// ===== Demon Algorithm (1983) =====
+
+///|
+pub struct DemonConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_demon_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> DemonConfig {
+  DemonConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Demon Algorithm (Creutz 1983, microcanonical Monte Carlo). The single
+/// incumbent carries a global "demon" energy ledger with a hard cap: a worse
+/// move is accepted only when it can be paid from the ledger, while an
+/// improving move is always accepted and refunds its gain to the ledger
+/// (discarding any overflow beyond demon_max). There is no temperature and no
+/// random rejection of improving moves, only a conserved borrowing budget,
+/// which is the defining difference from simulated annealing and from the
+/// per-molecule kinetic-energy buffer of chemical reaction optimization. A
+/// depleted ledger triggers a fresh uniform re-seed so the chain cannot stall;
+/// the budget is split among random restarts and the historical best is
+/// tracked separately. Note that this is a single-point method
+/// (population_size is accepted for a uniform config interface but not used),
+/// matching the SPSA/BAS/BFGS convention.
+pub fn demon_algorithm(
+  config : DemonConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let restarts = 8
+  let raw_seg = max_evals / restarts
+  let seg_budget = if raw_seg < 24 { 24 } else { raw_seg }
+
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _r in 0..<restarts {
+    if evaluations >= max_evals {
+      break
+    }
+    let mut x = random_solution(dim, bounds, current_rng)
+    let mut fx = evaluate(f, x)
+    evaluations = evaluations + 1
+    if !have_best || fx < best_val {
+      best_val = fx
+      best_pos = x
+      have_best = true
+    }
+    let f0_abs = if fx < 0.0 { -fx } else { fx }
+    let fscale = 1.0 + f0_abs
+    let base_cap = min(span * 0.10, fscale * 0.30)
+    let base_ledger = min(span * 0.05, fscale * 0.10)
+    let mut ledger = base_ledger
+    let mut stall = 0
+    let mut step = span * 0.30
+    let mut seg_used = 1
+    while seg_used < seg_budget && evaluations < max_evals {
+      let raw_frac = seg_used.to_double() / seg_budget.to_double()
+      let frac = if raw_frac > 1.0 { 1.0 } else { raw_frac }
+      let decay = 1.0 - frac
+      let trust = 0.05 + 0.95 * decay
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = x[d] + (2.0 * RNG::next(current_rng) - 1.0) * step
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      seg_used = seg_used + 1
+      step = max(step * 0.99, span * 1.0e-5)
+      let de = fv - fx
+      if de <= 0.0 {
+        // improving move: always accepted, gain is frozen into the ledger
+        ledger = min(ledger - de, base_cap * trust)
+        x = cand
+        fx = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+          stall = 0
+        } else {
+          stall = stall + 1
+        }
+      } else if de <= ledger {
+        // worse move: accepted only if the demon can pay for it
+        ledger = ledger - de
+        x = cand
+        fx = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+          stall = 0
+        } else {
+          stall = stall + 1
+        }
+      } else {
+        stall = stall + 1
+      }
+      if ledger < fscale * 1.0e-4 && evaluations < max_evals {
+        // ledger depleted: reheat the chain near its current state
+        ledger = base_ledger * trust
+        let reheat : Array[Double] = []
+        for d in 0..<dim {
+          let nv = x[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.03 * decay
+          reheat.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let ff = evaluate(f, reheat)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        x = reheat
+        fx = ff
+        if ff < best_val {
+          best_val = ff
+          best_pos = reheat
+        }
+      }
+      if stall >= 120 && evaluations < max_evals {
+        // plateau: borrow a fresh start from the incumbent best
+        let jump : Array[Double] = []
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10
+          jump.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fj = evaluate(f, jump)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        x = jump
+        fx = fj
+        ledger = base_ledger * trust
+        stall = 0
+        if fj < best_val {
+          best_val = fj
+          best_pos = jump
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
