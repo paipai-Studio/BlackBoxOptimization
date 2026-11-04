@@ -2230,6 +2230,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       adaptive_simulated_annealing(make_asa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "GSS",
+    run: (e, d, b, r, f) => {
+      golden_section_search(make_gss_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

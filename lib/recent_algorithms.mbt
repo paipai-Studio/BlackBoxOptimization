@@ -37933,3 +37933,192 @@ pub fn adaptive_simulated_annealing(
     evaluations,
   }
 }
+
+// ===== GSS: golden section search (1953) =====
+
+///|
+pub struct GssConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_gss_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> GssConfig {
+  GssConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn gss_point(
+  x : Array[Double],
+  d : Int32,
+  dim : Int32,
+  value : Double,
+) -> Array[Double] {
+  let p : Array[Double] = []
+  for k in 0..<dim {
+    if k == d {
+      p.push(value)
+    } else {
+      p.push(x[k])
+    }
+  }
+  p
+}
+
+///|
+/// Golden Section Search (Kiefer 1953) applied coordinate by coordinate. Each
+/// coordinate is minimized over a bracket around its current value: two
+/// interior probes at the golden ratio are evaluated and the bracket is
+/// repeatedly reduced to the sub-interval containing the better probe, until a
+/// fixed number of reductions or the budget is exhausted. The bracket expands
+/// on success and shrinks on failure, and a whole sweep without improvement
+/// triggers a jump near the incumbent best. Unlike PRAXIS (parabolic line
+/// search along rotating principal axes) this uses the bracketing golden-section
+/// rule on fixed coordinate axes; the schedule does not depend on the total
+/// budget, so a larger budget strictly continues the same run and the
+/// historical best is monotone. population_size is accepted for a uniform
+/// config interface but not used.
+pub fn golden_section_search(
+  config : GssConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let phi = 0.6180339887498949
+
+  let mut x = random_solution(dim, bounds, current_rng)
+  let mut fx = evaluate(f, x)
+  let mut evaluations = 1
+  let mut best_pos = x
+  let mut best_val = fx
+
+  let brackets : Array[Double] = []
+  for _d in 0..<dim {
+    brackets.push(span * 0.08)
+  }
+  let mut stall = 0
+
+  while evaluations < max_evals {
+    let fx_before = fx
+    for d in 0..<dim {
+      if evaluations >= max_evals {
+        break
+      }
+      let w = brackets[d]
+      let lo = max(bounds.min, x[d] - w)
+      let hi = min(bounds.max, x[d] + w)
+      let width = hi - lo
+      if width >= span * 1.0e-9 {
+        let a0 = hi - phi * width
+        let b0 = lo + phi * width
+        let xa = gss_point(x, d, dim, a0)
+        let xb = gss_point(x, d, dim, b0)
+        let fa0 = evaluate(f, xa)
+        evaluations = evaluations + 1
+        let mut best_t = a0
+        let mut best_f = fa0
+        let mut l = lo
+        let mut h = hi
+        let mut aa = a0
+        let mut bb = b0
+        let mut faa = fa0
+        let mut fbb = fa0
+        if evaluations < max_evals {
+          fbb = evaluate(f, xb)
+          evaluations = evaluations + 1
+          if fbb < best_f {
+            best_t = b0
+            best_f = fbb
+          }
+          let mut it = 0
+          while it < 7 && evaluations < max_evals {
+            if faa < fbb {
+              h = bb
+              bb = aa
+              fbb = faa
+              aa = h - phi * (h - l)
+              let xaa = gss_point(x, d, dim, aa)
+              faa = evaluate(f, xaa)
+              evaluations = evaluations + 1
+              if faa < best_f {
+                best_t = aa
+                best_f = faa
+              }
+            } else {
+              l = aa
+              aa = bb
+              faa = fbb
+              bb = l + phi * (h - l)
+              let xbb = gss_point(x, d, dim, bb)
+              fbb = evaluate(f, xbb)
+              evaluations = evaluations + 1
+              if fbb < best_f {
+                best_t = bb
+                best_f = fbb
+              }
+            }
+            it = it + 1
+          }
+        }
+        if best_f < fx {
+          x = gss_point(x, d, dim, best_t)
+          fx = best_f
+          brackets[d] = min(brackets[d] * 1.25, span * 0.5)
+          if best_f < best_val {
+            best_val = best_f
+            best_pos = x
+          }
+        } else {
+          brackets[d] = max(brackets[d] * 0.7, span * 1.0e-5)
+        }
+      }
+    }
+    if fx < fx_before {
+      stall = 0
+    } else {
+      stall = stall + 1
+    }
+    if stall >= 20 && evaluations < max_evals {
+      let jump : Array[Double] = []
+      for d in 0..<dim {
+        let nv = best_pos[d] +
+          (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10
+        jump.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fj = evaluate(f, jump)
+      evaluations = evaluations + 1
+      x = jump
+      fx = fj
+      for d in 0..<dim {
+        brackets[d] = span * 0.05
+      }
+      stall = 0
+      if fj < best_val {
+        best_val = fj
+        best_pos = jump
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
