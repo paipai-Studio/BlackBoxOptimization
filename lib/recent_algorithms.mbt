@@ -31668,3 +31668,145 @@ pub fn queuing_search_algorithm(
     evaluations,
   }
 }
+
+// ===== Starfish Optimization Algorithm (2024) =====
+
+///|
+pub struct StarfishConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_starfish_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> StarfishConfig {
+  StarfishConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Starfish Optimization Algorithm (2024).  The regeneration factor
+/// sff = e^{-t/2500} shrinks all strides as evaluations are spent:
+///   * foraging - follow a randomly chosen arm, i.e. a random swarm member,
+///     with a differential kick and a jitter;
+///   * regeneration - only a random subset of the dimensions (the damaged
+///     arm) contracts toward the global best, so the remaining coordinates
+///     retain their diversity and the search keeps exploring;
+///   * autotomy - a fine jitter, occasionally replaced by a wide arm twitch
+///     that relocates part of the body.
+pub fn starfish_optimization(
+  config : StarfishConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let sff = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.30 {
+        // foraging: follow the better of two random arms, with a weak pull
+        // toward the best and a differential kick
+        let j = (r2 * pop_size.to_double()).to_int() % pop_size
+        let k = (r3 * pop_size.to_double()).to_int() % pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        let xfood = if fits[j] <= fits[k] { xj } else { xk }
+        for d in 0..<dim {
+          let nv = xi[d] +
+            1.0 * sff * (xfood[d] - xi[d]) +
+            0.45 * sff * (best_pos[d] - xi[d]) +
+            0.35 * r2 * sff * (xj[d] - xk[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.08 * sff
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < 0.85 {
+        // regeneration: only a random subset of the dimensions regrows
+        // toward the global best
+        for d in 0..<dim {
+          if RNG::next(current_rng) < 0.72 {
+            let nv = xi[d] +
+              2.0 * sff * (best_pos[d] - xi[d]) +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.015 * sff
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          } else {
+            cand.push(xi[d])
+          }
+        }
+        // autotomy: fine jitter, occasionally a wide arm twitch
+      } else if r3 < 0.12 {
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.30 * sff
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05 * sff * sff
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

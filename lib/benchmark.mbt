@@ -2010,6 +2010,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       queuing_search_algorithm(make_qsa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "Starfish",
+    run: (e, d, b, r, f) => {
+      starfish_optimization(make_starfish_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
