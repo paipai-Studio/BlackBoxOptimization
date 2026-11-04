@@ -2224,6 +2224,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       bobyqa_optimizer(make_bobyqa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "ASA",
+    run: (e, d, b, r, f) => {
+      adaptive_simulated_annealing(make_asa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

@@ -37790,3 +37790,146 @@ pub fn bobyqa_optimizer(
     evaluations,
   }
 }
+
+// ===== ASA: Adaptive Simulated Annealing (1989) =====
+
+///|
+pub struct AsaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_asa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> AsaConfig {
+  AsaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Adaptive Simulated Annealing (Ingber 1989). A single prefix-stable walk is
+/// used: the temperature follows Ingber's exponential schedule
+/// `T(k) = T0 * exp(-2 * k^(1/dim))`, and each coordinate keeps its own step
+/// size that is adapted every 20 trials toward the 44% acceptance target
+/// (increase when the acceptance rate exceeds 0.44, decrease otherwise).
+/// Candidates perturb one coordinate at a time and follow the Metropolis rule.
+/// Unlike plain simulated annealing with one global step and a geometric
+/// cooling factor, ASA adapts per-dimension scales and uses the reannealing
+/// schedule. A long stall triggers a jump near the incumbent best. Because no
+/// schedule depends on the total budget, a larger budget strictly continues the
+/// same trajectory, so the historical best is monotone. population_size is
+/// accepted for a uniform config interface but not used.
+pub fn adaptive_simulated_annealing(
+  config : AsaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+
+  let mut x = random_solution(dim, bounds, current_rng)
+  let mut fx = evaluate(f, x)
+  let mut evaluations = 1
+  let mut best_pos = x
+  let mut best_val = fx
+
+  let f0_abs = if fx < 0.0 { -fx } else { fx }
+  let t0 = 0.20 * (1.0 + f0_abs)
+  let steps : Array[Double] = []
+  let succ : Array[Int32] = []
+  let tries : Array[Int32] = []
+  for _d in 0..<dim {
+    steps.push(span * 0.10)
+    succ.push(0)
+    tries.push(0)
+  }
+  let mut stall = 0
+
+  while evaluations < max_evals {
+    let k = evaluations.to_double()
+    let phase = @math.pow(k, 1.0 / dim.to_double())
+    let temp = t0 * @math.exp(-2.0 * phase) + 1.0e-12
+    let d = (RNG::next(current_rng) * dim.to_double()).to_int() % dim
+    let s = steps[d]
+    let cand : Array[Double] = []
+    for kk in 0..<dim {
+      if kk == d {
+        let nv = x[kk] + (2.0 * RNG::next(current_rng) - 1.0) * s
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      } else {
+        cand.push(x[kk])
+      }
+    }
+    let fv = evaluate(f, cand)
+    evaluations = evaluations + 1
+    tries[d] = tries[d] + 1
+    let de = fv - fx
+    let mut accepted = false
+    if de <= 0.0 {
+      accepted = true
+    } else if RNG::next(current_rng) < @math.exp(-de / temp) {
+      accepted = true
+    }
+    if accepted {
+      x = cand
+      fx = fv
+      succ[d] = succ[d] + 1
+      stall = 0
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    } else {
+      stall = stall + 1
+    }
+    if tries[d] >= 20 {
+      let rate = succ[d].to_double() / 20.0
+      if rate > 0.44 {
+        steps[d] = min(steps[d] * 1.2, span * 0.5)
+      } else {
+        steps[d] = max(steps[d] * 0.8, span * 1.0e-6)
+      }
+      succ[d] = 0
+      tries[d] = 0
+    }
+    if stall >= 200 && evaluations < max_evals {
+      let jump : Array[Double] = []
+      for kk in 0..<dim {
+        let nv = best_pos[kk] +
+          (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10
+        jump.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fj = evaluate(f, jump)
+      evaluations = evaluations + 1
+      x = jump
+      fx = fj
+      for kk in 0..<dim {
+        steps[kk] = span * 0.05
+      }
+      stall = 0
+      if fj < best_val {
+        best_val = fj
+        best_pos = jump
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
