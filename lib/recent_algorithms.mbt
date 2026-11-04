@@ -34943,3 +34943,183 @@ pub fn simulated_quantum_annealing(
     evaluations,
   }
 }
+
+// ===== COBYLA: linear-approximation trust region (1994) =====
+
+///|
+pub struct CobylaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_cobyla_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CobylaConfig {
+  CobylaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// COBYLA-style linear-approximation trust region (Powell 1994). Each step
+/// builds a local linear model with forward differences, then takes the
+/// steepest-descent step clipped to a trust radius rho; the radius expands
+/// when the actual/predicted decrease ratio is good and contracts on a failed
+/// step. No curvature is accumulated (unlike BFGS) and no simplex is
+/// maintained (unlike Nelder-Mead): the model is purely linear and accuracy is
+/// governed by the trust radius. Flat regions trigger an informed escape
+/// toward the incumbent best, and the budget is split among random restarts so
+/// a trapped trust region can be abandoned for a fresh basin.
+pub fn cobyla_optimizer(
+  config : CobylaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let restarts = 8
+  let raw_seg = max_evals / restarts
+  let seg_budget = if raw_seg < 24 { 24 } else { raw_seg }
+
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _r in 0..<restarts {
+    if evaluations >= max_evals {
+      break
+    }
+    let mut x = random_solution(dim, bounds, current_rng)
+    let mut fx = evaluate(f, x)
+    evaluations = evaluations + 1
+    if !have_best || fx < best_val {
+      best_val = fx
+      best_pos = x
+      have_best = true
+    }
+    let mut rho = span * 0.08
+    let mut seg_used = 1
+    let mut stall = 0
+    while seg_used < seg_budget && evaluations < max_evals {
+      let h = max(rho * 0.5, span * 1.0e-4)
+      let g : Array[Double] = []
+      for _d in 0..<dim {
+        g.push(0.0)
+      }
+      let mut g_ok = true
+      for d in 0..<dim {
+        if evaluations >= max_evals {
+          g_ok = false
+          break
+        }
+        let probe : Array[Double] = []
+        for k in 0..<dim {
+          let v = if k == d {
+            max(bounds.min, min(bounds.max, x[k] + h))
+          } else {
+            x[k]
+          }
+          probe.push(v)
+        }
+        let fv = evaluate(f, probe)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        g[d] = (fv - fx) / h
+      }
+      if !g_ok {
+        break
+      }
+      let mut gsq = 0.0
+      for d in 0..<dim {
+        gsq = gsq + g[d] * g[d]
+      }
+      let gnorm = gsq.sqrt()
+      if gnorm < 1.0e-10 {
+        // flat region: informed escape toward the incumbent best
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.20
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        x = cand
+        fx = fv
+        rho = span * 0.08
+        stall = 0
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      } else {
+        let scale = rho / gnorm
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let nv = x[d] - scale * g[d]
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        let ared = fx - fv
+        if ared > 0.0 {
+          let ratio = ared / (gnorm * rho + 1.0e-12)
+          x = cand
+          fx = fv
+          stall = 0
+          if fv < best_val {
+            best_val = fv
+            best_pos = cand
+          }
+          if ratio > 0.75 {
+            rho = min(rho * 1.5, span * 0.50)
+          }
+        } else {
+          stall = stall + 1
+          rho = max(rho * 0.5, span * 1.0e-4)
+        }
+      }
+      if stall >= 8 && evaluations < max_evals {
+        // trust region collapsed repeatedly: re-centre near the best
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        x = cand
+        fx = fv
+        rho = span * 0.08
+        stall = 0
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

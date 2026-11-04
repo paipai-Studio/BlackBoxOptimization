@@ -2134,6 +2134,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       simulated_quantum_annealing(make_sqa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "COBYLA",
+    run: (e, d, b, r, f) => {
+      cobyla_optimizer(make_cobyla_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
