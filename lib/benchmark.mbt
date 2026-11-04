@@ -2094,6 +2094,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       parallel_tempering_optimization(make_pto_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "CLPSO",
+    run: (e, d, b, r, f) => {
+      comprehensive_learning_pso(make_clpso_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

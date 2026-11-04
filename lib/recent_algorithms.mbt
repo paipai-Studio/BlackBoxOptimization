@@ -33772,3 +33772,145 @@ pub fn parallel_tempering_optimization(
     evaluations,
   }
 }
+
+// ===== CLPSO: Comprehensive Learning Particle Swarm Optimizer (2006) =====
+
+///|
+pub struct ComprehensiveLearningConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_clpso_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ComprehensiveLearningConfig {
+  ComprehensiveLearningConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Comprehensive Learning Particle Swarm Optimizer (Liang, Qin, Suganthan &
+/// Baskar 2006): every particle keeps a personal best, but instead of
+/// learning from its own pbest alone it builds a heterogeneous exemplar -
+/// each dimension is drawn from a different random particle's pbest - and
+/// only re-draws that exemplar after a stagnation stretch (tg=7 barren
+/// generations), so each particle learns a different mixture of the
+/// swarm's knowledge.  The learning factor clf = e^{-t/2500} shrinks the
+/// steps.
+pub fn comprehensive_learning_pso(
+  config : ComprehensiveLearningConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let tg : Int32 = 7
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  // personal bests, stagnation counters and per-dimension exemplars
+  let pbest : Array[Array[Double]] = []
+  let pfit : Array[Double] = []
+  let stall : Array[Int32] = []
+  let ex_idx : Array[Array[Int32]] = []
+  for i in 0..<pop_size {
+    pbest.push(pop[i])
+    pfit.push(fits[i])
+    stall.push(0)
+    let ex : Array[Int32] = []
+    for _d in 0..<dim {
+      let j = ((RNG::next(current_rng) * pop_size.to_double()).to_int() + i + 1) %
+        pop_size
+      ex.push(j)
+    }
+    ex_idx.push(ex)
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let clf = @math.exp(-evaluations.to_double() / 2500.0)
+      // comprehensive learning: every dimension takes its value from a
+      // different particle's personal best
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let ex = pbest[ex_idx[i][d]]
+        let nv = xi[d] +
+          0.65 * clf * (ex[d] - xi[d]) +
+          (2.0 * RNG::next(current_rng) - 1.0) * span * 0.08 * clf
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      // personal-best update and stagnation accounting
+      if fv < pfit[i] {
+        pbest[i] = cand
+        pfit[i] = fv
+        stall[i] = 0
+      } else {
+        stall[i] = stall[i] + 1
+      }
+      pop[i] = cand
+      fits[i] = fv
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+      // re-draw the heterogeneous exemplar after a barren stretch
+      if stall[i] >= tg {
+        stall[i] = 0
+        for d in 0..<dim {
+          let j = (
+              (RNG::next(current_rng) * pop_size.to_double()).to_int() + i + 1
+            ) %
+            pop_size
+          ex_idx[i][d] = j
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
