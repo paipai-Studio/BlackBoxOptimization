@@ -31246,3 +31246,132 @@ pub fn plant_propagation_algorithm(
     evaluations,
   }
 }
+
+// ===== Honey Bee Mating Optimization (2001) =====
+
+///|
+pub struct HBMOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_hbmo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> HBMOConfig {
+  HBMOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Honey Bee Mating Optimization (2001).  The best individual is the queen
+/// and every other bee is a drone that may mate with her.  The annealing
+/// speed speed = e^{-t/2500} controls both the mating acceptance and the
+/// brood care:
+///   * a drone with normalized fitness gap g = |fit_i - fit_best| /
+///     (|fit_i| + |fit_best| + eps) is accepted with probability
+///     p = e^{-g / speed}, so early (fast) rounds accept diverse drones while
+///     late (slow) rounds only accept drones almost as good as the queen;
+///   * an accepted drone crosses with the queen,
+///     brood = queen + w (drone - queen) + jitter, inheriting part of the
+///     drone genome;
+///   * a rejected drone stays as a worker and patrols its neighbourhood with
+///     a weak pull toward the queen plus a fine jitter, so the hive keeps
+///     converging even when mating is rare.
+/// The brood replaces its drone only when it is better, and the queen is
+/// replaced whenever a brood beats her.
+pub fn honey_bee_mating_optimization(
+  config : HBMOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // annealing mating speed, floored so late rounds still allow mating
+    let speed = 0.2 + 0.8 * @math.exp(-evaluations.to_double() / 2500.0)
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let gap = abs_val(fits[i] - best_val) /
+        (abs_val(fits[i]) + abs_val(best_val) + 1.0e-9)
+      let p_mate = @math.exp(-gap / (speed + 1.0e-9))
+      let cand : Array[Double] = []
+      if r1 < p_mate {
+        // mating: cross the drone genome into the queen
+        let w = 0.3 + 0.6 * r2
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            w * (xi[d] - best_pos[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.03 * speed
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // worker patrol: weak pull toward the queen plus a fine jitter
+        for d in 0..<dim {
+          let nv = xi[d] +
+            0.35 * r2 * (best_pos[d] - xi[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.02 * speed
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < fits[i] {
+        pop[i] = cand
+        fits[i] = fv
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

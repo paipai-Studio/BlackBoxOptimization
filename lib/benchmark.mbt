@@ -1992,6 +1992,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       plant_propagation_algorithm(make_ppa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "HBMO",
+    run: (e, d, b, r, f) => {
+      honey_bee_mating_optimization(make_hbmo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
