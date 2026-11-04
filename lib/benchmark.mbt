@@ -2248,6 +2248,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       multi_level_single_linkage(make_mlsl_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "LBB",
+    run: (e, d, b, r, f) => {
+      lipschitz_branch_and_bound(make_lipschitz_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

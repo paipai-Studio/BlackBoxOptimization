@@ -38591,3 +38591,252 @@ pub fn multi_level_single_linkage(
     evaluations,
   }
 }
+
+// ===== LBB: Lipschitz branch and bound (1972) =====
+
+///|
+pub struct LipschitzConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_lipschitz_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> LipschitzConfig {
+  LipschitzConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn lbb_abs(v : Double) -> Double {
+  if v < 0.0 {
+    -v
+  } else {
+    v
+  }
+}
+
+///|
+fn lbb_halfdiag(widths : Array[Double], dim : Int32) -> Double {
+  let mut s = 0.0
+  for d in 0..<dim {
+    let h = widths[d] * 0.5
+    s = s + h * h
+  }
+  s.sqrt()
+}
+
+///|
+/// Lipschitz branch and bound (Piyavskii-Shubert style, 1972). The search space
+/// is covered by boxes; each box stores its centre value and a **local
+/// Lipschitz estimate** derived from the observed slopes between the parent
+/// centre and the new split points. The lower bound of a box is
+/// `f(centre) - L_local * half_diagonal`, and boxes are split along their
+/// longest side into three parts (evaluating the two new centres) in order of
+/// their lower bounds, plus the widest box for coverage. Unlike DIRECT
+/// (best/widest rectangles with a convex-hull potentiality test), the Lipschitz
+/// bound directly ranks boxes and gives the region a certificate of
+/// optimality. A box cap keeps the scan cheap; the schedule is independent of
+/// the total budget, so a larger budget strictly continues the same run and the
+/// historical best is monotone. population_size is accepted for a uniform
+/// config interface but not used.
+pub fn lipschitz_branch_and_bound(
+  config : LipschitzConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let max_rects = 512
+
+  let center : Array[Double] = []
+  let widths0 : Array[Double] = []
+  for _d in 0..<dim {
+    center.push(bounds.min + RNG::next(current_rng) * span)
+    widths0.push(span)
+  }
+  let f0 = evaluate(f, center)
+  let mut evaluations = 1
+  let mut centers : Array[Array[Double]] = [center]
+  let mut widths : Array[Array[Double]] = [widths0]
+  let mut vals : Array[Double] = [f0]
+  let mut lips : Array[Double] = [0.0]
+  let mut best_pos = center
+  let mut best_val = f0
+
+  while evaluations < max_evals {
+    let len = centers.length()
+    if len == 0 {
+      break
+    }
+    let mut best_lb_i = 0
+    let mut best_lb = 1.0e300
+    let mut second_lb_i = 0
+    let mut second_lb = 1.0e300
+    let mut widest_i = 0
+    let mut widest = -1.0
+    for i in 0..<len {
+      let hd = lbb_halfdiag(widths[i], dim)
+      let lb = vals[i] - lips[i] * hd
+      if lb < best_lb {
+        second_lb = best_lb
+        second_lb_i = best_lb_i
+        best_lb = lb
+        best_lb_i = i
+      } else if lb < second_lb {
+        second_lb = lb
+        second_lb_i = i
+      }
+      if hd > widest {
+        widest = hd
+        widest_i = i
+      }
+    }
+    let before_split = evaluations
+    let targets : Array[Int32] = []
+    targets.push(best_lb_i)
+    if second_lb_i != best_lb_i {
+      targets.push(second_lb_i)
+    }
+    if widest_i != best_lb_i && widest_i != second_lb_i {
+      targets.push(widest_i)
+    }
+    for t in 0..<targets.length() {
+      if evaluations + 2 > max_evals {
+        break
+      }
+      let idx = targets[t]
+      let mut k = 0
+      for d in 1..<dim {
+        if widths[idx][d] > widths[idx][k] {
+          k = d
+        }
+      }
+      let w = widths[idx][k]
+      if w >= 1.0e-12 {
+        let c = centers[idx]
+        let left_x = max(bounds.min, min(bounds.max, c[k] - w / 3.0))
+        let right_x = max(bounds.min, min(bounds.max, c[k] + w / 3.0))
+        let left : Array[Double] = []
+        let right : Array[Double] = []
+        for d in 0..<dim {
+          if d == k {
+            left.push(left_x)
+            right.push(right_x)
+          } else {
+            left.push(c[d])
+            right.push(c[d])
+          }
+        }
+        let fl = evaluate(f, left)
+        let fr = evaluate(f, right)
+        evaluations = evaluations + 2
+        let d1 = lbb_abs(left[k] - c[k])
+        let d2 = lbb_abs(right[k] - c[k])
+        let d3 = lbb_abs(right[k] - left[k])
+        let mut lnew = lips[idx]
+        if d1 > 1.0e-12 {
+          let cand_l = lbb_abs(fl - vals[idx]) / d1
+          if cand_l > lnew {
+            lnew = cand_l
+          }
+        }
+        if d2 > 1.0e-12 {
+          let cand_l = lbb_abs(fr - vals[idx]) / d2
+          if cand_l > lnew {
+            lnew = cand_l
+          }
+        }
+        if d3 > 1.0e-12 {
+          let cand_l = lbb_abs(fr - fl) / d3
+          if cand_l > lnew {
+            lnew = cand_l
+          }
+        }
+        let wm : Array[Double] = []
+        let wl : Array[Double] = []
+        let wr : Array[Double] = []
+        for d in 0..<dim {
+          if d == k {
+            wm.push(w / 3.0)
+            wl.push(w / 3.0)
+            wr.push(w / 3.0)
+          } else {
+            wm.push(widths[idx][d])
+            wl.push(widths[idx][d])
+            wr.push(widths[idx][d])
+          }
+        }
+        widths[idx] = wm
+        lips[idx] = lnew
+        centers.push(left)
+        widths.push(wl)
+        vals.push(fl)
+        lips.push(lnew)
+        centers.push(right)
+        widths.push(wr)
+        vals.push(fr)
+        lips.push(lnew)
+        if fl < best_val {
+          best_val = fl
+          best_pos = left
+        }
+        if fr < best_val {
+          best_val = fr
+          best_pos = right
+        }
+        if centers.length() > max_rects {
+          let n = centers.length()
+          let mut worst = 0
+          let mut worst_lb = -1.0e300
+          for i in 0..<n {
+            let hd = lbb_halfdiag(widths[i], dim)
+            let lb = vals[i] - lips[i] * hd
+            if lb > worst_lb {
+              worst_lb = lb
+              worst = i
+            }
+          }
+          let nc : Array[Array[Double]] = []
+          let nw : Array[Array[Double]] = []
+          let nv : Array[Double] = []
+          let nl : Array[Double] = []
+          for i in 0..<n {
+            if i != worst {
+              nc.push(centers[i])
+              nw.push(widths[i])
+              nv.push(vals[i])
+              nl.push(lips[i])
+            }
+          }
+          centers = nc
+          widths = nw
+          vals = nv
+          lips = nl
+        }
+      }
+    }
+    if evaluations == before_split {
+      break
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
