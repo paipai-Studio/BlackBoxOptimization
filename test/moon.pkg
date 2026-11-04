@@ -1,3 +1,5 @@
+warnings = "-29"
+
 import {
   "IvanAXu/BlackBoxOptimization/lib",
 }

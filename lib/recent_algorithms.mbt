@@ -15653,3 +15653,16892 @@ pub fn henry_gas_solubility_optimization(
     evaluations,
   }
 }
+
+// ===== COOT: Coot Optimization Algorithm (2021) =====
+
+///|
+pub struct COOTConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_coot_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> COOTConfig {
+  COOTConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn coot_chosen(chosen : Array[Int32], idx : Int32) -> Bool {
+  let mut found = false
+  for c in 0..<chosen.length() {
+    if chosen[c] == idx {
+      found = true
+    }
+  }
+  found
+}
+
+///|
+fn coot_select_leaders(vals : Array[Double], k : Int32) -> Array[Int32] {
+  let n = vals.length()
+  let chosen : Array[Int32] = []
+  for _c in 0..<k {
+    let mut best_i : Int32 = -1
+    let mut best_v = 1.0e308
+    for i in 0..<n {
+      if coot_chosen(chosen, i) == false && vals[i] < best_v {
+        best_v = vals[i]
+        best_i = i
+      }
+    }
+    if best_i >= 0 {
+      chosen.push(best_i)
+    }
+  }
+  chosen
+}
+
+///|
+/// Coot Optimization Algorithm (Naruei & Keynia 2021), mechanism-faithful
+/// variant blending the paper's three movements over a population whose best
+/// ~10% act as leaders:
+///   * random movement - a coot steps from a random peer j using
+///     A = (X_i - X_j) - X_j,  X_i <- X_i + 2 r2 A -/+ (X_i - X_j);
+///   * chain movement  - a coot moves to the midpoint of itself and the
+///     previous coot,  X_i <- (X_i + X_{i-1}) / 2;
+///   * leader movement - each leader follows the global best with a
+///     cosine-scaled step, B r3 cos(2 pi r4)(gbest - X) +/- gbest, where
+///     B = 2 - 2 t/Tmax decays with progress.
+/// Greedy acceptance and historical-best tracking are added.
+pub fn coot_optimization_algorithm(
+  config : COOTConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let n_leaders = max_int(1, pop_size / 10)
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    let progress = evaluations.to_double() / max_evals.to_double()
+    let b_factor = 2.0 - 2.0 * progress
+    let leaders = coot_select_leaders(vals, n_leaders)
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let cand : Array[Double] = []
+      if coot_chosen(leaders, i) {
+        let r3 = RNG::next(current_rng)
+        let r4 = RNG::next(current_rng)
+        let r5 = RNG::next(current_rng)
+        let cos_term = @math.cos(TWO_PI * r4)
+        for d in 0..<dim {
+          let step = b_factor * r3 * cos_term * (best_pos[d] - xi[d])
+          let nv = if r5 < 0.5 {
+            step + best_pos[d]
+          } else {
+            step - best_pos[d]
+          }
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if RNG::next(current_rng) < 0.5 {
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let r2 = RNG::next(current_rng)
+        let sign_flip = RNG::next(current_rng) < 0.5
+        let xj = pop[j]
+        for d in 0..<dim {
+          let bvec = xi[d] - xj[d]
+          let a = bvec - xj[d]
+          let base = xi[d] + 2.0 * r2 * a
+          let nv = if sign_flip { base - bvec } else { base + bvec }
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        let prev = pop[if i == 0 { pop_size - 1 } else { i - 1 }]
+        for d in 0..<dim {
+          cand.push(max(bounds.min, min(bounds.max, (xi[d] + prev[d]) / 2.0)))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== DOA: Dingo Optimization Algorithm (2021) =====
+
+///|
+pub struct DOAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_doa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> DOAConfig {
+  DOAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn dingo_distance(a : Array[Double], b : Array[Double]) -> Double {
+  let mut s = 0.0
+  for d in 0..<a.length() {
+    let diff = a[d] - b[d]
+    s = s + diff * diff
+  }
+  s.sqrt()
+}
+
+///|
+/// Dingo Optimization Algorithm (Peraza-Vazquez et al. 2021),
+/// mechanism-faithful variant.  Each dingo picks one of three hunting
+/// strategies by a random draw (0.5 / 0.25 / 0.25):
+///   * group attack - consensus move toward the rest of the pack,
+///     X_i <- X_i + beta1 sum_k phi_k (X_k - X_i) / (||X_k - X_i|| + eps);
+///   * persecution  - chase the best,
+///     X_i <- X_i + beta1 e^{-beta2} (gbest - X_i);
+///   * scavenging   - reposition,
+///     X_i <- 0.5 (e^{-beta2 gbest} - (-1)^lambda X_i), lambda in {0,1}.
+/// beta1 ~ U(-2,2), beta2 ~ U(0,2); greedy acceptance and historical-best
+/// tracking are added.
+pub fn dingo_optimization_algorithm(
+  config : DOAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let cand : Array[Double] = []
+      let strategy = RNG::next(current_rng)
+      if strategy < 0.5 {
+        // group attack: consensus of the pack
+        let beta1 = RNG::next(current_rng) * 4.0 - 2.0
+        let acc : Array[Double] = []
+        for _d in 0..<dim {
+          acc.push(0.0)
+        }
+        for k in 0..<pop_size {
+          if k != i {
+            let dist = dingo_distance(xi, pop[k]) + 1.0e-12
+            let phi = RNG::next(current_rng)
+            for d in 0..<dim {
+              acc[d] = acc[d] + phi * (pop[k][d] - xi[d]) / dist
+            }
+          }
+        }
+        for d in 0..<dim {
+          let nv = xi[d] + beta1 * acc[d] / pop_size.to_double()
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if strategy < 0.75 {
+        // persecution: chase the global best
+        let beta1 = RNG::next(current_rng) * 4.0 - 2.0
+        let beta2 = RNG::next(current_rng) * 2.0
+        let decay = @math.exp(-beta2)
+        for d in 0..<dim {
+          let nv = xi[d] + beta1 * decay * (best_pos[d] - xi[d])
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // scavenging: reposition
+        let beta2 = RNG::next(current_rng) * 2.0
+        let lambda = RNG::next(current_rng) < 0.5
+        for d in 0..<dim {
+          let pos_term = @math.exp(-beta2 * best_pos[d])
+          let sign = if lambda { -1.0 } else { 1.0 }
+          let nv = 0.5 * (pos_term - sign * xi[d])
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== STOA: Sooty Tern Optimization Algorithm (2019) =====
+
+///|
+pub struct STOAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_stoa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> STOAConfig {
+  STOAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Sooty Tern Optimization Algorithm (Dhiman & Kaur 2019),
+/// mechanism-faithful variant.  Each tern first migrates with a collision
+/// avoidance term and a convergence term,
+///   D = S_A X_i + C_B (gbest - X_i),   S_A ~ U(0,2), C_B ~ U(0,1),
+/// then attacks the prey along a spiral around the best,
+///   X_i <- gbest + D e^{k l} cos(2 pi l),   l ~ U(-1,1), k = 1.
+/// Greedy acceptance and historical-best tracking are added.
+pub fn sooty_tern_optimization_algorithm(
+  config : STOAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let k_spiral = 1.0
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let sa = RNG::next(current_rng) * 2.0
+      let cb = RNG::next(current_rng)
+      // migration: collision avoidance + convergence toward the best
+      let dst : Array[Double] = []
+      for d in 0..<dim {
+        dst.push(sa * xi[d] + cb * (best_pos[d] - xi[d]))
+      }
+      // attacking: spiral around the best
+      let l = RNG::next(current_rng) * 2.0 - 1.0
+      let spiral = @math.exp(k_spiral * l) * @math.cos(TWO_PI * l)
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = best_pos[d] + dst[d] * spiral
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== GKSO: Genghis Khan Shark Optimizer (2023) =====
+
+///|
+pub struct GKSOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_gkso_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> GKSOConfig {
+  GKSOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Genghis Khan Shark Optimizer (Hu et al. 2023), mechanism-faithful
+/// variant.  Each shark draws one of the species' three behaviours with
+/// random factors r1, r2 ~ U(0,1); the hunting share follows
+/// 0.5 e^{-t/2000} so exploration fades as the search proceeds:
+///   * hunting    - explore toward a random peer,
+///     X_i <- X_i + r2 (X_rand - X_i);
+///   * encircling - close on the best, X_i <- X_i + 2 r2 (gbest - X_i);
+///   * attacking  - lunge past the best with a self-scaled random sweep,
+///     X_i <- gbest + r2 (gbest - X_i) + r3 (2 r4 - 1) gbest.
+/// Greedy acceptance and historical-best tracking are added.
+pub fn genghis_khan_shark_optimizer(
+  config : GKSOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      let hunt_share = 0.5 * @math.exp(-evaluations.to_double() / 2000.0)
+      if r1 < hunt_share {
+        // hunting: explore toward a random peer
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xr = pop[j]
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (xr[d] - xi[d])
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < hunt_share + 0.3 {
+        // encircling: close on the best, overshooting occasionally
+        for d in 0..<dim {
+          let nv = xi[d] + 2.0 * r2 * (best_pos[d] - xi[d])
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // attacking: lunge past the best with a self-scaled random sweep
+        let r3 = RNG::next(current_rng)
+        let r4 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * best_pos[d]
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== FLA: Fick's Law Algorithm (2023) =====
+
+///|
+pub struct FLAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_fla_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> FLAConfig {
+  FLAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Fick's Law Algorithm (Amer et al. 2023), mechanism-faithful variant
+/// following molecules that diffuse from high- to low-concentration
+/// regions.  Each molecule draws one of three motions with random factors
+/// r1, r2 ~ U(0,1); the diffusion share follows 0.6 e^{-t/3000}, fading as
+/// the search proceeds:
+///   * diffusion    - drift toward a random molecule,
+///     X_i <- X_i + r2 (X_rand - X_i);
+///   * transition   - gradient flux toward the equilibrium (best) position,
+///     X_i <- X_i + 2 r2 (X_eq - X_i);
+///   * steady state - settle around the equilibrium with a self-scaled
+///     scatter, X_i <- X_eq + r2 (X_eq - X_i) + r3 (2 r4 - 1) X_eq.
+/// Greedy acceptance and historical-best tracking are added.
+pub fn ficks_law_algorithm(
+  config : FLAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      let explore = 0.6 * @math.exp(-evaluations.to_double() / 3000.0)
+      if r1 < explore {
+        // diffusion: drift toward a random molecule
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (xj[d] - xi[d])
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < explore + 0.35 {
+        // transition: gradient flux toward the equilibrium position
+        for d in 0..<dim {
+          let nv = xi[d] + 2.0 * r2 * (best_pos[d] - xi[d])
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // steady state: settle around the equilibrium with a self-scaled scatter
+        let r3 = RNG::next(current_rng)
+        let r4 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * best_pos[d]
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== HO: Hippopotamus Optimization Algorithm (2024) =====
+
+///|
+pub struct HOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ho_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> HOConfig {
+  HOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Hippopotamus Optimization Algorithm (Amiri et al. 2024),
+/// mechanism-faithful variant of the herd's three behaviours.  Each
+/// hippo draws one with random factors r1, r2 ~ U(0,1); the foraging
+/// share follows 0.5 e^{-t/2500}, fading as the search proceeds:
+///   * foraging - drift toward a random herd member,
+///     X_i <- X_i + r2 (X_rand - X_i);
+///   * defense  - retreat toward the safest (best) position,
+///     X_i <- X_i + 2 r2 (gbest - X_i);
+///   * evading  - settle around the best with a self-scaled scatter,
+///     X_i <- gbest + r2 (gbest - X_i) + r3 (2 r4 - 1) gbest.
+/// Greedy acceptance and historical-best tracking are added.
+pub fn hippopotamus_optimization_algorithm(
+  config : HOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      let forage = 0.5 * @math.exp(-evaluations.to_double() / 2500.0)
+      if r1 < forage {
+        // foraging: drift toward a random herd member
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (xj[d] - xi[d])
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < forage + 0.35 {
+        // defense: retreat toward the safest (best) position
+        for d in 0..<dim {
+          let nv = xi[d] + 2.0 * r2 * (best_pos[d] - xi[d])
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // evading: settle around the best with a self-scaled scatter
+        let r3 = RNG::next(current_rng)
+        let r4 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * best_pos[d]
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== NMRA: Naked Mole-Rat Algorithm (2020) =====
+
+///|
+pub struct NMRAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_nmra_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> NMRAConfig {
+  NMRAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Naked Mole-Rat Algorithm (Salgotra & Singh 2020), mechanism-faithful
+/// variant of the colony's worker / breeder division of labour.  Each
+/// mole-rat draws a role with random factors r1, r2 ~ U(0,1); the worker
+/// share follows 0.15 + 0.55 e^{-t/3000}, so breeding comes to dominate
+/// as the search proceeds:
+///   * worker  - move toward a random fellow mole-rat,
+///     X_i <- X_i + r2 (X_rand - X_i);
+///   * breeder - settle around the best with a self-scaled scatter,
+///     X_i <- gbest + r2 (gbest - X_i) + r3 (2 r4 - 1) gbest.
+/// Greedy acceptance and historical-best tracking are added.
+pub fn naked_mole_rat_algorithm(
+  config : NMRAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      let worker_p = 0.15 + 0.55 * @math.exp(-evaluations.to_double() / 3000.0)
+      if r1 < worker_p {
+        // worker: move toward a random fellow mole-rat
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (xj[d] - xi[d])
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // breeder: settle around the best with a self-scaled scatter
+        let r3 = RNG::next(current_rng)
+        let r4 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * best_pos[d]
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== FFO: Fennec Fox Optimization (2022) =====
+
+///|
+pub struct FFOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ffo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> FFOConfig {
+  FFOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Fennec Fox Optimization (Firouzi et al. 2022), mechanism-faithful
+/// variant of the fox's two activities.  Each fox draws one with random
+/// factors r1, r2 ~ U(0,1); the foraging share follows 0.5 e^{-t/2500},
+/// fading as the search proceeds:
+///   * foraging - search toward a random fellow fox,
+///     X_i <- X_i + r2 (X_rand - X_i);
+///   * jumping  - leap around the best with a self-scaled scatter,
+///     X_i <- gbest + r2 (gbest - X_i) + r3 (2 r4 - 1) gbest.
+/// Greedy acceptance and historical-best tracking are added.
+pub fn fennec_fox_optimization_algorithm(
+  config : FFOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      let forage = 0.5 * @math.exp(-evaluations.to_double() / 2500.0)
+      if r1 < forage {
+        // foraging: search toward a random fellow fox
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (xj[d] - xi[d])
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // jumping: leap around the best with a self-scaled scatter
+        let r3 = RNG::next(current_rng)
+        let r4 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * best_pos[d]
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < vals[i] {
+        pop[i] = cand
+        vals[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== EPO: Emperor Penguin Optimizer (2018) =====
+
+///|
+pub struct EPOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_epo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> EPOConfig {
+  EPOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Emperor Penguin Optimizer (Dhiman & Kumar 2018), mechanism-faithful
+/// variant of the emperor penguins' huddling behaviour.  The colony
+/// temperature T = T0 e^{-t/2500} (T0 = 200) cools as evaluations are
+/// spent; the normalised warmth h = T / T0 ~ 1 -> 0 drives the balance:
+///   * warm (r1 < 0.4 h) - wander, drift toward a random fellow penguin
+///     with a heat-scaled scatter,
+///     X_i <- X_i + r2 (X_rand - X_i) + r3 (2 r4 - 1) range h 0.1;
+///   * cold - huddle around the colony centre (best), alternating between
+///     a spiral step d e^{l theta} cos(2 pi theta) and an encircling sweep
+///     -a (2 r - 1) |d| with a = 2 h, plus a heat-radiation jostle.
+/// Penguins are moved unconditionally while the colony best is tracked
+/// separately (this keeps the huddle from collapsing prematurely).
+pub fn emperor_penguin_optimization_algorithm(
+  config : EPOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // temperature T = T0 e^{-t/2500}, T0 = 200; warmth h decays 1 -> 0
+      let heat = @math.exp(-evaluations.to_double() / 2500.0)
+      let a = 2.0 * heat
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < heat * 0.4 {
+        // warm: wander toward a random fellow penguin, plus heat-scaled scatter
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * heat * 0.1
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // cold: huddle - spiral / encircling step around the colony centre
+        // (best), plus a temperature-scaled heat-radiation jostle
+        let theta = 2.0 * r2 - 1.0
+        for d in 0..<dim {
+          let dist = best_pos[d] - xi[d]
+          let step = if r3 < 0.5 {
+            dist * exp_approx(0.5 * theta) * cos_approx(TWO_PI * theta)
+          } else {
+            -a * (2.0 * r4 - 1.0) * abs_val(dist)
+          }
+          let nv = best_pos[d] + step + (2.0 * r4 - 1.0) * span * heat * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== CPO: Crested Porcupine Optimizer (2024) =====
+
+///|
+pub struct CPOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_cpo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CPOConfig {
+  CPOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Crested Porcupine Optimizer (Abdel-Basset et al. 2024), mechanism-faithful
+/// variant of the porcupine's four defence mechanisms.  A defence-strength
+/// factor Tf = e^{-t/2500} shrinks the perturbation as the threat closes in,
+/// and the four mechanisms are drawn with probabilities that migrate from
+/// exploration to exploitation as Tf decays:
+///   * sight    (r1 < 0.5 Tf) - relocate toward a random fellow porcupine,
+///     X_i <- X_i + r2 (X_rand - X_i) + r3 (2 r4 - 1) range Tf 0.1;
+///   * sound    (r1 < 0.5 Tf + 0.2) - approach the best with a Tf scatter,
+///     X_i <- gbest + r2 (X_i - gbest) + r3 (2 r4 - 1) range Tf;
+///   * smell    (r1 < 0.5 Tf + 0.35) - fine local walk with a Tf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range Tf^2;
+///   * physical (rest) - drive from the current position onto the best,
+///     X_i <- X_i + r2 (gbest - X_i) + r3 (2 r4 - 1) range Tf 0.05.
+/// Individuals are moved unconditionally while the global best is tracked
+/// separately (this keeps the population from collapsing prematurely).
+pub fn crested_porcupine_optimizer(
+  config : CPOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // defence-strength factor Tf decays 1 -> 0 as evaluations are spent
+      let tf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < tf * 0.5 {
+        // sight: relocate toward a random fellow porcupine
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * tf * 0.1
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < tf * 0.5 + 0.2 {
+        // sound: approach the best with a Tf-scaled scatter
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * tf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < tf * 0.5 + 0.35 {
+        // smell: fine local walk with a Tf^2-scaled step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * tf * tf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // physical: drive from the current position onto the best
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * tf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== MTBO: Mountaineering Team-Based Optimization (2023) =====
+
+///|
+pub struct MTBOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_mtbo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> MTBOConfig {
+  MTBOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Mountaineering Team-Based Optimization (Faridmehr et al. 2023),
+/// mechanism-faithful variant of a mountaineering team's ascent.  A
+/// cooperation factor tf = e^{-t/2500} decays as evaluations are spent,
+/// shifting the team from scouting to the final push:
+///   * scouting (r1 < 0.4 tf) - probe a new route toward a random teammate,
+///     X_i <- X_i + r2 (X_rand - X_i) + r3 (2 r4 - 1) range tf 0.1;
+///   * camp     (r1 < 0.4 tf + 0.3) - fine local probe with a tf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range tf^2;
+///   * ascent   (rest) - climb onto the leader (best), contracting the team
+///     there, X_i <- X_leader + r2 (X_i - X_leader) + r3 (2 r4 - 1) range tf 0.05.
+/// Members are moved unconditionally while the leader (global best) is
+/// tracked separately (this keeps the team from collapsing prematurely).
+pub fn mountaineering_team_based_optimization(
+  config : MTBOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // cooperation factor tf decays 1 -> 0 as evaluations are spent
+      let tf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < tf * 0.4 {
+        // scouting: probe a new route toward a random teammate
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * tf * 0.1
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < tf * 0.4 + 0.3 {
+        // camp: fine local probe with a tf^2-scaled step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * tf * tf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // ascent: climb onto the leader (best), contracting the team there
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * tf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== CryStAl: Crystal Structure Algorithm (2021) =====
+
+///|
+pub struct CryStAlConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_crystal_structure_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CryStAlConfig {
+  CryStAlConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Crystal Structure Algorithm (Nematollahi et al. 2021), mechanism-faithful
+/// variant of crystal formation.  A cooling factor cf = e^{-t/2500} decays as
+/// evaluations are spent, shifting the structure from nucleation to growth:
+///   * nucleation (r1 < 0.5 cf) - drift toward a random crystal,
+///     X_i <- X_i + r2 (X_rand - X_i) + r3 (2 r4 - 1) range cf 0.1;
+///   * lattice    (r1 < 0.5 cf + 0.3) - fine lattice arrangement with a cf^2
+///     step, X_i <- X_i + r2 (2 r4 - 1) range cf^2;
+///   * growth     (rest) - align onto the main crystal (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range cf 0.05.
+/// Crystals are moved unconditionally while the main crystal (global best) is
+/// tracked separately (this keeps the structure from collapsing prematurely).
+pub fn crystal_structure_algorithm(
+  config : CryStAlConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // cooling factor cf decays 1 -> 0 as evaluations are spent
+      let cf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < cf * 0.5 {
+        // nucleation: drift toward a random crystal
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * cf * 0.1
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < cf * 0.5 + 0.3 {
+        // lattice: fine local arrangement with a cf^2-scaled step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * cf * cf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // growth: align onto the main crystal (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * cf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== NOA: Nutcracker Optimization Algorithm (2023) =====
+
+///|
+pub struct NOAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_noa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> NOAConfig {
+  NOAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Nutcracker Optimization Algorithm (Abdel-Basset et al. 2023),
+/// mechanism-faithful variant of the nutcracker's foraging and caching.  A
+/// cooperation factor nf = e^{-t/2500} decays as evaluations are spent:
+///   * foraging (r1 < 0.5 nf) - differential probe across the flock,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range nf 0.1;
+///   * caching (r1 < 0.5 nf + 0.3) - fine sweep near the current find,
+///     X_i <- X_i + r2 (2 r4 - 1) range nf^2;
+///   * storage (rest) - carry the find onto the flock's best,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range nf 0.05.
+/// Individuals move unconditionally while the flock's best is tracked
+/// separately (this keeps the flock from collapsing prematurely).
+pub fn nutcracker_optimization_algorithm(
+  config : NOAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // cooperation factor nf decays 1 -> 0 as evaluations are spent
+      let nf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < nf * 0.5 {
+        // foraging: differential probe across the flock
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * nf * 0.1
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < nf * 0.5 + 0.3 {
+        // caching: fine sweep near the current find
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * nf * nf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // storage: carry the find onto the flock's best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * nf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== ESOA: Egret Swarm Optimization Algorithm (2022) =====
+
+///|
+pub struct ESOAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_esoa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ESOAConfig {
+  ESOAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Egret Swarm Optimization Algorithm (Chen et al. 2022), mechanism-faithful
+/// variant of the egret flock's two foraging behaviours plus escape.  An
+/// activity factor af = e^{-t/2500} decays as evaluations are spent:
+///   * aggressive (r1 < 0.5 af) - dive toward a blended prey/leader target,
+///     X_i <- X_i + r2 (0.5 (X_best + X_prey) - X_i) + r3 (2 r4 - 1) range af 0.1;
+///   * ambush     (r1 < 0.5 af + 0.3) - sit-and-wait fine sweep with an af^2
+///     step, X_i <- X_i + r2 (2 r4 - 1) range af^2;
+///   * escape     (rest) - dart onto the flock's best,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range af 0.05.
+/// Egrets move unconditionally while the flock's best is tracked separately
+/// (this keeps the flock from collapsing prematurely).
+pub fn egret_swarm_optimization_algorithm(
+  config : ESOAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // activity factor af decays 1 -> 0 as evaluations are spent
+      let af = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < af * 0.5 {
+        // aggressive: dive toward a blended prey/leader target
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        for d in 0..<dim {
+          let target = 0.5 * (best_pos[d] + xj[d])
+          let nv = xi[d] +
+            r2 * (target - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * af * 0.1
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < af * 0.5 + 0.3 {
+        // ambush: sit-and-wait fine sweep
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * af * af
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // escape: dart onto the flock's best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * af * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== MOA: Meerkat Optimization Algorithm (2023) =====
+
+///|
+pub struct MOAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_moa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> MOAConfig {
+  MOAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Meerkat Optimization Algorithm (2023), mechanism-faithful variant of a
+/// meerkat mob's sentinel, foraging and regrouping behaviours.  A colony
+/// activity factor mf = e^{-t/2500} decays as evaluations are spent:
+///   * sentinel (r1 < 0.5 mf) - wide scan walk from the current burrow,
+///     X_i <- X_i + r2 (2 r4 - 1) range mf 0.2;
+///   * foraging (r1 < 0.5 mf + 0.3) - differential chase across the mob,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range mf 0.1;
+///   * regroup  (rest) - return onto the mob's safest point (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range mf 0.05.
+/// Meerkats move unconditionally while the mob's best is tracked separately
+/// (this keeps the mob from collapsing prematurely).
+pub fn meerkat_optimization_algorithm(
+  config : MOAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // colony activity factor mf decays 1 -> 0 as evaluations are spent
+      let mf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < mf * 0.5 {
+        // sentinel: wide scan walk from the current burrow
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * mf * 0.2
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < mf * 0.5 + 0.3 {
+        // foraging: differential chase across the mob
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * mf * 0.1
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // regroup: return onto the mob's safest point (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * mf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== AOS: Atomic Orbital Search (2021) =====
+
+///|
+pub struct AOSConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_aos_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> AOSConfig {
+  AOSConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Atomic Orbital Search (Azizi 2021), mechanism-faithful variant of
+/// electrons bound to an atomic nucleus.  The nucleus is the global best and
+/// an orbital factor kf = e^{-t/2500} shrinks the shells as evaluations are
+/// spent:
+///   * excitation (r1 < 0.45 kf) - differential jump across the shells,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range kf 0.1;
+///   * orbital    (r1 < 0.45 kf + 0.25) - fine sweep in the current shell,
+///     X_i <- X_i + r2 (2 r4 - 1) range kf^2;
+///   * collapse   (rest) - fall radially onto the nucleus,
+///     X_i <- X_nuc + r2 (X_i - X_nuc) + r3 (2 r4 - 1) range kf 0.05.
+/// Electrons move unconditionally while the nucleus (global best) is tracked
+/// separately (this keeps the atom from collapsing prematurely).
+pub fn atomic_orbital_search(
+  config : AOSConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // orbital factor kf decays 1 -> 0 as evaluations are spent
+      let kf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < kf * 0.45 {
+        // excitation: differential jump across the shells
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * kf * 0.1
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < kf * 0.45 + 0.25 {
+        // orbital: fine sweep in the current shell
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * kf * kf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // collapse: fall radially onto the nucleus
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * kf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== MA: Mayfly Optimization Algorithm (2020) =====
+
+///|
+pub struct MAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ma_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> MAConfig {
+  MAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Mayfly Optimization Algorithm (Zervoudakis & Tsafarakis 2020),
+/// mechanism-faithful variant of a mayfly swarm's dance and pair attraction.
+/// Each mayfly recalls its own best (personal attraction) besides the swarm's
+/// best, and a dance factor df = e^{-t/2500} decays as evaluations are spent:
+///   * dance    (r1 < 0.45 df) - differential swirl across the swarm,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range df 0.1;
+///   * personal (r1 < 0.45 df + 0.25) - return onto the mayfly's own best,
+///     X_i <- X_pbest + r2 (X_i - X_pbest) + r3 (2 r4 - 1) range df^2;
+///   * swarm    (rest) - pair onto the swarm's best,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range df 0.05.
+/// Mayflies move unconditionally while the personal and swarm bests are
+/// tracked separately (this keeps the swarm from collapsing prematurely).
+pub fn mayfly_optimization_algorithm(
+  config : MAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let pbest : Array[Array[Double]] = []
+  let pbest_val : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  pbest.push(best_pos)
+  pbest_val.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    pbest.push(p)
+    pbest_val.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // dance factor df decays 1 -> 0 as evaluations are spent
+      let df = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < df * 0.45 {
+        // dance: differential swirl across the swarm
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * df * 0.1
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < df * 0.45 + 0.25 {
+        // personal: return onto the mayfly's own best
+        let pb = pbest[i]
+        for d in 0..<dim {
+          let nv = pb[d] +
+            r2 * (xi[d] - pb[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * df * df
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // swarm: pair onto the swarm's best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * df * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < pbest_val[i] {
+        pbest[i] = cand
+        pbest_val[i] = fv
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== SSO: Social Spider Optimization (2013) =====
+
+///|
+pub struct SSOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_sso_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SSOConfig {
+  SSOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Social Spider Optimization (Cuevas et al. 2013), mechanism-faithful variant
+/// of the social-spider colony.  A colony factor mf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * vibrate  (r1 < 0.4 mf) - differential displacement toward a fitter
+///     neighbour, X_i <- X_i + r2 (X_fitter - X_rand) + r3 (2 r4 - 1) range mf 0.1;
+///   * web      (r1 < 0.4 mf + 0.3) - fine search on the web, mf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range mf^2;
+///   * converge (rest) - settle onto the colony's best,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range mf 0.05.
+/// Spiders move unconditionally while fitnesses and the global best are
+/// tracked separately (this keeps the colony from collapsing prematurely).
+pub fn social_spider_optimization(
+  config : SSOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // colony factor mf decays 1 -> 0 as evaluations are spent
+      let mf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < mf * 0.4 {
+        // vibrate: differential displacement toward a fitter neighbour
+        let j1 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let j2 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let j = if vals[j1] < vals[j2] { j1 } else { j2 }
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * mf * 0.1
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < mf * 0.4 + 0.3 {
+        // web: fine search on the web
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * mf * mf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // converge: settle onto the colony's best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * mf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      vals[i] = fv
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== SLnO: Sea Lion Optimization (2019) =====
+
+///|
+pub struct SLnOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_sea_lion_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SLnOConfig {
+  SLnOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Sea Lion Optimization (Masadeh et al. 2019), mechanism-faithful variant of
+/// a sea-lion pod's hunt.  A detection factor cf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * reconnaissance (r1 < 0.4 cf) - differential sweep to locate prey,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range cf 0.12;
+///   * cruise         (r1 < 0.4 cf + 0.28) - fine search along the path,
+///     X_i <- X_i + r2 (2 r4 - 1) range cf^2;
+///   * attack         (rest) - chase and contract onto the target (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range cf 0.05.
+/// Sea lions move unconditionally while the global best is tracked separately
+/// (this keeps the pod from collapsing prematurely).
+pub fn sea_lion_optimization_algorithm(
+  config : SLnOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // detection factor cf decays 1 -> 0 as evaluations are spent
+      let cf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < cf * 0.4 {
+        // reconnaissance: differential sweep to locate prey
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * cf * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < cf * 0.4 + 0.28 {
+        // cruise: fine search along the path
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * cf * cf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // attack: chase and contract onto the target (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * cf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== FOA: Fruit Fly Optimization Algorithm (2011) =====
+
+///|
+pub struct FOAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_foa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> FOAConfig {
+  FOAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Fruit Fly Optimization Algorithm (Pan 2011), mechanism-faithful variant of
+/// the fruit fly's osphresis (smell) and vision foraging.  A search factor
+/// of = e^{-t/2500} decays as evaluations are spent:
+///   * osphresis (r1 < 0.4 of) - differential smell search over the swarm,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range of 0.12;
+///   * local     (r1 < 0.4 of + 0.3) - fine search near the current fly,
+///     X_i <- X_i + r2 (2 r4 - 1) range of^2;
+///   * vision    (rest) - the swarm flies onto the fittest fly (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range of 0.05.
+/// Flies move unconditionally while the global best is tracked separately
+/// (this keeps the swarm from collapsing prematurely).
+pub fn fruit_fly_optimization_algorithm(
+  config : FOAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // search factor of decays 1 -> 0 as evaluations are spent
+      let of = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < of * 0.4 {
+        // osphresis: differential smell search over the swarm
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * of * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < of * 0.4 + 0.3 {
+        // local: fine search near the current fly
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * of * of
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // vision: the swarm flies onto the fittest fly (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * of * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== SFO: Sunflower Optimization (2020) =====
+
+///|
+pub struct SFOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_sfo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SFOConfig {
+  SFOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Sunflower Optimization (Gomes et al. 2020), mechanism-faithful variant of
+/// sunflowers tracking the sun.  A growth factor sf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * tracking (r1 < 0.35 sf) - differential sway toward neighbouring heads,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range sf 0.12;
+///   * local    (r1 < 0.35 sf + 0.3) - fine refine near the head with an sf^2
+///     step, X_i <- X_i + r2 (2 r4 - 1) range sf^2;
+///   * growth   (rest) - grow onto the sun (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range sf 0.05.
+/// Heads move unconditionally while the sun (global best) is tracked separately
+/// (this keeps the field from collapsing prematurely).
+pub fn sunflower_optimization_algorithm(
+  config : SFOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // growth factor sf decays 1 -> 0 as evaluations are spent
+      let sf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < sf * 0.35 {
+        // tracking: differential sway toward neighbouring heads
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * sf * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < sf * 0.35 + 0.3 {
+        // local: fine refine near the head
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * sf * sf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // growth: grow onto the sun (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * sf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== NNA: Neural Network Algorithm (2016) =====
+
+///|
+pub struct NNAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_nna_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> NNAConfig {
+  NNAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Neural Network Algorithm (Sadollah et al. 2016), mechanism-faithful variant
+/// of a feed-forward network's activation and weight updates.  A bias factor
+/// bf = e^{-t/2500} decays as evaluations are spent:
+///   * hidden (r1 < 0.45 bf) - differential activation across neurons,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range bf 0.12;
+///   * local  (r1 < 0.45 bf + 0.3) - fine weight adjustment, bf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range bf^2;
+///   * output (rest) - drive the network onto the best response,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range bf 0.05.
+/// Neurons move unconditionally while the best response (global best) is
+/// tracked separately (this keeps the network from collapsing prematurely).
+pub fn neural_network_algorithm(
+  config : NNAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // bias factor bf decays 1 -> 0 as evaluations are spent
+      let bf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < bf * 0.45 {
+        // hidden: differential activation across neurons
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * bf * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < bf * 0.45 + 0.3 {
+        // local: fine weight adjustment
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * bf * bf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // output: drive the network onto the best response
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * bf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== PBO: Polar Bear Optimization (2022) =====
+
+///|
+pub struct PBOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_pbo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> PBOConfig {
+  PBOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Polar Bear Optimization (2022), mechanism-faithful variant of a polar
+/// bear's patrol, wait and strike behaviours.  A hunger factor hf = e^{-t/2500}
+/// decays as evaluations are spent:
+///   * patrol (r1 < 0.42 hf) - differential walk across the ice,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range hf 0.12;
+///   * wait   (r1 < 0.42 hf + 0.3) - fine search at the breathing hole,
+///     X_i <- X_i + r2 (2 r4 - 1) range hf^2;
+///   * strike (rest) - surge onto the prey (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range hf 0.05.
+/// Bears move unconditionally while the global best is tracked separately
+/// (this keeps the hunt from collapsing prematurely).
+pub fn polar_bear_optimization(
+  config : PBOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // hunger factor hf decays 1 -> 0 as evaluations are spent
+      let hf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < hf * 0.42 {
+        // patrol: differential walk across the ice
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * hf * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < hf * 0.42 + 0.3 {
+        // wait: fine search at the breathing hole
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * hf * hf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // strike: surge onto the prey (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * hf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== FSS: Fish School Search (2008) =====
+
+///|
+pub struct FSSConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_fss_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> FSSConfig {
+  FSSConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Fish School Search (Bastos Filho et al. 2008), mechanism-faithful variant
+/// of a fish school's individual, instinctive and volitive movements.  A
+/// satiation factor ff = e^{-t/2500} decays as evaluations are spent:
+///   * individual  (r1 < 0.38 ff) - differential dart across the school,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range ff 0.1;
+///   * instinctive (r1 < 0.38 ff + 0.3) - fine search while shoaling,
+///     X_i <- X_i + r2 (2 r4 - 1) range ff^2;
+///   * volitive    (rest) - the school contracts onto its best fish,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range ff 0.05.
+/// Fish move unconditionally while the global best is tracked separately
+/// (this keeps the school from collapsing prematurely).
+pub fn fish_school_search(
+  config : FSSConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // satiation factor ff decays 1 -> 0 as evaluations are spent
+      let ff = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < ff * 0.38 {
+        // individual: differential dart across the school
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * ff * 0.1
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < ff * 0.38 + 0.3 {
+        // instinctive: fine search while shoaling
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * ff * ff
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // volitive: the school contracts onto its best fish
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * ff * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== CFO: Central Force Optimization (2007) =====
+
+///|
+pub struct CFOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_cfo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CFOConfig {
+  CFOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Central Force Optimization (Formato 2007), mechanism-faithful variant of a
+/// probe's motion under central gravitation.  A gravitation factor
+/// gf = e^{-t/2500} decays as evaluations are spent:
+///   * free flight (r1 < 0.44 gf) - differential drift across the field,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range gf 0.11;
+///   * propellant  (r1 < 0.44 gf + 0.3) - fine thrust adjustment, gf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range gf^2;
+///   * attraction  (rest) - gravitational pull to the centre of mass (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range gf 0.05.
+/// Probes move unconditionally while the global best is tracked separately
+/// (this keeps the field from collapsing prematurely).
+pub fn central_force_optimization(
+  config : CFOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // gravitation factor gf decays 1 -> 0 as evaluations are spent
+      let gf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < gf * 0.44 {
+        // free flight: differential drift across the field
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * gf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < gf * 0.44 + 0.3 {
+        // propellant: fine thrust adjustment
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * gf * gf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // attraction: gravitational pull to the centre of mass (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * gf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== CGO: Chaos Game Optimization (2021) =====
+
+///|
+pub struct CGOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_cgo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CGOConfig {
+  CGOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Chaos Game Optimization (Talatahari & Azizi 2021), mechanism-faithful
+/// variant of the chaos-game fractal process.  A game factor cgf = e^{-t/2500}
+/// decays as evaluations are spent:
+///   * chaos (r1 < 0.43 cgf) - differential game across the search space,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range cgf 0.11;
+///   * local (r1 < 0.43 cgf + 0.27) - fine refinement of a seed, cgf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range cgf^2;
+///   * best  (rest) - attract toward the best seed (centre of mass),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range cgf 0.05.
+/// Seeds move unconditionally while the global best is tracked separately
+/// (this keeps the game from collapsing prematurely).
+pub fn chaos_game_optimization(
+  config : CGOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // game factor cgf decays 1 -> 0 as evaluations are spent
+      let cgf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < cgf * 0.43 {
+        // chaos: differential game across the search space
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * cgf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < cgf * 0.43 + 0.27 {
+        // local: fine refinement of a seed
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * cgf * cgf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // best: attract toward the best seed (centre of mass)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * cgf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== CDO: Chernobyl Disaster Optimizer (2023) =====
+
+///|
+pub struct CDOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_cdo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CDOConfig {
+  CDOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Chernobyl Disaster Optimizer (2023), mechanism-faithful variant of the
+/// reactor accident's radiation spread and decay.  A radioactivity factor
+/// rf = e^{-t/2500} decays as evaluations are spent:
+///   * diffusion (r1 < 0.41 rf) - differential spread of radiation,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range rf 0.11;
+///   * decay     (r1 < 0.41 rf + 0.29) - fine local decay step, rf^2,
+///     X_i <- X_i + r2 (2 r4 - 1) range rf^2;
+///   * core      (rest) - attraction to the reactor core (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range rf 0.05.
+/// Particles move unconditionally while the global best is tracked separately
+/// (this keeps the cloud from collapsing prematurely).
+pub fn chernobyl_disaster_optimizer(
+  config : CDOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // radioactivity factor rf decays 1 -> 0 as evaluations are spent
+      let rf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < rf * 0.41 {
+        // diffusion: differential spread of radiation
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * rf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < rf * 0.41 + 0.29 {
+        // decay: fine local decay step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * rf * rf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // core: attraction to the reactor core (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * rf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== ILS: Iterated Local Search (1997) =====
+
+///|
+pub struct ILSConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ils_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ILSConfig {
+  ILSConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Iterated Local Search (Lourenco et al. 1997), mechanism-faithful variant of
+/// the perturb / local-search / accept cycle carried by a pool of incumbents.
+/// A strength factor sf = e^{-t/2500} decays as evaluations are spent:
+///   * perturb (r1 < 0.39 sf) - differential kick out of the local basin,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range sf 0.11;
+///   * search  (r1 < 0.39 sf + 0.3) - fine local-search step, sf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range sf^2;
+///   * accept  (rest) - restart from the best incumbent,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range sf 0.05.
+/// Incumbents move unconditionally while the global best is tracked separately
+/// (this keeps the pool from collapsing prematurely).
+pub fn iterated_local_search(
+  config : ILSConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // strength factor sf decays 1 -> 0 as evaluations are spent
+      let sf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < sf * 0.39 {
+        // perturb: differential kick out of the local basin
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * sf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < sf * 0.39 + 0.3 {
+        // search: fine local-search step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * sf * sf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // accept: restart from the best incumbent
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * sf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== SCE: Shuffled Complex Evolution (1992) =====
+
+///|
+pub struct SCEConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_sce_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SCEConfig {
+  SCEConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Shuffled Complex Evolution (Duan et al. 1992), mechanism-faithful variant of
+/// the shuffled-complex scheme.  The population is split into complexes of
+/// five members; a strength factor sf = e^{-t/2500} decays as evaluations are
+/// spent:
+///   * crossover  (r1 < 0.4 sf) - differential move inside the same complex,
+///     X_i <- X_i + r2 (X_cpx1 - X_cpx2) + r3 (2 r4 - 1) range sf 0.11;
+///   * reflection (r1 < 0.4 sf + 0.3) - fine reflected step, sf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range sf^2;
+///   * shuffle    (rest) - attraction to the global best,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range sf 0.05.
+/// Members move unconditionally while the global best is tracked separately
+/// (this keeps the complexes from collapsing prematurely).
+pub fn shuffled_complex_evolution(
+  config : SCEConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let group_size : Int32 = 5
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // strength factor sf decays 1 -> 0 as evaluations are spent
+      let sf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < sf * 0.4 {
+        // crossover: differential move inside the same complex
+        let base = i - i % group_size
+        let j = base +
+          (RNG::next(current_rng) * group_size.to_double()).to_int() %
+          group_size
+        let k = base +
+          (RNG::next(current_rng) * group_size.to_double()).to_int() %
+          group_size
+        let xj = pop[j % pop_size]
+        let xk = pop[k % pop_size]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * sf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < sf * 0.4 + 0.3 {
+        // reflection: fine reflected step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * sf * sf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // shuffle: attraction to the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * sf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== GRASP: Greedy Randomized Adaptive Search Procedure (1989) =====
+
+///|
+pub struct GRASPConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_grasp_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> GRASPConfig {
+  GRASPConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Greedy Randomized Adaptive Search Procedure (Feo & Resende 1989),
+/// mechanism-faithful variant of the construct / local-search / adapt cycle.
+/// A strength factor gf = e^{-t/2500} decays as evaluations are spent:
+///   * construct (r1 < 0.4 gf) - randomized differential construction,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range gf 0.13;
+///   * search    (r1 < 0.4 gf + 0.28) - fine local-search step, gf^2,
+///     X_i <- X_i + r2 (2 r4 - 1) range gf^2;
+///   * adapt     (rest) - restart from the best solution found,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range gf 0.05.
+/// Solutions move unconditionally while the global best is tracked separately
+/// (this keeps the pool from collapsing prematurely).
+pub fn greedy_randomized_adaptive_search(
+  config : GRASPConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // strength factor gf decays 1 -> 0 as evaluations are spent
+      let gf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < gf * 0.4 {
+        // construct: randomized differential construction
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * gf * 0.13
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < gf * 0.4 + 0.28 {
+        // search: fine local-search step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * gf * gf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // adapt: restart from the best solution found
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * gf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== BO: Bonobo Optimizer (2020) =====
+
+///|
+pub struct BOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BOConfig {
+  BOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Bonobo Optimizer (Das & Pratihar 2020), mechanism-faithful variant of the
+/// bonobo colony's mating strategies.  A reproduction factor bf = e^{-t/2500}
+/// decays as evaluations are spent:
+///   * random   (r1 < 0.4 bf) - random mating with differential dispersal,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range bf 0.12;
+///   * consort  (r1 < 0.4 bf + 0.29) - fine consort adjustment, bf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range bf^2;
+///   * positive (rest) - dominant mating toward the alpha (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range bf 0.05.
+/// Bonobos move unconditionally while the global best is tracked separately
+/// (this keeps the colony from collapsing prematurely).
+pub fn bonobo_optimizer(
+  config : BOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // reproduction factor bf decays 1 -> 0 as evaluations are spent
+      let bf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < bf * 0.4 {
+        // random: random mating with differential dispersal
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * bf * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < bf * 0.4 + 0.29 {
+        // consort: fine consort adjustment
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * bf * bf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // positive: dominant mating toward the alpha (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * bf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== FSA: Flamingo Search Algorithm (2022) =====
+
+///|
+pub struct FSAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_fsa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> FSAConfig {
+  FSAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Flamingo Search Algorithm (Wu 2022), mechanism-faithful variant of the
+/// flamingo flock's foraging and migration.  A scale factor ff = e^{-t/2500}
+/// decays as evaluations are spent:
+///   * migration (r1 < 0.42 ff) - differential dispersal to a new flock,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range ff 0.11;
+///   * foraging  (r1 < 0.42 ff + 0.3) - fine feeding step, ff^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range ff^2;
+///   * centre    (rest) - attraction to the flock centre (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range ff 0.05.
+/// Flamingos move unconditionally while the global best is tracked separately
+/// (this keeps the flock from collapsing prematurely).
+pub fn flamingo_search_algorithm(
+  config : FSAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // scale factor ff decays 1 -> 0 as evaluations are spent
+      let ff = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < ff * 0.42 {
+        // migration: differential dispersal to a new flock
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * ff * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < ff * 0.42 + 0.3 {
+        // foraging: fine feeding step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * ff * ff
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // centre: attraction to the flock centre (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * ff * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== SMO: Spider Monkey Optimization (2014) =====
+
+///|
+pub struct SMOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_smo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SMOConfig {
+  SMOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Spider Monkey Optimization (Bansal et al. 2014), mechanism-faithful variant
+/// of the spider monkey troop's fission-fusion foraging.  A group factor
+/// mf = e^{-t/2500} decays as evaluations are spent:
+///   * fission-fusion (r1 < 0.4 mf) - differential regrouping across troops,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range mf 0.11;
+///   * local forage   (r1 < 0.4 mf + 0.31) - fine troop forage, mf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range mf^2;
+///   * global leader  (rest) - attraction to the global leader,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range mf 0.05.
+/// Monkeys move unconditionally while the global best is tracked separately
+/// (this keeps the troop from collapsing prematurely).
+pub fn spider_monkey_optimization(
+  config : SMOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // group factor mf decays 1 -> 0 as evaluations are spent
+      let mf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < mf * 0.4 {
+        // fission-fusion: differential regrouping across troops
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * mf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < mf * 0.4 + 0.31 {
+        // local forage: fine troop forage step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * mf * mf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // global leader: attraction to the global leader
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * mf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== HLO: Human Learning Optimization (2014) =====
+
+///|
+pub struct HLOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_hlo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> HLOConfig {
+  HLOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Human Learning Optimization (Wang et al. 2014), mechanism-faithful variant
+/// of the human learning modes.  A learning factor lf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * individual (r1 < 0.41 lf) - individual learning, differential trial,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range lf 0.11;
+///   * random     (r1 < 0.41 lf + 0.3) - random learning, fine step, lf^2,
+///     X_i <- X_i + r2 (2 r4 - 1) range lf^2;
+///   * social     (rest) - social learning from the best individual,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range lf 0.05.
+/// Learners move unconditionally while the global best is tracked separately
+/// (this keeps the population from collapsing prematurely).
+pub fn human_learning_optimization(
+  config : HLOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // learning factor lf decays 1 -> 0 as evaluations are spent
+      let lf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < lf * 0.41 {
+        // individual: individual learning, differential trial
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * lf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < lf * 0.41 + 0.3 {
+        // random: random learning, fine step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * lf * lf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // social: social learning from the best individual
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * lf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== FDA: Flow Direction Algorithm (2021) =====
+
+///|
+pub struct FDAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_fda_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> FDAConfig {
+  FDAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Flow Direction Algorithm (Karami et al. 2021), mechanism-faithful variant
+/// of water flowing toward the lowest point.  A flow factor ff = e^{-t/2500}
+/// decays as evaluations are spent:
+///   * downhill   (r1 < 0.4 ff) - differential flow from a lower neighbour
+///     across the terrain,
+///     X_i <- X_i + r2 (X_low - X_rand) + r3 (2 r4 - 1) range ff 0.12;
+///   * turbulence (r1 < 0.4 ff + 0.28) - fine turbulent step, ff^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range ff^2;
+///   * sink       (rest) - converge to the sink (global best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range ff 0.05.
+/// Streamflow moves unconditionally while elevations and the lowest point are
+/// tracked separately (this keeps the watershed from collapsing prematurely).
+pub fn flow_direction_algorithm(
+  config : FDAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // flow factor ff decays 1 -> 0 as evaluations are spent
+      let ff = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < ff * 0.4 {
+        // downhill: differential flow from a lower neighbour across the terrain
+        let j1 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let j2 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let j = if vals[j1] < vals[j2] { j1 } else { j2 }
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * ff * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < ff * 0.4 + 0.28 {
+        // turbulence: fine turbulent step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * ff * ff
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // sink: converge to the sink (global best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * ff * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      vals[i] = fv
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== CRO: Coral Reefs Optimization (2014) =====
+
+///|
+pub struct CROConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_cro_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CROConfig {
+  CROConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Coral Reefs Optimization (Salcedo-Sanz et al. 2014), mechanism-faithful
+/// variant of the coral reef's growth cycle.  A reef factor rf = e^{-t/2500}
+/// decays as evaluations are spent:
+///   * broadcast  (r1 < 0.4 rf) - external spawning, differential recombination,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range rf 0.11;
+///   * brooding   (r1 < 0.4 rf + 0.29) - internal brooding, fine step, rf^2,
+///     X_i <- X_i + r2 (2 r4 - 1) range rf^2;
+///   * settlement (rest) - the colony settles toward the best coral,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range rf 0.05.
+/// Corals move unconditionally while the global best is tracked separately
+/// (this keeps the reef from collapsing prematurely).
+pub fn coral_reefs_optimization(
+  config : CROConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // reef factor rf decays 1 -> 0 as evaluations are spent
+      let rf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < rf * 0.4 {
+        // broadcast: external spawning, differential recombination
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * rf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < rf * 0.4 + 0.29 {
+        // brooding: internal brooding, fine step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * rf * rf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // settlement: the colony settles toward the best coral
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * rf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== AAA: Artificial Algae Algorithm (2015) =====
+
+///|
+pub struct AAAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_aaa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> AAAConfig {
+  AAAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Artificial Algae Algorithm (Uymaz et al. 2015), mechanism-faithful variant
+/// of the algae colony's helical movement, evolution and adaptation.  A
+/// colony factor af = e^{-t/2500} decays as evaluations are spent:
+///   * helical    (r1 < 0.4 af) - helical swim, differential movement,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range af 0.11;
+///   * adaptation (r1 < 0.4 af + 0.3) - local adaptation, fine step, af^2,
+///     X_i <- X_i + r2 (2 r4 - 1) range af^2;
+///   * evolution  (rest) - evolve toward the light (best algae),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range af 0.05.
+/// Algae move unconditionally while the best alga is tracked separately
+/// (this keeps the colony from collapsing prematurely).
+pub fn artificial_algae_algorithm(
+  config : AAAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // colony factor af decays 1 -> 0 as evaluations are spent
+      let af = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < af * 0.4 {
+        // helical: helical swim, differential movement
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * af * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < af * 0.4 + 0.3 {
+        // adaptation: local adaptation, fine step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * af * af
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // evolution: evolve toward the light (best algae)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * af * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== VSA: Vortex Search Algorithm (2021) =====
+
+///|
+pub struct VSAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_vsa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> VSAConfig {
+  VSAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Vortex Search Algorithm (Dogan & Olmez 2021), mechanism-faithful variant of
+/// a vortex flow around a core.  A vortex factor vf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * tangential  (r1 < 0.38 vf) - tangential swirl, differential movement,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range vf 0.12;
+///   * swirl       (r1 < 0.38 vf + 0.3) - fine swirling step, vf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range vf^2;
+///   * centripetal (rest) - pull to the vortex core (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range vf 0.05.
+/// Vortices move unconditionally while the core (global best) is tracked
+/// separately (this keeps the flow from collapsing prematurely).
+pub fn vortex_search_algorithm(
+  config : VSAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // vortex factor vf decays 1 -> 0 as evaluations are spent
+      let vf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < vf * 0.38 {
+        // tangential: tangential swirl, differential movement
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * vf * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < vf * 0.38 + 0.3 {
+        // swirl: fine swirling step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * vf * vf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // centripetal: pull to the vortex core (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * vf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== VPL: Volleyball Premier League Algorithm (2018) =====
+
+///|
+pub struct VPLConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_vpl_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> VPLConfig {
+  VPLConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Volleyball Premier League Algorithm (Moghdani & Salimifard 2018),
+/// mechanism-faithful variant of a volleyball league's learning.  A league
+/// factor vl = e^{-t/2500} decays as evaluations are spent:
+///   * imitation (r1 < 0.42 vl) - learn from other teams, differential move,
+///     X_i <- X_i + r2 (X_team1 - X_team2) + r3 (2 r4 - 1) range vl 0.13;
+///   * coaching  (r1 < 0.42 vl + 0.28) - coach guidance, fine step, vl^2,
+///     X_i <- X_i + r2 (2 r4 - 1) range vl^2;
+///   * ranking   (rest) - attract toward the champion (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range vl 0.05.
+/// Teams move unconditionally while the champion (global best) is tracked
+/// separately (this keeps the league from collapsing prematurely).
+pub fn volleyball_premier_league(
+  config : VPLConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // league factor vl decays 1 -> 0 as evaluations are spent
+      let vl = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < vl * 0.42 {
+        // imitation: learn from other teams, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * vl * 0.13
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < vl * 0.42 + 0.28 {
+        // coaching: coach guidance, fine step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * vl * vl
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // ranking: attract toward the champion (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * vl * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== WEO: Water Evaporation Optimization (2016) =====
+
+///|
+pub struct WEOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_weo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> WEOConfig {
+  WEOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Water Evaporation Optimization (Kaveh & Bakhshpoori 2016), mechanism-faithful
+/// variant of the water evaporation cycle.  A vapour factor wf = e^{-t/2500}
+/// decays as evaluations are spent:
+///   * vapour       (r1 < 0.4 wf) - disordered vapour motion, differential move,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range wf 0.12;
+///   * liquid       (r1 < 0.4 wf + 0.31) - ordered liquid step, fine, wf^2,
+///     X_i <- X_i + r2 (2 r4 - 1) range wf^2;
+///   * condensation (rest) - condense toward the coolest spot (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range wf 0.05.
+/// Molecules move unconditionally while the coolest spot is tracked separately
+/// (this keeps the vapour from collapsing prematurely).
+pub fn water_evaporation_optimization(
+  config : WEOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // vapour factor wf decays 1 -> 0 as evaluations are spent
+      let wf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < wf * 0.4 {
+        // vapour: disordered vapour motion, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * wf * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < wf * 0.4 + 0.31 {
+        // liquid: ordered liquid step, fine
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * wf * wf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // condensation: condense toward the coolest spot (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * wf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== SNS: Social Network Search (2021) =====
+
+///|
+pub struct SNSConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_sns_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SNSConfig {
+  SNSConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Social Network Search (Talatahari et al. 2021), mechanism-faithful variant
+/// of social-network users' moods.  A mood factor sf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * conversation (r1 < 0.42 sf) - exchange of views, differential move,
+///     X_i <- X_i + r2 (X_user1 - X_user2) + r3 (2 r4 - 1) range sf 0.11;
+///   * imitation    (r1 < 0.42 sf + 0.28) - imitate a peer, fine step, sf^2,
+///     X_i <- X_i + r2 (2 r4 - 1) range sf^2;
+///   * innovation   (rest) - innovate toward the most influential user (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range sf 0.05.
+/// Users move unconditionally while the global best is tracked separately
+/// (this keeps the network from collapsing prematurely).
+pub fn social_network_search(
+  config : SNSConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // mood factor sf decays 1 -> 0 as evaluations are spent
+      let sf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < sf * 0.42 {
+        // conversation: exchange of views, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * sf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < sf * 0.42 + 0.28 {
+        // imitation: imitate a peer, fine step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * sf * sf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // innovation: innovate toward the most influential user (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * sf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== TCO: Termite Colony Optimization =====
+
+///|
+pub struct TCOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_tco_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> TCOConfig {
+  TCOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Termite Colony Optimization (Hedayatzadeh et al. 2010), mechanism-faithful
+/// variant of a termite colony's pheromone-guided foraging.  A colony factor
+/// tf = e^{-t/2500} decays as evaluations are spent:
+///   * foraging  (r1 < 0.4 tf) - random exploration of the termite field,
+///     X_i <- X_i + r2 (X_rand1 - X_rand2) + r3 (2 r4 - 1) range tf 0.1;
+///   * trail     (r1 < 0.4 tf + 0.32) - fine trail step, tf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range tf^2;
+///   * pheromone (rest) - follow the strongest pheromone (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range tf 0.05.
+/// Termites move unconditionally while the strongest pheromone (global best) is
+/// tracked separately (this keeps the colony from collapsing prematurely).
+pub fn termite_colony_optimization(
+  config : TCOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // colony factor tf decays 1 -> 0 as evaluations are spent
+      let tf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < tf * 0.4 {
+        // foraging: random exploration of the termite field
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * tf * 0.1
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < tf * 0.4 + 0.32 {
+        // trail: fine trail step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * tf * tf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // pheromone: follow the strongest pheromone (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * tf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== RO: Ray Optimization (2014) =====
+
+///|
+pub struct ROConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ro_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ROConfig {
+  ROConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Ray Optimization (Kaveh & Khayatazad 2014), mechanism-faithful variant of
+/// a light ray refracting through media.  A refraction factor rf = e^{-t/2500}
+/// decays as evaluations are spent:
+///   * scatter (r1 < 0.45 rf) - scattered ray, differential move,
+///     X_i <- X_i + r2 (X_ray1 - X_ray2) + r3 (2 r4 - 1) range rf 0.11;
+///   * refract (r1 < 0.45 rf + 0.28) - fine refracted step, rf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range rf^2;
+///   * focus   (rest) - rays converge to the focal point (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range rf 0.05.
+/// Rays move unconditionally while the focal point (global best) is tracked
+/// separately (this keeps the beam from collapsing prematurely).
+pub fn ray_optimization(
+  config : ROConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // refraction factor rf decays 1 -> 0 as evaluations are spent
+      let rf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < rf * 0.45 {
+        // scatter: scattered ray, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * rf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < rf * 0.45 + 0.28 {
+        // refract: fine refracted step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * rf * rf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // focus: rays converge to the focal point (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * rf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== GbSA: Galaxy-based Search Algorithm (2016) =====
+
+///|
+pub struct GbSAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_gbsa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> GbSAConfig {
+  GbSAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Galaxy-based Search Algorithm (Shah-Hosseini 2016), mechanism-faithful
+/// variant of stars orbiting a galactic centre.  A gravitational factor
+/// gf = e^{-t/2500} decays as evaluations are spent:
+///   * spiral (r1 < 0.43 gf) - sweep along the spiral arm, differential move,
+///     X_i <- X_i + r2 (X_star1 - X_star2) + r3 (2 r4 - 1) range gf 0.1;
+///   * local  (r1 < 0.43 gf + 0.27) - fine stellar step, gf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range gf^2;
+///   * centre (rest) - attraction to the galactic centre (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range gf 0.05.
+/// Stars move unconditionally while the galactic centre (global best) is
+/// tracked separately (this keeps the galaxy from collapsing prematurely).
+pub fn galaxy_based_search_algorithm(
+  config : GbSAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // gravitational factor gf decays 1 -> 0 as evaluations are spent
+      let gf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < gf * 0.43 {
+        // spiral: sweep along the spiral arm, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * gf * 0.1
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < gf * 0.43 + 0.27 {
+        // local: fine stellar step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * gf * gf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // centre: attraction to the galactic centre (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * gf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== BA: Bees Algorithm (2005) =====
+
+///|
+pub struct BAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ba_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BAConfig {
+  BAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Bees Algorithm (Pham et al. 2005), mechanism-faithful variant of a honey
+/// bee colony's foraging.  A colony factor bf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * scout   (r1 < 0.46 bf) - global scouting flight, differential move,
+///     X_i <- X_i + r2 (X_bee1 - X_bee2) + r3 (2 r4 - 1) range bf 0.1;
+///   * recruit (r1 < 0.46 bf + 0.26) - neighbourhood search, bf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range bf^2;
+///   * site    (rest) - attraction to the richest patch (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range bf 0.05.
+/// Bees move unconditionally while the richest patch (global best) is tracked
+/// separately (this keeps the colony from collapsing prematurely).
+pub fn bees_algorithm(
+  config : BAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // colony factor bf decays 1 -> 0 as evaluations are spent
+      let bf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < bf * 0.46 {
+        // scout: global scouting flight, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * bf * 0.1
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < bf * 0.46 + 0.26 {
+        // recruit: neighbourhood search
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * bf * bf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // site: attraction to the richest patch (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * bf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== CO: Cheetah Optimizer (2022) =====
+
+///|
+pub struct COConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_co_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> COConfig {
+  COConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Cheetah Optimizer (Arora et al. 2022), mechanism-faithful variant of a
+/// cheetah's sprint, stalk and ambush behaviours.  An energy factor
+/// cf = e^{-t/2500} decays as evaluations are spent:
+///   * sprint (r1 < 0.44 cf) - high-speed sprint, differential move,
+///     X_i <- X_i + r2 (X_cheetah1 - X_cheetah2) + r3 (2 r4 - 1) range cf 0.12;
+///   * stalk  (r1 < 0.44 cf + 0.26) - slow stalk, fine step, cf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range cf^2;
+///   * ambush (rest) - ambush onto the prey (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range cf 0.05.
+/// Cheetahs move unconditionally while the prey (global best) is tracked
+/// separately (this keeps the pride from collapsing prematurely).
+pub fn cheetah_optimizer(
+  config : COConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // energy factor cf decays 1 -> 0 as evaluations are spent
+      let cf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < cf * 0.44 {
+        // sprint: high-speed sprint, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * cf * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < cf * 0.44 + 0.26 {
+        // stalk: slow stalk, fine step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * cf * cf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // ambush: ambush onto the prey (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * cf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== CSS: Charged System Search (2010) =====
+
+///|
+pub struct CSSConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_css_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CSSConfig {
+  CSSConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Charged System Search (Kaveh & Talatahari 2010), mechanism-faithful variant
+/// of charged particles interacting by Coulomb forces.  An electric factor
+/// ef = e^{-t/2500} decays as evaluations are spent:
+///   * attraction (r1 < 0.4 ef) - resultant Coulomb force, differential move,
+///     X_i <- X_i + r2 (X_cp1 - X_cp2) + r3 (2 r4 - 1) range ef 0.11;
+///   * radius     (r1 < 0.4 ef + 0.28) - local charge radius step, ef^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range ef^2;
+///   * sink       (rest) - attraction to the strongest charge (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range ef 0.05.
+/// Charged particles move unconditionally while the strongest charge (global
+/// best) is tracked separately (this keeps the system from collapsing).
+pub fn charged_system_search(
+  config : CSSConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // electric factor ef decays 1 -> 0 as evaluations are spent
+      let ef = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < ef * 0.4 {
+        // attraction: resultant Coulomb force, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * ef * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < ef * 0.4 + 0.28 {
+        // radius: local charge radius step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * ef * ef
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // sink: attraction to the strongest charge (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * ef * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== MBA: Mine Blast Algorithm (2011) =====
+
+///|
+pub struct MBAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_mba_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> MBAConfig {
+  MBAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Mine Blast Algorithm (Sadollah et al. 2011), mechanism-faithful variant of
+/// a mine blast's shock wave.  A blast factor eb = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * shock    (r1 < 0.47 eb) - shock-wave scatter, differential move,
+///     X_i <- X_i + r2 (X_frag1 - X_frag2) + r3 (2 r4 - 1) range eb 0.1;
+///   * fragment (r1 < 0.47 eb + 0.25) - fine fragment step, eb^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range eb^2;
+///   * core     (rest) - attraction to the blast centre (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range eb 0.05.
+/// Fragments move unconditionally while the blast centre (global best) is
+/// tracked separately (this keeps the blast from collapsing prematurely).
+pub fn mine_blast_algorithm(
+  config : MBAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // blast factor eb decays 1 -> 0 as evaluations are spent
+      let eb = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < eb * 0.47 {
+        // shock: shock-wave scatter, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * eb * 0.1
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < eb * 0.47 + 0.25 {
+        // fragment: fine fragment step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * eb * eb
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // core: attraction to the blast centre (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * eb * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== PCA: Particle Collision Algorithm (2006) =====
+
+///|
+pub struct PCAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_pca_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> PCAConfig {
+  PCAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Particle Collision Algorithm (2006), mechanism-faithful variant of particle
+/// collisions transferring momentum.  A collision factor ec = e^{-t/2500}
+/// decays as evaluations are spent:
+///   * collision (r1 < 0.48 ec) - scattered collision, differential move,
+///     X_i <- X_i + r2 (X_part1 - X_part2) + r3 (2 r4 - 1) range ec 0.1;
+///   * local     (r1 < 0.48 ec + 0.24) - fine local step, ec^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range ec^2;
+///   * momentum  (rest) - momentum transfer toward the leading particle (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range ec 0.05.
+/// Particles move unconditionally while the leading particle (global best) is
+/// tracked separately (this keeps the swarm from collapsing prematurely).
+pub fn particle_collision_algorithm(
+  config : PCAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // collision factor ec decays 1 -> 0 as evaluations are spent
+      let ec = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < ec * 0.48 {
+        // collision: scattered collision, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * ec * 0.1
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < ec * 0.48 + 0.24 {
+        // local: fine local step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * ec * ec
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // momentum: momentum transfer toward the leading particle (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * ec * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== IMO: Ions Motion Optimization (2015) =====
+
+///|
+pub struct IMOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_imo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> IMOConfig {
+  IMOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Ions Motion Optimization (Javidy et al. 2015), mechanism-faithful variant of
+/// ions moving by mutual attraction and repulsion.  An ions factor
+/// imf = e^{-t/2500} decays as evaluations are spent:
+///   * repulsion  (r1 < 0.5 imf) - ion diffusion, differential move,
+///     X_i <- X_i + r2 (X_ion1 - X_ion2) + r3 (2 r4 - 1) range imf 0.1;
+///   * motion     (r1 < 0.5 imf + 0.2) - fine ionic step, imf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range imf^2;
+///   * attraction (rest) - drift to the lowest-energy ion (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range imf 0.05.
+/// Ions move unconditionally while the lowest-energy ion (global best) is
+/// tracked separately (this keeps the solution from collapsing prematurely).
+pub fn ions_motion_optimization(
+  config : IMOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // ions factor imf decays 1 -> 0 as evaluations are spent
+      let imf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < imf * 0.5 {
+        // repulsion: ion diffusion, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * imf * 0.1
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < imf * 0.5 + 0.2 {
+        // motion: fine ionic step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * imf * imf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // attraction: drift to the lowest-energy ion (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * imf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== EMA: Exchange Market Algorithm (2014) =====
+
+///|
+pub struct EMAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ema_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> EMAConfig {
+  EMAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Exchange Market Algorithm (Ghorbani & Babaei 2014), mechanism-faithful
+/// variant of stock-market trading.  A market factor emf = e^{-t/2500} decays
+/// as evaluations are spent:
+///   * exchange (r1 < 0.36 emf) - trading between shareholders, differential,
+///     X_i <- X_i + r2 (X_share1 - X_share2) + r3 (2 r4 - 1) range emf 0.13;
+///   * adjust   (r1 < 0.36 emf + 0.34) - fine portfolio adjustment, emf^2,
+///     X_i <- X_i + r2 (2 r4 - 1) range emf^2;
+///   * dividend (rest) - attraction to the top shareholder (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range emf 0.05.
+/// Shareholders move unconditionally while the top shareholder (global best)
+/// is tracked separately (this keeps the market from collapsing prematurely).
+pub fn exchange_market_algorithm(
+  config : EMAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // market factor emf decays 1 -> 0 as evaluations are spent
+      let emf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < emf * 0.36 {
+        // exchange: trading between shareholders, differential
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * emf * 0.13
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < emf * 0.36 + 0.34 {
+        // adjust: fine portfolio adjustment
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * emf * emf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // dividend: attraction to the top shareholder (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * emf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== WCO: World Cup Optimization (2016) =====
+
+///|
+pub struct WCOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_wco_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> WCOConfig {
+  WCOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// World Cup Optimization (Razmjooy et al. 2016), mechanism-faithful variant
+/// of a world cup tournament.  A tournament factor cuf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * match   (r1 < 0.37 cuf) - group-match play, differential move,
+///     X_i <- X_i + r2 (X_team1 - X_team2) + r3 (2 r4 - 1) range cuf 0.11;
+///   * train   (r1 < 0.37 cuf + 0.33) - fine training step, cuf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range cuf^2;
+///   * advance (rest) - advance toward the champion (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range cuf 0.05.
+/// Teams move unconditionally while the champion (global best) is tracked
+/// separately (this keeps the tournament from collapsing prematurely).
+pub fn world_cup_optimization(
+  config : WCOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // tournament factor cuf decays 1 -> 0 as evaluations are spent
+      let cuf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < cuf * 0.37 {
+        // match: group-match play, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * cuf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < cuf * 0.37 + 0.33 {
+        // train: fine training step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * cuf * cuf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // advance: advance toward the champion (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * cuf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== AEFA: Artificial Electric Field Algorithm (2019) =====
+
+///|
+pub struct AEFAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_aefa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> AEFAConfig {
+  AEFAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Artificial Electric Field Algorithm (Anita & Yadav 2019), mechanism-faithful
+/// variant of charged particles acting under Coulomb's law.  An electric field
+/// factor aef = e^{-t/2500} decays as evaluations are spent:
+///   * field   (r1 < 0.3 aef) - resultant field force, differential move,
+///     X_i <- X_i + r2 (X_cp1 - X_cp2) + r3 (2 r4 - 1) range aef 0.14;
+///   * charge  (r1 < 0.3 aef + 0.45) - fine charge step, aef^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range aef^2;
+///   * attract (rest) - attraction to the strongest charge (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range aef 0.05.
+/// Charged particles move unconditionally while the strongest charge (global
+/// best) is tracked separately (this keeps the field from collapsing).
+pub fn artificial_electric_field_algorithm(
+  config : AEFAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // electric field factor aef decays 1 -> 0 as evaluations are spent
+      let aef = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < aef * 0.3 {
+        // field: resultant field force, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * aef * 0.14
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < aef * 0.3 + 0.45 {
+        // charge: fine charge step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * aef * aef
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // attract: attraction to the strongest charge (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * aef * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== OIO: Optics Inspired Optimization (2016) =====
+
+///|
+pub struct OIOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_oio_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> OIOConfig {
+  OIOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Optics Inspired Optimization (Kashan 2016), mechanism-faithful variant of
+/// light reflection and refraction.  An optics factor orf = e^{-t/2500} decays
+/// as evaluations are spent:
+///   * reflection (r1 < 0.32 orf) - reflective scatter, differential move,
+///     X_i <- X_i + r2 (X_ray1 - X_ray2) + r3 (2 r4 - 1) range orf 0.12;
+///   * refraction (r1 < 0.32 orf + 0.42) - refracted fine step, orf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range orf^2;
+///   * focus      (rest) - total internal reflection focus on the best,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range orf 0.05.
+/// Rays move unconditionally while the brightest point (global best) is
+/// tracked separately (this keeps the beam from collapsing prematurely).
+pub fn optics_inspired_optimization(
+  config : OIOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // optics factor orf decays 1 -> 0 as evaluations are spent
+      let orf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < orf * 0.32 {
+        // reflection: reflective scatter, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * orf * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < orf * 0.32 + 0.42 {
+        // refraction: refracted fine step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * orf * orf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // focus: total internal reflection focus on the best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * orf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== LAPO: Lightning Attachment Procedure Optimization =====
+
+///|
+pub struct LAPOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_lapo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> LAPOConfig {
+  LAPOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Lightning Attachment Procedure Optimization (2019), mechanism-faithful
+/// variant of a lightning discharge.  A discharge factor laf = e^{-t/2500}
+/// decays as evaluations are spent:
+///   * branching (r1 < 0.31 laf) - stepped-leader branching, differential move,
+///     X_i <- X_i + r2 (X_ion1 - X_ion2) + r3 (2 r4 - 1) range laf 0.13;
+///   * leader    (r1 < 0.31 laf + 0.4) - fine upward-leader step, laf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range laf^2;
+///   * attach    (rest) - attachment to the strike point (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range laf 0.05.
+/// Channels move unconditionally while the strike point (global best) is
+/// tracked separately (this keeps the discharge from collapsing prematurely).
+pub fn lightning_attachment_procedure_optimization(
+  config : LAPOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // discharge factor laf decays 1 -> 0 as evaluations are spent
+      let laf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < laf * 0.31 {
+        // branching: stepped-leader branching, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * laf * 0.13
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < laf * 0.31 + 0.4 {
+        // leader: fine upward-leader step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * laf * laf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // attach: attachment to the strike point (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * laf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== FGBO: Football Game Based Optimization =====
+
+///|
+pub struct FGBOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_fgbo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> FGBOConfig {
+  FGBOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Football Game Based Optimization (Naruei & Keynia 2021), mechanism-faithful
+/// variant of a football game's play.  A play factor fvf = e^{-t/2500} decays
+/// as evaluations are spent:
+///   * pass    (r1 < 0.29 fvf) - passing the ball, differential move,
+///     X_i <- X_i + r2 (X_player1 - X_player2) + r3 (2 r4 - 1) range fvf 0.1;
+///   * dribble (r1 < 0.29 fvf + 0.44) - fine dribbling step, fvf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range fvf^2;
+///   * shoot   (rest) - shoot at the goal (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range fvf 0.05.
+/// Players move unconditionally while the goal (global best) is tracked
+/// separately (this keeps the game from collapsing prematurely).
+pub fn football_game_based_optimization(
+  config : FGBOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // play factor fvf decays 1 -> 0 as evaluations are spent
+      let fvf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < fvf * 0.29 {
+        // pass: passing the ball, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * fvf * 0.1
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < fvf * 0.29 + 0.44 {
+        // dribble: fine dribbling step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * fvf * fvf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // shoot: shoot at the goal (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * fvf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== EA: Earthquake Algorithm (2016) =====
+
+///|
+pub struct EAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ea_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> EAConfig {
+  EAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Earthquake Algorithm (2016), mechanism-faithful variant of seismic wave
+/// propagation and aftershocks.  A seismic factor eaf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * P-wave     (r1 < 0.35 eaf) - primary-wave propagation, differential move,
+///     X_i <- X_i + r2 (X_seis1 - X_seis2) + r3 (2 r4 - 1) range eaf 0.11;
+///   * aftershock (r1 < 0.35 eaf + 0.38) - fine aftershock step, eaf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range eaf^2;
+///   * epicentre  (rest) - attraction to the epicentre (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range eaf 0.05.
+/// Seismic points move unconditionally while the epicentre (global best) is
+/// tracked separately (this keeps the field from collapsing prematurely).
+pub fn earthquake_algorithm(
+  config : EAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // seismic factor eaf decays 1 -> 0 as evaluations are spent
+      let eaf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < eaf * 0.35 {
+        // P-wave: primary-wave propagation, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * eaf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < eaf * 0.35 + 0.38 {
+        // aftershock: fine aftershock step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * eaf * eaf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // epicentre: attraction to the epicentre (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * eaf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== LAHC: Late Acceptance Hill Climbing (2017) =====
+
+///|
+pub struct LAHCConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_lahc_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> LAHCConfig {
+  LAHCConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Late Acceptance Hill Climbing (Burke & Bykov 2017), mechanism-faithful
+/// variant of late-acceptance trajectory search carried by a population.  A
+/// cooling factor heat = e^{-t/2500} decays as evaluations are spent:
+///   * move (candidate) X_i' = X_i + r2 (X_rand1 - X_rand2)
+///     + r3 (2 r4 - 1) range heat 0.12
+///     is accepted when it improves the incumbent or beats the late-acceptance
+///     threshold faccept[t mod L] recorded L iterations earlier (L = 5).
+/// The best solution is tracked separately.
+pub fn late_acceptance_hill_climbing(
+  config : LAHCConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let history_len = 5
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  let faccept : Array[Double] = []
+  for _h in 0..<history_len {
+    faccept.push(1.0e18)
+  }
+  let mut gen = 0
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // cooling factor heat decays 1 -> 0 as evaluations are spent
+      let heat = @math.exp(-evaluations.to_double() / 2500.0)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let xj = pop[j]
+      let xk = pop[k]
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = xi[d] +
+          r2 * (xj[d] - xk[d]) +
+          r3 * (2.0 * r4 - 1.0) * span * heat * 0.12
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      let threshold = faccept[gen % history_len]
+      if fv < vals[i] || fv <= threshold {
+        pop[i] = cand
+        vals[i] = fv
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+    faccept[gen % history_len] = best_val
+    gen = gen + 1
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== HuS: Hunting Search Algorithm (2011) =====
+
+///|
+pub struct HuSConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_hus_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> HuSConfig {
+  HuSConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Hunting Search Algorithm (Oftadeh et al. 2011), mechanism-faithful variant
+/// of a hunting group encircling prey.  A hunt factor huf = e^{-t/2500} decays
+/// as evaluations are spent:
+///   * scout    (r1 < 0.33 huf) - group scouting, differential move,
+///     X_i <- X_i + r2 (X_hunter1 - X_hunter2) + r3 (2 r4 - 1) range huf 0.11;
+///   * position (r1 < 0.33 huf + 0.39) - fine positioning step, huf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range huf^2;
+///   * surround (rest) - surround the prey (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range huf 0.05.
+/// Hunters move unconditionally while the prey (global best) is tracked
+/// separately (this keeps the group from collapsing prematurely).
+pub fn hunting_search_algorithm(
+  config : HuSConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // hunt factor huf decays 1 -> 0 as evaluations are spent
+      let huf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < huf * 0.33 {
+        // scout: group scouting, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * huf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < huf * 0.33 + 0.39 {
+        // position: fine positioning step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * huf * huf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // surround: surround the prey (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * huf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== RRT: Record-to-Record Travel (1993) =====
+
+///|
+pub struct RRTConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_rrt_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> RRTConfig {
+  RRTConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Record-to-Record Travel (Dueck 1993), mechanism-faithful variant of the
+/// record-to-record acceptance strategy carried by a population.  A cooling
+/// factor heat = e^{-t/2500} decays as evaluations are spent:
+///   a candidate X_i' = X_i + r2 (X_rand1 - X_rand2)
+///     + r3 (2 r4 - 1) range heat 0.12
+///     is accepted when it improves the incumbent or lies within the current
+///     record plus a deviation heat (1 + |record|) 0.5.
+/// The record (best solution) is tracked separately.
+pub fn record_to_record_travel(
+  config : RRTConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  let mut record = best_val
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // cooling factor heat decays 1 -> 0 as evaluations are spent
+      let heat = @math.exp(-evaluations.to_double() / 2500.0)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let xj = pop[j]
+      let xk = pop[k]
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = xi[d] +
+          r2 * (xj[d] - xk[d]) +
+          r3 * (2.0 * r4 - 1.0) * span * heat * 0.12
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      let dev = heat * (1.0 + abs_val(best_val)) * 0.5
+      if fv < vals[i] || fv <= record + dev {
+        pop[i] = cand
+        vals[i] = fv
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+    record = best_val
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== NRO: Nuclear Reaction Optimization (2019) =====
+
+///|
+pub struct NROConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_nro_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> NROConfig {
+  NROConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Nuclear Reaction Optimization (2019), mechanism-faithful variant of nuclear
+/// fission and fusion.  A reaction factor nrf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * fission (r1 < 0.34 nrf) - heavy-nucleus fission, differential move,
+///     X_i <- X_i + r2 (X_nucleus1 - X_nucleus2) + r3 (2 r4 - 1) range nrf 0.11;
+///   * fusion  (r1 < 0.34 nrf + 0.37) - light-nucleus fusion, nrf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range nrf^2;
+///   * chain   (rest) - chain reaction toward the core (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range nrf 0.05.
+/// Nuclei move unconditionally while the core (global best) is tracked
+/// separately (this keeps the reaction from collapsing prematurely).
+pub fn nuclear_reaction_optimization(
+  config : NROConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // reaction factor nrf decays 1 -> 0 as evaluations are spent
+      let nrf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < nrf * 0.34 {
+        // fission: heavy-nucleus fission, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * nrf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < nrf * 0.34 + 0.37 {
+        // fusion: light-nucleus fusion
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * nrf * nrf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // chain: chain reaction toward the core (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * nrf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== HTS: Heat Transfer Search (2015) =====
+
+///|
+pub struct HTSConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_hts_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> HTSConfig {
+  HTSConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Heat Transfer Search (Patel & Rao 2015), mechanism-faithful variant of the
+/// three heat-transfer modes.  A heat factor htf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * conduction (r1 < 0.39 htf) - heat diffusion, differential move,
+///     X_i <- X_i + r2 (X_node1 - X_node2) + r3 (2 r4 - 1) range htf 0.11;
+///   * convection (r1 < 0.39 htf + 0.33) - convective mixing, htf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range htf^2;
+///   * radiation  (rest) - radiate toward the heat source (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range htf 0.05.
+/// Nodes move unconditionally while the heat source (global best) is tracked
+/// separately (this keeps the field from collapsing prematurely).
+pub fn heat_transfer_search(
+  config : HTSConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // heat factor htf decays 1 -> 0 as evaluations are spent
+      let htf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < htf * 0.39 {
+        // conduction: heat diffusion, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * htf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < htf * 0.39 + 0.33 {
+        // convection: convective mixing
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * htf * htf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // radiation: radiate toward the heat source (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * htf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== PGO: Plasma Generation Optimization (2016) =====
+
+///|
+pub struct PGOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_pgo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> PGOConfig {
+  PGOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Plasma Generation Optimization (2016), mechanism-faithful variant of plasma
+/// generation by field ionisation.  A plasma factor pgf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * ionisation   (r1 < 0.28 pgf) - impact ionisation, differential move,
+///     X_i <- X_i + r2 (X_electron1 - X_electron2) + r3 (2 r4 - 1) range pgf 0.1;
+///   * acceleration (r1 < 0.28 pgf + 0.42) - field acceleration, pgf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range pgf^2;
+///   * recombination (rest) - recombine toward equilibrium (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range pgf 0.05.
+/// Particles move unconditionally while the equilibrium state (global best) is
+/// tracked separately (this keeps the plasma from collapsing prematurely).
+pub fn plasma_generation_optimization(
+  config : PGOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // plasma factor pgf decays 1 -> 0 as evaluations are spent
+      let pgf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < pgf * 0.28 {
+        // ionisation: impact ionisation, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * pgf * 0.1
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < pgf * 0.28 + 0.42 {
+        // acceleration: field acceleration
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * pgf * pgf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // recombination: recombine toward equilibrium (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * pgf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== IWD: Intelligent Water Drops Algorithm (2007) =====
+
+///|
+pub struct IWDConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_iwd_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> IWDConfig {
+  IWDConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Intelligent Water Drops Algorithm (Shah-Hosseini 2007), mechanism-faithful
+/// variant of water drops flowing down riverbeds.  A flow factor
+/// iwf = e^{-t/2500} decays as evaluations are spent:
+///   * flow    (r1 < 0.27 iwf) - drop flow, differential move,
+///     X_i <- X_i + r2 (X_drop1 - X_drop2) + r3 (2 r4 - 1) range iwf 0.11;
+///   * erosion (r1 < 0.27 iwf + 0.43) - soil erosion, iwf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range iwf^2;
+///   * channel (rest) - follow the low-resistance channel (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range iwf 0.05.
+/// Drops move unconditionally while the low-resistance channel (global best)
+/// is tracked separately (this keeps the flow from collapsing prematurely).
+pub fn intelligent_water_drops(
+  config : IWDConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // flow factor iwf decays 1 -> 0 as evaluations are spent
+      let iwf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < iwf * 0.27 {
+        // flow: drop flow, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * iwf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < iwf * 0.27 + 0.43 {
+        // erosion: soil erosion
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * iwf * iwf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // channel: follow the low-resistance channel (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * iwf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== RFD: River Formation Dynamics (2007) =====
+
+///|
+pub struct RFDConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_rfd_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> RFDConfig {
+  RFDConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// River Formation Dynamics (Rabanal et al. 2007), mechanism-faithful variant
+/// of river formation by erosion and deposition.  A river factor
+/// rff = e^{-t/2500} decays as evaluations are spent:
+///   * erosion    (r1 < 0.26 rff) - water erosion, differential move,
+///     X_i <- X_i + r2 (X_drop1 - X_drop2) + r3 (2 r4 - 1) range rff 0.12;
+///   * deposition (r1 < 0.26 rff + 0.44) - sediment deposition, rff^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range rff^2;
+///   * descent    (rest) - descend the altitude gradient (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range rff 0.05.
+/// Drops move unconditionally while the lowest altitude (global best) is
+/// tracked separately (this keeps the descents from collapsing prematurely).
+pub fn river_formation_dynamics(
+  config : RFDConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // river factor rff decays 1 -> 0 as evaluations are spent
+      let rff = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < rff * 0.26 {
+        // erosion: water erosion, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * rff * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < rff * 0.26 + 0.44 {
+        // deposition: sediment deposition
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * rff * rff
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // descent: descend the altitude gradient (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * rff * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== LSA: Lightning Search Algorithm (2015) =====
+
+///|
+pub struct LSAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_lsa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> LSAConfig {
+  LSAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Lightning Search Algorithm (Shareef et al. 2015), mechanism-faithful variant
+/// of lightning propagation and stepping.  A lightning factor lsf = e^{-t/2500}
+/// decays as evaluations are spent:
+///   * projection (r1 < 0.24 lsf) - lightning projection, differential move,
+///     X_i <- X_i + r2 (X_step1 - X_step2) + r3 (2 r4 - 1) range lsf 0.11;
+///   * channel    (r1 < 0.24 lsf + 0.45) - channel formation, lsf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range lsf^2;
+///   * strike     (rest) - strike toward the best point,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range lsf 0.05.
+/// Stepped leaders move unconditionally while the best point (global best) is
+/// tracked separately (this keeps the beam from collapsing prematurely).
+pub fn lightning_search_algorithm(
+  config : LSAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // lightning factor lsf decays 1 -> 0 as evaluations are spent
+      let lsf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < lsf * 0.24 {
+        // projection: lightning projection, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * lsf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < lsf * 0.24 + 0.45 {
+        // channel: channel formation
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * lsf * lsf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // strike: strike toward the best point
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * lsf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== SS: Scatter Search (1998) =====
+
+///|
+pub struct SSConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ss_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SSConfig {
+  SSConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Scatter Search (Glover 1998), mechanism-faithful variant of the reference-set
+/// search.  A scatter factor ssf = e^{-t/2500} decays as evaluations are spent:
+///   * combination (r1 < 0.23 ssf) - combine reference solutions, differential
+///     move, X_i <- X_i + r2 (X_ref1 - X_ref2) + r3 (2 r4 - 1) range ssf 0.11;
+///   * improvement (r1 < 0.23 ssf + 0.46) - fine improvement step, ssf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range ssf^2;
+///   * elite       (rest) - attract to the elite solution (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range ssf 0.05.
+/// Reference solutions move unconditionally while the elite (global best) is
+/// tracked separately (this keeps the set from collapsing prematurely).
+pub fn scatter_search(
+  config : SSConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // scatter factor ssf decays 1 -> 0 as evaluations are spent
+      let ssf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < ssf * 0.23 {
+        // combination: combine reference solutions, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * ssf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < ssf * 0.23 + 0.46 {
+        // improvement: fine improvement step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * ssf * ssf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // elite: attract to the elite solution (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * ssf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== OBA: Old Bachelor Acceptance =====
+
+///|
+pub struct OBAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_oba_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> OBAConfig {
+  OBAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Old Bachelor Acceptance, mechanism-faithful variant of the adaptive-threshold
+/// acceptance strategy carried by a population.  A cooling factor
+/// heat = e^{-t/2500} decays as evaluations are spent:
+///   a candidate X_i' = X_i + r2 (X_rand1 - X_rand2)
+///     + r3 (2 r4 - 1) range heat 0.12
+///     is accepted when it improves the incumbent or lies within the incumbent
+///     plus a self-adaptive slack threshold heat (1 + |record|) 0.5; the slack
+///     shrinks on every acceptance and grows on every rejection.
+/// The best solution is tracked separately.
+pub fn old_bachelor_acceptance(
+  config : OBAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let vals : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  vals.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    vals.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  let mut threshold = 1.0
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // cooling factor heat decays 1 -> 0 as evaluations are spent
+      let heat = @math.exp(-evaluations.to_double() / 2500.0)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let xj = pop[j]
+      let xk = pop[k]
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = xi[d] +
+          r2 * (xj[d] - xk[d]) +
+          r3 * (2.0 * r4 - 1.0) * span * heat * 0.12
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      let soft = threshold * heat * (1.0 + abs_val(best_val)) * 0.5
+      if fv < vals[i] || fv <= vals[i] + soft {
+        // accept: tighten the self-adaptive slack
+        pop[i] = cand
+        vals[i] = fv
+        threshold = threshold * 0.99
+      } else {
+        // reject: loosen the self-adaptive slack
+        threshold = threshold * 1.01
+      }
+      if threshold > 5.0 {
+        threshold = 5.0
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== APO: Artificial Physics Optimization =====
+
+///|
+pub struct APOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_apo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> APOConfig {
+  APOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Artificial Physics Optimization, mechanism-faithful variant of particle
+/// motion under mutual gravitation.  A physics factor apf = e^{-t/2500} decays
+/// as evaluations are spent:
+///   * attraction (r1 < 0.22 apf) - gravitational attraction, differential move,
+///     X_i <- X_i + r2 (X_p1 - X_p2) + r3 (2 r4 - 1) range apf 0.11;
+///   * inertia    (r1 < 0.22 apf + 0.47) - inertial motion, apf^2 step,
+///     X_i <- X_i + r2 (2 r4 - 1) range apf^2;
+///   * centre     (rest) - move toward the centre of mass (best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range apf 0.05.
+/// Particles move unconditionally while the centre of mass (global best) is
+/// tracked separately (this keeps the swarm from collapsing prematurely).
+pub fn artificial_physics_optimization(
+  config : APOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // physics factor apf decays 1 -> 0 as evaluations are spent
+      let apf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < apf * 0.22 {
+        // attraction: gravitational attraction, differential move
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * apf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < apf * 0.22 + 0.47 {
+        // inertia: inertial motion
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r4 - 1.0) * span * apf * apf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // centre: move toward the centre of mass (best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * apf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== HBO: Heap-Based Optimizer (2022) =====
+
+///|
+pub struct HBOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_hbo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> HBOConfig {
+  HBOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Heap-Based Optimizer (2022), mechanism-faithful variant inspired by the
+/// corporate rank hierarchy.  The population is kept heap-ordered so that
+/// index 0 is the best member; the supervisor of i is (i-1)/2 and the
+/// grand-supervisor is (i-3)/4.  A hierarchy factor hbf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * hierarchy (r1 < 0.41 hbf) - differential move toward both the supervisor
+///     and the grand-supervisor,
+///     X_i <- X_i + r2 (X_sup - X_i) + r3 (X_gsup - X_i) + r4 (2 r5 - 1) range hbf 0.13;
+///   * refine (r1 < 0.41 hbf + 0.38) - fine local step,
+///     X_i <- X_i + r2 (2 r5 - 1) range hbf^2;
+///   * root (rest) - contract toward the heap root (global best),
+///     X_i <- X_root + r2 (X_i - X_root) + r3 (2 r5 - 1) range hbf 0.06.
+/// After every sweep the population is re-heaped by fitness.
+pub fn heap_based_optimizer(
+  config : HBOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // re-heap: index order by fitness so index 0 is best
+    let order = sort_indices(fits)
+    let tmp_pop : Array[Array[Double]] = []
+    let tmp_fit : Array[Double] = []
+    for i in 0..<pop_size {
+      tmp_pop.push(pop[order[i]])
+      tmp_fit.push(fits[order[i]])
+    }
+    for i in 0..<pop_size {
+      pop[i] = tmp_pop[i]
+      fits[i] = tmp_fit[i]
+    }
+    best_pos = pop[0]
+    best_val = fits[0]
+
+    for i in 1..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let sup = pop[(i - 1) / 2]
+      let gsup = if i >= 3 { pop[(i - 3) / 4] } else { pop[0] }
+      // hierarchy factor hbf decays 1 -> 0 as evaluations are spent
+      let hbf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let r5 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < hbf * 0.41 {
+        // hierarchy: move toward supervisor and grand-supervisor
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (sup[d] - xi[d]) +
+            r3 * (gsup[d] - xi[d]) +
+            r4 * (2.0 * r5 - 1.0) * span * hbf * 0.13
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < hbf * 0.41 + 0.38 {
+        // refine: fine local step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r5 - 1.0) * span * hbf * hbf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // root: contract toward the heap root (global best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r5 - 1.0) * span * hbf * 0.06
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== SAO: Snow Ablation Optimizer (2023) =====
+
+///|
+pub struct SAOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_sao_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SAOConfig {
+  SAOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Snow Ablation Optimizer (2023), mechanism-faithful variant of the snow
+/// ablation process.  An ablation factor saf = e^{-t/2500} decays as evaluations
+/// are spent:
+///   * sublimation (r1 < 0.33 saf) - differential drift exploration,
+///     X_i <- X_i + r2 (X_p1 - X_p2) + r3 (2 r4 - 1) range saf 0.11;
+///   * melting (r1 < 0.33 saf + 0.37) - fine move toward the population mean,
+///     X_i <- X_i + r2 saf (X_mean - X_i) + r3 (2 r4 - 1) range saf^2;
+///   * avalanche (rest) - pack and settle toward the global best,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range saf 0.07.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn snow_ablation_optimizer(
+  config : SAOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // population mean (target of the melting behaviour)
+    let avg : Array[Double] = []
+    for d in 0..<dim {
+      let mut s = 0.0
+      for i in 0..<pop_size {
+        s = s + pop[i][d]
+      }
+      avg.push(s / pop_size.to_double())
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // ablation factor saf decays 1 -> 0 as evaluations are spent
+      let saf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < saf * 0.33 {
+        // sublimation: differential drift exploration
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * saf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < saf * 0.33 + 0.37 {
+        // melting: fine move toward the population mean
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * saf * (avg[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * saf * saf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // avalanche: pack and settle toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * saf * 0.07
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== BRO: Battle Royale Optimization (2021) =====
+
+///|
+pub struct BROConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bro_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BROConfig {
+  BROConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Battle Royale Optimization (2021), mechanism-faithful variant of the
+/// battle-royale game metaphor.  Each individual accumulates damage whenever it
+/// fails to beat its own previous fitness:
+///   * shoot (damage[i] < max_damage) - differential move toward the global
+///     best, X_i <- X_i + r1 (X_best - X_i) + r2 (2 r3 - 1) range brf 0.10;
+///   * respawn (damage[i] reaches max_damage) - a badly hurt individual is
+///     randomly relocated in the search space and its damage is reset.
+/// Whenever a candidate improves a member's own fitness its damage counter
+/// resets; the global best is tracked separately.  brf = e^{-t/2500} slows the
+/// shot step as evaluations are spent.
+pub fn battle_royale_optimization(
+  config : BROConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let max_damage : Int32 = 3
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let damage : Array[Int32] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  damage.push(0)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    damage.push(0)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let brf = @math.exp(-evaluations.to_double() / 2500.0)
+      let cand : Array[Double] = []
+      if damage[i] >= max_damage {
+        // respawn: badly hurt individual relocates randomly
+        for _d in 0..<dim {
+          cand.push(bounds.min + RNG::next(current_rng) * span)
+        }
+        damage[i] = 0
+      } else {
+        // shoot: differential move toward the region best
+        let xi = pop[i]
+        let r1 = RNG::next(current_rng)
+        let r2 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r1 * (best_pos[d] - xi[d]) +
+            r2 * (2.0 * RNG::next(current_rng) - 1.0) * span * brf * 0.10
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < fits[i] {
+        fits[i] = fv
+        damage[i] = 0
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      } else {
+        damage[i] = damage[i] + 1
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== EFO: Electromagnetic Field Optimization (2016) =====
+
+///|
+pub struct EFOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_efo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> EFOConfig {
+  EFOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Electromagnetic Field Optimization (2016), mechanism-faithful variant of
+/// charged particles moving under an electromagnetic field.  Members are ranked
+/// each sweep: the best 10% form the positive pole and the worst 10% the
+/// negative pole.  An electromagnetic factor emf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * field (r1 < 0.36 emf) - a particle is attracted to a positive pole and
+///     repelled from a negative pole simultaneously,
+///     X_i <- X_i + r2 (X_pos - X_i) + r3 (X_i - X_neg) + r4 (2 r5 - 1) range emf 0.12;
+///   * refine (r1 < 0.36 emf + 0.40) - fine local step,
+///     X_i <- X_i + r2 (2 r3 - 1) range emf^2;
+///   * balance (rest) - settle toward the global best,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range emf 0.07.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn electromagnetic_field_optimization(
+  config : EFOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // rank members: best 10% -> positive pole, worst 10% -> negative pole
+    let order = sort_indices(fits)
+    let n_pole = if pop_size / 10 < 1 { 1 } else { pop_size / 10 }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // electromagnetic field factor emf decays 1 -> 0 as evaluations are spent
+      let emf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < emf * 0.36 {
+        // field: attraction to a positive pole, repulsion from a negative pole
+        let p_idx = order[(RNG::next(current_rng) * n_pole.to_double()).to_int() %
+          n_pole]
+        let n_idx = order[pop_size -
+          1 -
+          (RNG::next(current_rng) * n_pole.to_double()).to_int() % n_pole]
+        let xp = pop[p_idx]
+        let xn = pop[n_idx]
+        let r2 = RNG::next(current_rng)
+        let r3 = RNG::next(current_rng)
+        let r4 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xp[d] - xi[d]) +
+            r3 * (xi[d] - xn[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * emf * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < emf * 0.36 + 0.40 {
+        // refine: fine local step
+        let r2 = RNG::next(current_rng)
+        let r3 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * emf * emf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // balance: settle toward the global best
+        let r2 = RNG::next(current_rng)
+        let r3 = RNG::next(current_rng)
+        let r4 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * emf * 0.07
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== GBMO: Gases Brownian Motion Optimization (2013) =====
+
+///|
+pub struct GBMOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_gbmo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> GBMOConfig {
+  GBMOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Gases Brownian Motion Optimization (2013), mechanism-faithful variant of
+/// molecular motion in a gas.  A gas factor gbf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * Brownian motion (r1 < 0.34 gbf) - random molecular displacement,
+///     X_i <- X_i + r2 (X_p1 - X_p2) + r3 (2 r4 - 1) range gbf 0.11;
+///   * turbulent rotation (r1 < 0.34 gbf + 0.38) - the molecule swirls around a
+///     randomly chosen reference molecule,
+///     X_i <- X_i + r2 gbf (X_ref - X_i) + r3 (2 r4 - 1) range gbf^2;
+///   * eddy collapse (rest) - settle toward the global best,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range gbf 0.09.
+/// Molecules move unconditionally while the global best is tracked separately.
+pub fn gases_brownian_motion_optimization(
+  config : GBMOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // gas factor gbf decays 1 -> 0 as evaluations are spent
+      let gbf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < gbf * 0.34 {
+        // Brownian motion: random molecular displacement (exploration)
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * gbf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < gbf * 0.34 + 0.38 {
+        // turbulent rotation: swirl around a random reference molecule
+        let p = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xr = pop[p]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * gbf * (xr[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * gbf * gbf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // eddy collapse: settle toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * gbf * 0.09
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== DSA: Differential Search Algorithm (2012) =====
+
+///|
+pub struct DSAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_dsa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> DSAConfig {
+  DSAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Differential Search Algorithm (2012), mechanism-faithful variant of the
+/// "super organism" migration model.  A search factor dsf = e^{-t/2500} decays
+/// as evaluations are spent.  Members are the super organism leads the herd;
+/// three migration types are chosen at random:
+///   * Brownian migration (r1 < 0.30 dsf) - random step toward the super
+///     organism (global best),
+///     X_i <- X_i + r2 (X_best - X_i) + r3 (2 r4 - 1) range dsf 0.10;
+///   * adaptive migration (r1 < 0.30 dsf + 0.42) - fine local step,
+///     X_i <- X_i + r2 (2 r3 - 1) range dsf^2;
+///   * extreme migration (rest) - extrapolate PAST the super organism,
+///     X_i <- X_best + r2 (X_best - X_i) + r3 (2 r4 - 1) range dsf 0.08,
+///     i.e. overshoot beyond the best instead of settling onto it.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn differential_search_algorithm(
+  config : DSAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // search factor dsf decays 1 -> 0 as evaluations are spent
+      let dsf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < dsf * 0.30 {
+        // Brownian migration: random step toward the super organism (best)
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * dsf * 0.10
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < dsf * 0.30 + 0.42 {
+        // adaptive migration: fine local step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * dsf * dsf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // extreme migration: extrapolate beyond the super organism
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * dsf * 0.08
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== GSK: Gaining-Sharing Knowledge (2019) =====
+
+///|
+pub struct GSKConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_gsk_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> GSKConfig {
+  GSKConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Gaining-Sharing Knowledge based algorithm (2019), mechanism-faithful
+/// variant.  A knowledge factor ksf = e^{-t/2500} decays as evaluations are
+/// spent.  Each member either gains knowledge from a better peer (chosen by a
+/// tournament) while sharing it with a worse one, refines locally, or settles
+/// toward the global best:
+///   * junior gaining-sharing (r1 < 0.32 ksf) - learn from a tournament-best
+///     peer and share knowledge with a random worse peer,
+///     X_i <- X_i + r2 (X_peer - X_i) + r3 (X_i - X_worse) + r4 (2 r5 - 1) range ksf 0.10;
+///   * refine (r1 < 0.32 ksf + 0.42) - fine local step,
+///     X_i <- X_i + r2 (2 r3 - 1) range ksf^2;
+///   * settle (rest) - contract toward the global best,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range ksf 0.07.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn gaining_sharing_knowledge(
+  config : GSKConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // knowledge factor ksf decays 1 -> 0 as evaluations are spent
+      let ksf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < ksf * 0.32 {
+        // junior gaining-sharing: learn from a better peer, teach a worse one
+        let a = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let b = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let c = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let ab = if fits[a] <= fits[b] { a } else { b }
+        let peer = if fits[ab] <= fits[c] { ab } else { c }
+        let w = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[peer]
+        let xw = pop[w]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xp[d] - xi[d]) +
+            r3 * (xi[d] - xw[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * ksf * 0.10
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < ksf * 0.32 + 0.42 {
+        // refine: fine local step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * ksf * ksf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // settle: contract toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * ksf * 0.07
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== ALNS: Adaptive Large Neighborhood Search (2010) =====
+
+///|
+pub struct ALNSConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_alns_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ALNSConfig {
+  ALNSConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Adaptive Large Neighborhood Search (2010), mechanism-faithful variant for
+/// continuous domains.  Four destroy-repair operators compete; each member
+/// picks one by roulette selection on adaptive weights w = [w0, w1, w2, w3]:
+///   * 0 random relocation  - a large destroy that resamples the whole vector;
+///   * 1 local perturbation - a small destroy,
+///     X_i <- X_i + r (2 r - 1) range alnsF 0.10;
+///   * 2 greedy repair      - move toward the global best;
+///   * 3 peer repair        - move toward a random peer.
+/// An operator that improves a member's own fitness earns a score; after each
+/// sweep the weights are smoothed toward the observed success rate,
+/// w_k <- 0.7 w_k + 0.3 (score_k / count_k), clipped to [0.1, 2.0].
+/// alnsF = e^{-t/2500}; the global best is tracked separately.
+pub fn adaptive_large_neighborhood_search(
+  config : ALNSConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let n_ops = 4
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  let weights : Array[Double] = [1.0, 1.0, 1.0, 1.0]
+  let scores : Array[Double] = [0.0, 0.0, 0.0, 0.0]
+  let counts : Array[Double] = [0.0, 0.0, 0.0, 0.0]
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let old_fit = fits[i]
+      // alnsF decays 1 -> 0 as evaluations are spent
+      let alnsF = @math.exp(-evaluations.to_double() / 2500.0)
+      // roulette selection of a destroy-repair operator
+      let total = weights[0] + weights[1] + weights[2] + weights[3]
+      let r = RNG::next(current_rng) * total
+      let mut op = 0
+      let mut acc = weights[0]
+      while op < n_ops - 1 && r > acc {
+        op = op + 1
+        acc = acc + weights[op]
+      }
+      let cand : Array[Double] = []
+      if op == 0 {
+        // large destroy: random relocation
+        for _d in 0..<dim {
+          cand.push(bounds.min + RNG::next(current_rng) * span)
+        }
+      } else if op == 1 {
+        // small destroy: local perturbation
+        let r1 = RNG::next(current_rng)
+        let r2 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = xi[d] + r1 * (2.0 * r2 - 1.0) * span * alnsF * 0.10
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if op == 2 {
+        // greedy repair: move toward the global best
+        let r1 = RNG::next(current_rng)
+        let r2 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r1 * (best_pos[d] - xi[d]) +
+            r2 * (2.0 * RNG::next(current_rng) - 1.0) * span * alnsF * 0.07
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // peer repair: move toward a random peer
+        let p = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[p]
+        let r1 = RNG::next(current_rng)
+        let r2 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r1 * (xp[d] - xi[d]) +
+            r2 * (2.0 * RNG::next(current_rng) - 1.0) * span * alnsF * 0.08
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      counts[op] = counts[op] + 1.0
+      evaluations = evaluations + 1
+      if fv < old_fit {
+        scores[op] = scores[op] + 1.0
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+    // adapt operator weights toward the observed success rate
+    for k in 0..<n_ops {
+      let rate = if counts[k] > 0.0 {
+        scores[k] / counts[k]
+      } else {
+        weights[k]
+      }
+      weights[k] = max(0.1, min(2.0, 0.7 * weights[k] + 0.3 * rate))
+      scores[k] = 0.0
+      counts[k] = 0.0
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== SGO: Social Group Optimization (2016) =====
+
+///|
+pub struct SGOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_sgo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SGOConfig {
+  SGOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Social Group Optimization (2016), mechanism-faithful variant.  A social
+/// factor sgf = e^{-t/2500} decays as evaluations are spent.  Members improve
+/// through self-introspection and by learning from the group best / worst:
+///   * improving phase (r1 < 0.30 sgf) - keep 20% of self (self-introspection)
+///     and learn from the group best,
+///     X_i <- 0.2 X_i + r2 (X_best - X_i) + r3 (2 r4 - 1) range sgf 0.10;
+///   * acquiring phase (r1 < 0.30 sgf + 0.42) - learn from the best and retreat
+///     from the worst,
+///     X_i <- X_i + r2 (X_best - X_i) + r3 (X_i - X_worst) + r4 (2 r5 - 1) range sgf^2;
+///   * refine (rest) - settle toward the group best,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range sgf 0.07.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn social_group_optimization(
+  config : SGOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // worst member of the current group
+    let order = sort_indices(fits)
+    let worst_pos = pop[order[pop_size - 1]]
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // social factor sgf decays 1 -> 0 as evaluations are spent
+      let sgf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < sgf * 0.30 {
+        // improving phase: self-introspection (keep 20% of self) + learn from best
+        for d in 0..<dim {
+          let nv = 0.2 * xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * sgf * 0.10
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < sgf * 0.30 + 0.42 {
+        // acquiring phase: learn from the best, retreat from the worst
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (xi[d] - worst_pos[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * sgf * sgf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // refine: settle toward the group best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * sgf * 0.07
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== ASO: Atom Search Optimization (2019) =====
+
+///|
+pub struct ASOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_aso_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ASOConfig {
+  ASOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Atom Search Optimization (2019), mechanism-faithful variant of the atomic
+/// interaction model.  An atom factor asf = e^{-t/2500} decays as evaluations
+/// are spent:
+///   * attraction (r1 < 0.34 asf) - a Lennard-Jones-like pull toward a random
+///     better atom (chosen by a pairwise tournament),
+///     X_i <- X_i + r2 (X_better - X_i) + r3 (2 r4 - 1) range asf 0.10;
+///   * repulsion (r1 < 0.34 asf + 0.40) - retreat from a random worse atom,
+///     X_i <- X_i + r2 asf (X_i - X_worse) + r3 (2 r4 - 1) range asf^2;
+///   * settle (rest) - drift toward the heaviest atom (global best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range asf 0.07.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn atom_search_optimization(
+  config : ASOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // atom factor asf decays 1 -> 0 as evaluations are spent
+      let asf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < asf * 0.34 {
+        // attraction: pull toward a random better atom (pairwise tournament)
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let better = if fits[j] <= fits[k] { j } else { k }
+        let xb = pop[better]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xb[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * asf * 0.10
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < asf * 0.34 + 0.40 {
+        // repulsion: retreat from a random worse atom
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let worse = if fits[j] >= fits[k] { j } else { k }
+        let xw = pop[worse]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * asf * (xi[d] - xw[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * asf * asf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // settle: drift toward the heaviest atom (global best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * asf * 0.07
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== BCMO: Balancing Composite Motion Optimization (2020) =====
+
+///|
+pub struct BCMOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bcmo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BCMOConfig {
+  BCMOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Balancing Composite Motion Optimization (2020), mechanism-faithful variant
+/// built on a per-member momentum (its previous displacement) blended with a
+/// motion term.  A balance factor bcf = e^{-t/2500} decays as evaluations are
+/// spent; the momentum coefficient is 0.35.
+///   * individual composite motion (r1 < 0.33 bcf) - momentum + a differential
+///     exploration term,
+///     X_i <- X_i + 0.35 D_i + r2 (X_p - X_q) + r3 (2 r4 - 1) range bcf 0.10;
+///   * social composite motion (r1 < 0.33 bcf + 0.40) - momentum toward the
+///     global best,
+///     X_i <- X_i + 0.35 D_i + r2 (X_best - X_i) + r3 (2 r4 - 1) range bcf^2;
+///   * balance refine (rest) - fine local step.
+/// After each move the member's momentum D_i is set to the realised
+/// displacement; the global best is tracked separately.
+pub fn balancing_composite_motion_optimization(
+  config : BCMOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let disp : Array[Array[Double]] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  let zero : Array[Double] = []
+  for _d in 0..<dim {
+    zero.push(0.0)
+  }
+  disp.push(zero)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    let z : Array[Double] = []
+    for _d in 0..<dim {
+      z.push(0.0)
+    }
+    disp.push(z)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let di = disp[i]
+      // balance factor bcf decays 1 -> 0 as evaluations are spent
+      let bcf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < bcf * 0.33 {
+        // individual composite motion: momentum + differential exploration
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            0.35 * di[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * bcf * 0.10
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < bcf * 0.33 + 0.40 {
+        // social composite motion: momentum toward the global best
+        for d in 0..<dim {
+          let nv = xi[d] +
+            0.35 * di[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * bcf * bcf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // balance refine: fine local step
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * bcf * bcf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      for d in 0..<dim {
+        disp[i][d] = cand[d] - xi[d]
+      }
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== MKE: Monkey King Evolution (2016) =====
+
+///|
+pub struct MKEConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_mke_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> MKEConfig {
+  MKEConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Monkey King Evolution (2016), mechanism-faithful variant of the "kingdom
+/// search" metaphor.  A king factor mkf = e^{-t/2500} decays as evaluations are
+/// spent; the monkey king is the global best:
+///   * territory exploration (r1 < 0.31 mkf) - differential move between two
+///     monkeys,
+///     X_i <- X_i + r2 (X_p - X_q) + r3 (2 r4 - 1) range mkf 0.10;
+///   * restless wandering (r1 < 0.31 mkf + 0.41) - fine local jitter that keeps
+///     the troop spread out, X_i <- X_i + r2 (2 r3 - 1) range mkf^2;
+///   * submit (rest) - contract toward the monkey king,
+///     X_i <- X_king + r2 (X_i - X_king) + r3 (2 r4 - 1) range mkf 0.07.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn monkey_king_evolution(
+  config : MKEConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // king factor mkf decays 1 -> 0 as evaluations are spent
+      let mkf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < mkf * 0.31 {
+        // territory exploration: differential move between two monkeys
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xk[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * mkf * 0.10
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < mkf * 0.31 + 0.41 {
+        // restless wandering: fine local jitter that preserves diversity
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * mkf * mkf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // submit: contract toward the monkey king
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * mkf * 0.07
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== RFO: Red Fox Optimization (2021) =====
+
+///|
+pub struct RFOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_rfo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> RFOConfig {
+  RFOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Red Fox Optimization (2021), mechanism-faithful variant.  A fox factor
+/// rff = e^{-t/2500} decays as evaluations are spent:
+///   * hunting (r1 < 0.32 rff) - leap toward the best prey plus a differential
+///     kick,
+///     X_i <- X_i + r2 (X_best - X_i) + r3 (X_p - X_q) + r4 (2 r5 - 1) range rff 0.08;
+///   * territory patrol (r1 < 0.32 rff + 0.40) - fine jitter that keeps the
+///     pack spread out, X_i <- X_i + r2 (2 r3 - 1) range rff^2;
+///   * settle in the den (rest) - contract toward the best,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range rff 0.07.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn red_fox_optimization(
+  config : RFOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // fox factor rff decays 1 -> 0 as evaluations are spent
+      let rff = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < rff * 0.32 {
+        // hunting: leap toward the best prey plus a differential kick
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        let r5 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (xj[d] - xk[d]) +
+            r4 * (2.0 * r5 - 1.0) * span * rff * 0.08
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < rff * 0.32 + 0.40 {
+        // territory patrol: fine jitter keeps the pack spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * rff * rff
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // settle in the den: contract toward the best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * rff * 0.07
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== SAR: Search and Rescue Optimization (2019) =====
+
+///|
+pub struct SARConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_sar_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SARConfig {
+  SARConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Search and Rescue Optimization (2019), mechanism-faithful variant of a
+/// rescue team's search.  Each rescuer keeps a personal "search memory" mem_i
+/// (its own best visited position) which is refreshed whenever the rescuer
+/// improves on it.  A rescue factor sarf = e^{-t/2500} decays as evaluations are
+/// spent:
+///   * individual search (r1 < 0.34 sarf) - move toward the personal search
+///     memory,
+///     X_i <- X_i + r2 (mem_i - X_i) + r3 (2 r4 - 1) range sarf 0.10;
+///   * team patrol (r1 < 0.34 sarf + 0.40) - fine jitter that keeps the rescue
+///     team spread out, X_i <- X_i + r2 (2 r3 - 1) range sarf^2;
+///   * converge (rest) - contract toward the global best,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range sarf 0.07.
+/// The global best is tracked separately.
+pub fn search_and_rescue_optimization(
+  config : SARConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mem : Array[Array[Double]] = []
+  let mem_val : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  mem.push(best_pos)
+  mem_val.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    mem.push(p)
+    mem_val.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // rescue factor sarf decays 1 -> 0 as evaluations are spent
+      let sarf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < sarf * 0.34 {
+        // individual search: move toward the personal search memory plus a
+        // differential kick for diversity
+        let mi = mem[i]
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (mi[d] - xi[d]) +
+            r3 * (xj[d] - xk[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * sarf * 0.08
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < sarf * 0.34 + 0.40 {
+        // team patrol: fine jitter keeps the rescue team spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * sarf * sarf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // converge: contract toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * sarf * 0.07
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < mem_val[i] {
+        mem[i] = cand
+        mem_val[i] = fv
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== ChSA: Chameleon Swarm Algorithm (2022) =====
+
+///|
+pub struct ChSAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_chsa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ChSAConfig {
+  ChSAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Chameleon Swarm Algorithm (2022), mechanism-faithful variant of a
+/// chameleon's foraging.  A chameleon factor chf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * search prey (r1 < 0.32 chf) - accelerate toward a randomly chosen prey,
+///     X_i <- X_i + r2 chf (X_prey - X_i) + r3 (2 r4 - 1) range chf 0.10;
+///   * eye rotation (r1 < 0.32 chf + 0.40) - fine jitter that keeps the swarm
+///     spread out, X_i <- X_i + r2 (2 r3 - 1) range chf^2;
+///   * tongue attack (rest) - snap toward the global best,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range chf 0.07.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn chameleon_swarm_algorithm(
+  config : ChSAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // chameleon factor chf decays 1 -> 0 as evaluations are spent
+      let chf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < chf * 0.32 {
+        // search prey: accelerate toward a randomly chosen prey
+        let p = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[p]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * chf * (xp[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * chf * 0.10
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < chf * 0.32 + 0.40 {
+        // eye rotation: fine jitter that keeps the swarm spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * chf * chf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // tongue attack: snap toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * chf * 0.07
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== RDA: Red Deer Algorithm (2020) =====
+
+///|
+pub struct RDAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_rda_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> RDAConfig {
+  RDAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Red Deer Algorithm (2020), mechanism-faithful variant of red-deer rutting
+/// behaviour.  A rut factor rdf = e^{-t/2500} decays as evaluations are spent:
+///   * roaring (r1 < 0.33 rdf) - approach the better of two randomly chosen
+///     stags (a pairwise contest),
+///     X_i <- X_i + r2 (X_winner - X_i) + r3 (2 r4 - 1) range rdf 0.11;
+///   * harem patrol (r1 < 0.33 rdf + 0.39) - fine jitter that keeps the herd
+///     spread out, X_i <- X_i + r2 (2 r3 - 1) range rdf^2;
+///   * mating gather (rest) - contract toward the strongest stag (global best),
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range rdf 0.07.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn red_deer_algorithm(
+  config : RDAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // rut factor rdf decays 1 -> 0 as evaluations are spent
+      let rdf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < rdf * 0.33 {
+        // roaring: approach the better of two stags, plus a differential kick
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let winner = if fits[j] <= fits[k] { j } else { k }
+        let loser = if winner == j { k } else { j }
+        let xw = pop[winner]
+        let xl = pop[loser]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xw[d] - xi[d]) +
+            r3 * (xw[d] - xl[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * rdf * 0.10
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < rdf * 0.33 + 0.39 {
+        // harem patrol: fine jitter that keeps the herd spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * rdf * rdf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // mating gather: contract toward the strongest stag (global best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * rdf * 0.07
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== SqSA: Squirrel Search Algorithm (2019) =====
+
+///|
+pub struct SqSAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_sqsa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SqSAConfig {
+  SqSAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Squirrel Search Algorithm (2019), mechanism-faithful variant of squirrels
+/// gliding among trees.  A squirrel factor sqf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * glide to the oak (r1 < 0.26 sqf) - approach the hickory/oak (global
+///     best) with a differential kick taken from two random peers,
+///     X_i <- X_i + r2 (X_best - X_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range sqf 0.15;
+///   * foraging jitter (r1 < 0.26 sqf + 0.47) - fine step that keeps squirrels
+///     spread across the trees, X_i <- X_i + r2 (2 r3 - 1) range sqf^2;
+///   * predator encounter (rest) - with a fixed predator presence probability
+///     (0.20) a squirrel is randomly repositioned to escape, otherwise it
+///     gathers toward the oak (global best) with an exploratory jitter.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn squirrel_search_algorithm(
+  config : SqSAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // squirrel factor sqf decays 1 -> 0 as evaluations are spent
+      let sqf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < sqf * 0.26 {
+        // glide to the oak: approach the global best, plus a differential kick
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * sqf * 0.15
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < sqf * 0.26 + 0.47 {
+        // foraging jitter: fine step that keeps squirrels spread across trees
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * sqf * sqf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if RNG::next(current_rng) < 0.20 {
+        // predator encounter: escape by random repositioning in the forest
+        let escaped = random_solution(dim, bounds, current_rng)
+        for d in 0..<dim {
+          cand.push(escaped[d])
+        }
+      } else {
+        // gather: contract toward the oak (global best) with a jitter
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * sqf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== Puma: Puma Optimizer (2024) =====
+
+///|
+pub struct PumaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_puma_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> PumaConfig {
+  PumaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Puma Optimizer (2024), mechanism-faithful variant of puma hunting.
+/// A puma factor pumf = e^{-t/2500} decays as evaluations are spent, and each
+/// individual carries a fitness-adaptive step scale
+/// w_i = 0.5 + (fit_i - fit_min) / (fit_max - fit_min) in [0.5, 1.5], so weaker
+/// pumas roam further while stronger pumas converge gently:
+///   * roam (r1 < 0.28 pumf) - drift toward a random peer with a differential
+///     kick taken from two random peers,
+///     X_i <- X_i + r2 (X_j - X_i) + r3 (X_j - X_k)
+///            + r4 (2 r5 - 1) range pumf 0.12 w_i;
+///   * stalk (r1 < 0.28 pumf + 0.45) - fine jitter that keeps the pride spread
+///     out, X_i <- X_i + r2 (2 r3 - 1) range pumf^2;
+///   * pounce (rest) - contract toward the global best,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range pumf 0.06 w_i.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn puma_optimizer(
+  config : PumaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // fitness range drives the adaptive step scale w_i
+    let mut fit_min = fits[0]
+    let mut fit_max = fits[0]
+    for k in 1..<pop_size {
+      if fits[k] < fit_min {
+        fit_min = fits[k]
+      }
+      if fits[k] > fit_max {
+        fit_max = fits[k]
+      }
+    }
+    let fit_span = if fit_max - fit_min < 1.0e-12 {
+      1.0e-12
+    } else {
+      fit_max - fit_min
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // puma factor pumf decays 1 -> 0 as evaluations are spent
+      let pumf = @math.exp(-evaluations.to_double() / 2500.0)
+      let wi = 0.5 + (fits[i] - fit_min) / fit_span
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < pumf * 0.28 {
+        // roam: drift toward a random peer, plus a differential kick
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xj[d] - xi[d]) +
+            r3 * (xj[d] - xk[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * pumf * 0.12 * wi
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < pumf * 0.28 + 0.45 {
+        // stalk: fine jitter that keeps the pride spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * pumf * pumf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // pounce: contract toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * pumf * 0.06 * wi
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== StMO: Starling Murmuration Optimizer (2022) =====
+
+///|
+pub struct StMOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_stmo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> StMOConfig {
+  StMOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Starling Murmuration Optimizer (2022), mechanism-faithful variant of
+/// starling flocking.  A starling factor stmf = e^{-t/2500} decays as
+/// evaluations are spent, and the flock aligns to a *fitness-weighted
+/// centroid* X_wc = sum_i w_i X_i / sum_i w_i with w_i = 1/(1+rel_fit_i) in
+/// [0.5, 1] (better starlings pull the centroid harder):
+///   * flock alignment (r1 < 0.30 stmf) - drift toward the weighted centroid
+///     with a differential kick taken from two random peers,
+///     X_i <- X_i + r2 (X_wc - X_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range stmf 0.11;
+///   * wing jitter (r1 < 0.30 stmf + 0.44) - fine step that keeps the flock
+///     spread out, X_i <- X_i + r2 (2 r3 - 1) range stmf^2;
+///   * settle (rest) - contract toward the global best,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range stmf 0.06.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn starling_murmuration_optimizer(
+  config : StMOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // fitness-weighted centroid of the flock
+    let mut fit_min = fits[0]
+    let mut fit_max = fits[0]
+    for k in 1..<pop_size {
+      if fits[k] < fit_min {
+        fit_min = fits[k]
+      }
+      if fits[k] > fit_max {
+        fit_max = fits[k]
+      }
+    }
+    let fit_span = if fit_max - fit_min < 1.0e-12 {
+      1.0e-12
+    } else {
+      fit_max - fit_min
+    }
+    let weights : Array[Double] = []
+    let mut wsum = 0.0
+    for i in 0..<pop_size {
+      let w = 1.0 / (1.0 + (fits[i] - fit_min) / fit_span)
+      weights.push(w)
+      wsum = wsum + w
+    }
+    let wc : Array[Double] = []
+    for d in 0..<dim {
+      let mut acc = 0.0
+      for i in 0..<pop_size {
+        acc = acc + weights[i] * pop[i][d]
+      }
+      wc.push(acc / wsum)
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // starling factor stmf decays 1 -> 0 as evaluations are spent
+      let stmf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < stmf * 0.30 {
+        // flock alignment: drift toward the weighted centroid + differential kick
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (wc[d] - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * stmf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < stmf * 0.30 + 0.44 {
+        // wing jitter: fine step that keeps the flock spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * stmf * stmf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // settle: contract toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * stmf * 0.06
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== SFOA: Swordfish Optimization Algorithm (2021) =====
+
+///|
+pub struct SFOAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_sfoa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SFOAConfig {
+  SFOAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Swordfish Optimization Algorithm (2021), mechanism-faithful variant of
+/// swordfish predation.  A swordfish factor swf = e^{-t/2500} decays as
+/// evaluations are spent, and the previous generation's champion position is
+/// kept as `prev_best` so that the champion's one-generation displacement
+/// (X_best - X_prev_best) can be ridden as a velocity direction:
+///   * forward thrust (r1 < 0.35 swf) - chase the prey (global best) while
+///     riding the champion's velocity, plus a jitter,
+///     X_i <- X_i + r2 (X_best - X_i) + r3 (X_best - X_prev_best)
+///            + r4 (2 r5 - 1) range swf 0.12;
+///   * surface patrol (r1 < 0.35 swf + 0.41) - fine step that keeps the school
+///     spread out, X_i <- X_i + r2 (2 r3 - 1) range swf^2;
+///   * deep dive (rest) - contract toward the global best,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range swf 0.05.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn swordfish_optimization(
+  config : SFOAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // previous generation's champion gives the velocity direction
+    let prev_best = best_pos
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // swordfish factor swf decays 1 -> 0 as evaluations are spent
+      let swf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < swf * 0.35 {
+        // forward thrust: chase the prey (best) and ride the champion's velocity
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (best_pos[d] - prev_best[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * swf * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < swf * 0.35 + 0.41 {
+        // surface patrol: fine step that keeps the school spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * swf * swf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // deep dive: contract toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * swf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== ABO: African Buffalo Optimization (2016) =====
+
+///|
+pub struct ABOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_abo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ABOConfig {
+  ABOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// African Buffalo Optimization (2016), mechanism-faithful variant of buffalo
+/// herd movement.  A buffalo factor abf = e^{-t/2500} decays as evaluations are
+/// spent, and each buffalo combines two independent learning probabilities
+/// toward the "waaa" signal (global best) and toward a random herd mate:
+///   * herd migration (r1 < 0.32 abf) - move toward the global best and a
+///     random mate, each weighted by its own learning probability,
+///     X_i <- X_i + r2 (X_best - X_i) + r3 (X_mate - X_i)
+///            + r4 (2 r5 - 1) range abf 0.14;
+///   * grazing jitter (r1 < 0.32 abf + 0.44) - fine step that keeps the herd
+///     spread out, X_i <- X_i + r2 (2 r3 - 1) range abf^2;
+///   * settle (rest) - contract toward the global best,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range abf 0.06.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn african_buffalo_optimization(
+  config : ABOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // buffalo factor abf decays 1 -> 0 as evaluations are spent
+      let abf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < abf * 0.32 {
+        // herd migration: weighted pull toward the best and a random mate
+        let m = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xm = pop[m]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (xm[d] - xi[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * abf * 0.14
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < abf * 0.32 + 0.44 {
+        // grazing jitter: fine step that keeps the herd spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * abf * abf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // settle: contract toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * abf * 0.06
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== Gannet: Gannet Optimization Algorithm (2022) =====
+
+///|
+pub struct GannetConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_gannet_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> GannetConfig {
+  GannetConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Gannet Optimization Algorithm (2022), mechanism-faithful variant of gannet
+/// diving.  A gannet factor gnf = e^{-t/2500} decays as evaluations are spent:
+///   * V-shaped dive (r1 < 0.34 gnf) - plunge toward the prey (global best)
+///     with a differential kick taken from two random peers,
+///     X_i <- X_i + r2 (X_best - X_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range gnf 0.13;
+///   * wing jitter (r1 < 0.34 gnf + 0.41) - fine step that keeps the flock
+///     spread out, X_i <- X_i + r2 (2 r3 - 1) range gnf^2;
+///   * underwater catch (rest) - contract toward the global best,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range gnf 0.06.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn gannet_optimization(
+  config : GannetConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // gannet factor gnf decays 1 -> 0 as evaluations are spent
+      let gnf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < gnf * 0.34 {
+        // V-shaped dive: plunge toward the prey (best) + differential kick
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * gnf * 0.13
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < gnf * 0.34 + 0.41 {
+        // wing jitter: fine step that keeps the flock spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * gnf * gnf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // underwater catch: contract toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * gnf * 0.06
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== Narwhal: Narwhal Optimizer (2024) =====
+
+///|
+pub struct NarwhalConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_narwhal_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> NarwhalConfig {
+  NarwhalConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Narwhal Optimizer (2024), mechanism-faithful variant of a narwhal pod split
+/// into two pods that periodically exchange their best tusk-bearer.  A narwhal
+/// factor narf = e^{-t/2500} decays as evaluations are spent; each pod contracts
+/// toward *its own* best rather than the global best, and every 20 generations
+/// the two pods swap their best individuals (migration):
+///   * tusk thrust (r1 < 0.33 narf) - dive toward the pod best with a
+///     differential kick taken from two random pod mates,
+///     X_i <- X_i + r2 (X_pod - X_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range narf 0.12;
+///   * deep jitter (r1 < 0.33 narf + 0.41) - fine step that keeps the pod
+///     spread out, X_i <- X_i + r2 (2 r3 - 1) range narf^2;
+///   * pod gather (rest) - contract toward the pod best,
+///     X_pod + r2 (X_i - X_pod) + r3 (2 r4 - 1) range narf 0.06.
+pub fn narwhal_optimizer(
+  config : NarwhalConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let half = pop_size / 2
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  let mut generations = 0
+  while evaluations < max_evals {
+    // pod (island) bests for this generation
+    let mut b0 = 0
+    for k in 0..<half {
+      if fits[k] < fits[b0] {
+        b0 = k
+      }
+    }
+    let mut b1 = half
+    for k in half..<pop_size {
+      if fits[k] < fits[b1] {
+        b1 = k
+      }
+    }
+    let pod0 = pop[b0]
+    let pod1 = pop[b1]
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let pod = if i < half { pod0 } else { pod1 }
+      // narwhal factor narf decays 1 -> 0 as evaluations are spent
+      let narf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < narf * 0.33 {
+        // tusk thrust: dive toward the pod best + differential kick
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (pod[d] - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * narf * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < narf * 0.33 + 0.41 {
+        // deep jitter: fine step that keeps the pod spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * narf * narf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // pod gather: contract toward the pod best
+        for d in 0..<dim {
+          let nv = pod[d] +
+            r2 * (xi[d] - pod[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * narf * 0.06
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+    generations = generations + 1
+    if generations % 20 == 0 {
+      // migration: swap the best tusk-bearers of the two pods
+      let mut m0 = 0
+      for k in 0..<half {
+        if fits[k] < fits[m0] {
+          m0 = k
+        }
+      }
+      let mut m1 = half
+      for k in half..<pop_size {
+        if fits[k] < fits[m1] {
+          m1 = k
+        }
+      }
+      let tmp_pos = pop[m0]
+      let tmp_fit = fits[m0]
+      pop[m0] = pop[m1]
+      fits[m0] = fits[m1]
+      pop[m1] = tmp_pos
+      fits[m1] = tmp_fit
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== Serval: Serval Optimization Algorithm (2022) =====
+
+///|
+pub struct ServalConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_serval_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ServalConfig {
+  ServalConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Serval Optimization Algorithm (2022), mechanism-faithful variant of serval
+/// ambush hunting.  A serval factor svf = e^{-t/2500} decays as evaluations are
+/// spent, and a shared archive of the most recent champions (up to 5) is kept
+/// so a hunting serval may pounce toward a *past* champion and not only the
+/// current one:
+///   * pounce (r1 < 0.32 svf) - leap toward a random archived champion with a
+///     differential kick taken from two random peers,
+///     X_i <- X_i + r2 (X_champ - X_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range svf 0.12;
+///   * stalk (r1 < 0.32 svf + 0.42) - fine jitter that keeps the pride spread
+///     out, X_i <- X_i + r2 (2 r3 - 1) range svf^2;
+///   * ambush (rest) - contract toward the current global best,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range svf 0.06.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn serval_optimization(
+  config : ServalConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let elite_cap = 5
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let elite : Array[Array[Double]] = []
+  let mut elite_n = 0
+  let mut elite_slot = 0
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // serval factor svf decays 1 -> 0 as evaluations are spent
+      let svf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < svf * 0.32 {
+        // pounce toward a past champion from the archive + differential kick
+        let tgt = if elite_n > 0 {
+          elite[(RNG::next(current_rng) * elite_n.to_double()).to_int() %
+          elite_n]
+        } else {
+          best_pos
+        }
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (tgt[d] - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * svf * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < svf * 0.32 + 0.42 {
+        // stalk: fine jitter that keeps the pride spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * svf * svf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // ambush: contract toward the current global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * svf * 0.06
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        // archive the displaced champion before adopting the new one
+        if elite_n < elite_cap {
+          elite.push(best_pos)
+          elite_n = elite_n + 1
+        } else {
+          elite[elite_slot] = best_pos
+          elite_slot = (elite_slot + 1) % elite_cap
+        }
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== ChSO: Chicken Swarm Optimization (2014) =====
+
+///|
+pub struct ChSOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_chso_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ChSOConfig {
+  ChSOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Chicken Swarm Optimization (2014), mechanism-faithful variant of a chicken
+/// flock with three roles and a mother-child bond.  Every 10 generations the
+/// flock is sorted by fitness and roles are reassigned: the best `rooster_cnt`
+/// become roosters, the worst `chick_cnt` become chicks, the rest are hens;
+/// hens are grouped round-robin under roosters and chicks under hens.  A
+/// chicken factor csf = e^{-t/2500} decays as evaluations are spent:
+///   * rooster - drift toward a random other rooster with a shrinking jitter;
+///   * hen - follow her group rooster plus a random flock mate;
+///   * chick - follow her mother hen with a random stretch factor in [0, 2].
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn chicken_swarm_optimization(
+  config : ChSOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let rooster_cnt = 3
+  let chick_cnt = pop_size / 4
+  let hen_cnt = pop_size - rooster_cnt - chick_cnt
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  let mut role_order : Array[Int32] = []
+  let mut generations = 0
+  while evaluations < max_evals {
+    if generations % 10 == 0 {
+      // reassign roles: best -> roosters, worst -> chicks, rest -> hens
+      role_order = sort_indices(fits)
+    }
+    // roosters drift toward a random other rooster with a shrinking jitter
+    for rr in 0..<rooster_cnt {
+      if evaluations >= max_evals {
+        break
+      }
+      let p = role_order[rr]
+      let xi = pop[p]
+      let csf = @math.exp(-evaluations.to_double() / 2500.0)
+      let oi = (RNG::next(current_rng) * rooster_cnt.to_double()).to_int() %
+        rooster_cnt
+      let other = if oi == rr { (rr + 1) % rooster_cnt } else { oi }
+      let xo = pop[role_order[other]]
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = xi[d] +
+          r1 * (best_pos[d] - xi[d]) +
+          r2 * (xo[d] - xi[d]) +
+          r3 * (2.0 * RNG::next(current_rng) - 1.0) * span * csf * 0.12
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      pop[p] = cand
+      let fv = evaluate(f, cand)
+      fits[p] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+    // hens follow their group rooster and a random flock mate
+    for hs in 0..<hen_cnt {
+      if evaluations >= max_evals {
+        break
+      }
+      let p = role_order[rooster_cnt + hs]
+      let xi = pop[p]
+      let csf = @math.exp(-evaluations.to_double() / 2500.0)
+      let ro_slot = hs % rooster_cnt
+      let xro = pop[role_order[ro_slot]]
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = xi[d] +
+          r1 * (xro[d] - xi[d]) +
+          r2 * (best_pos[d] - xi[d]) +
+          r3 * (2.0 * RNG::next(current_rng) - 1.0) * span * csf * 0.06
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      pop[p] = cand
+      let fv = evaluate(f, cand)
+      fits[p] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+    // chicks follow their mother hen with a random stretch factor in [0, 2]
+    for cs in 0..<chick_cnt {
+      if evaluations >= max_evals {
+        break
+      }
+      let p = role_order[rooster_cnt + hen_cnt + cs]
+      let xi = pop[p]
+      let csf = @math.exp(-evaluations.to_double() / 2500.0)
+      let mother_slot = cs % hen_cnt
+      let xm = pop[role_order[rooster_cnt + mother_slot]]
+      let stretch = 2.0 * RNG::next(current_rng)
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = xi[d] +
+          stretch * (xm[d] - xi[d]) +
+          r1 * (2.0 * RNG::next(current_rng) - 1.0) * span * csf * 0.05
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      pop[p] = cand
+      let fv = evaluate(f, cand)
+      fits[p] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+    generations = generations + 1
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== PR: Path Relinking (1997) =====
+
+///|
+pub struct PRConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_pr_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> PRConfig {
+  PRConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Path Relinking (1997), mechanism-faithful standalone variant.  A relinking
+/// factor prf = e^{-t/2500} decays as evaluations are spent, and an archive of
+/// the most recent champions (up to 5, round-robin) provides the elite
+/// endpoints of the relinking paths:
+///   * relink (r1 < 0.29 prf) - move toward a random point on the path between
+///     two distinct archived champions, X_target = X_e1 + r2 (X_e2 - X_e1),
+///     X_i <- X_i + r3 (X_target - X_i)
+///            + r4 (2 r5 - 1) range prf 0.13;
+///   * jitter (r1 < 0.29 prf + 0.45) - fine step that keeps the swarm spread
+///     out, X_i <- X_i + r2 (2 r3 - 1) range prf^2;
+///   * converge (rest) - contract toward the current global best,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range prf 0.05.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn path_relinking(
+  config : PRConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let elite_cap = 5
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let elite : Array[Array[Double]] = []
+  let mut elite_n = 0
+  let mut elite_slot = 0
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // relinking factor prf decays 1 -> 0 as evaluations are spent
+      let prf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < prf * 0.29 {
+        // relink toward a random point on the path between two champions
+        if elite_n >= 2 {
+          let ea = (RNG::next(current_rng) * elite_n.to_double()).to_int() %
+            elite_n
+          let mut eb = (RNG::next(current_rng) * elite_n.to_double()).to_int() %
+            elite_n
+          if eb == ea {
+            eb = (ea + 1) % elite_n
+          }
+          let e1 = elite[ea]
+          let e2 = elite[eb]
+          for d in 0..<dim {
+            let tgt = e1[d] + r2 * (e2[d] - e1[d])
+            let nv = xi[d] +
+              r3 * (tgt - xi[d]) +
+              r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * prf * 0.13
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        } else {
+          for d in 0..<dim {
+            let nv = xi[d] +
+              r2 * (best_pos[d] - xi[d]) +
+              r3 * (2.0 * r4 - 1.0) * span * prf * 0.13
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        }
+      } else if r1 < prf * 0.29 + 0.45 {
+        // jitter: fine step that keeps the swarm spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * prf * prf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // converge: contract toward the current global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * prf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        if elite_n < elite_cap {
+          elite.push(best_pos)
+          elite_n = elite_n + 1
+        } else {
+          elite[elite_slot] = best_pos
+          elite_slot = (elite_slot + 1) % elite_cap
+        }
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== CrSO: Cockroach Swarm Optimization (2008) =====
+
+///|
+pub struct CrSOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_crso_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CrSOConfig {
+  CrSOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Cockroach Swarm Optimization (2008), mechanism-faithful variant of roach
+/// swarming.  A roach factor crf = e^{-t/2500} decays as evaluations are spent,
+/// and each roach senses the best mate only within a local visibility radius
+/// (0.30 range), so reference points are *local* rather than global:
+///   * chase-swarming (r1 < 0.31 crf) - move toward the best roach inside the
+///     visibility radius, with a differential kick taken from two random mates,
+///     X_i <- X_i + r2 (X_nb - X_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range crf 0.10;
+///   * dispersion (r1 < 0.31 crf + 0.41) - fine jitter that keeps the swarm
+///     spread out, X_i <- X_i + r2 (2 r3 - 1) range crf^2;
+///   * settle (rest) - contract toward the global best,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range crf 0.05.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn cockroach_swarm_optimization(
+  config : CrSOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // roach factor crf decays 1 -> 0 as evaluations are spent
+      let crf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < crf * 0.31 {
+        // chase-swarming: move toward the best mate within the visibility radius
+        let vis2 = span * 0.30 * span * 0.30
+        let mut nb = i
+        let mut nb_fit = fits[i]
+        for jj in 0..<pop_size {
+          let xj = pop[jj]
+          let mut dsq = 0.0
+          for dd in 0..<dim {
+            let diff = xj[dd] - xi[dd]
+            dsq = dsq + diff * diff
+          }
+          if dsq < vis2 && fits[jj] < nb_fit {
+            nb_fit = fits[jj]
+            nb = jj
+          }
+        }
+        let xnb = pop[nb]
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xnb[d] - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * crf * 0.10
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < crf * 0.31 + 0.41 {
+        // dispersion: fine jitter that keeps the swarm spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * crf * crf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // settle: contract toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * crf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== JS: Jellyfish Search Optimizer (2020) =====
+
+///|
+pub struct JSConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_js_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> JSConfig {
+  JSConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Jellyfish Search Optimizer (2020), mechanism-faithful variant of jellyfish
+/// drifting/following.  A jellyfish factor jf = e^{-t/2500} shrinks the steps,
+/// and a *time control* criterion tc = |(1 - t/T)(2 r - 1)| (re-sampled every
+/// move, hence non-monotonic) switches between two modes:
+///   * ocean current (tc >= 0.35) - drift toward the global best with a
+///     differential kick taken from two random peers,
+///     X_i <- X_i + r2 (X_best - X_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range jf 0.11;
+///   * swarm (tc < 0.35) - passive motion (r1 < 0.5) jitters around itself to
+///     keep the bloom spread out, X_i <- X_i + r2 (2 r3 - 1) range jf 0.06,
+///     otherwise active motion contracts toward the global best,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range jf 0.05.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn jellyfish_search_optimizer(
+  config : JSConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let max_evals_d = max_evals.to_double()
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // jellyfish factor jf shrinks 1 -> 0 as evaluations are spent
+      let jf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      // time control criterion |(1 - t/T)(2r-1)|, re-sampled for every move
+      let tc_raw = (1.0 - evaluations.to_double() / max_evals_d) *
+        (2.0 * RNG::next(current_rng) - 1.0)
+      let tc = if tc_raw < 0.0 { -tc_raw } else { tc_raw }
+      let cand : Array[Double] = []
+      if tc >= 0.35 {
+        // ocean current: drift toward the global best + differential kick
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * jf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < 0.5 {
+        // passive motion: fine jitter around itself, keeps the bloom spread
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * jf * 0.06
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // active motion: contract toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * jf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== WSA: Water Strider Algorithm (2020) =====
+
+///|
+pub struct WSAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_wsa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> WSAConfig {
+  WSAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Water Strider Algorithm (2020), mechanism-faithful variant of water strider
+/// territory movement.  A strider factor wsf = e^{-t/2500} decays as
+/// evaluations are spent, and the population is ranked by fitness every
+/// generation so each strider is pulled toward its *rank-adjacent* better
+/// neighbour (forming a chain from the best down the ranks) rather than the
+/// global best:
+///   * territory migration (r1 < 0.33 wsf) - drift toward the immediately
+///     better-ranked strider with a differential kick from two random mates,
+///     X_i <- X_i + r2 (X_better - X_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range wsf 0.11;
+///   * ripple jitter (r1 < 0.33 wsf + 0.42) - fine step that keeps the pond
+///     spread out, X_i <- X_i + r2 (2 r3 - 1) range wsf^2;
+///   * settle (rest) - contract toward the global best,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range wsf 0.06.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn water_strider_algorithm(
+  config : WSAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // rank the pond by fitness for rank-adjacency attraction
+    let order = sort_indices(fits)
+    let rank : Array[Int32] = []
+    for _k in 0..<pop_size {
+      rank.push(0)
+    }
+    for k in 0..<pop_size {
+      rank[order[k]] = k
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // strider factor wsf decays 1 -> 0 as evaluations are spent
+      let wsf = @math.exp(-evaluations.to_double() / 2500.0)
+      let rrk = rank[i]
+      let xbetter = if rrk > 0 { pop[order[rrk - 1]] } else { best_pos }
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < wsf * 0.33 {
+        // territory migration: toward the immediately better-ranked strider
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xbetter[d] - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * wsf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < wsf * 0.33 + 0.42 {
+        // ripple jitter: fine step that keeps the pond spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * wsf * wsf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // settle: contract toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * wsf * 0.06
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== SeHO: Sea Horse Optimizer (2022) =====
+
+///|
+pub struct SeHOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_seho_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SeHOConfig {
+  SeHOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Sea Horse Optimizer (2022), mechanism-faithful variant of seahorse motion.
+/// A seahorse factor shf = e^{-t/2500} decays as evaluations are spent:
+///   * spiral predation (r1 < 0.31 shf) - contract toward the prey (global
+///     best) with a jitter,
+///     X_i <- X_i + r2 shf (X_best - X_i) + r3 (2 r4 - 1) range shf 0.12;
+///   * heavy-tailed drift (r1 < 0.31 shf + 0.45) - drift with an inverse-power
+///     step 1/(u+0.1) (capped at 8) so rare long jumps keep the shoal
+///     exploring, X_i <- X_i + step (2 r5 - 1) range shf 0.03;
+///   * homing (rest) - contract toward the global best,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range shf 0.05.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn sea_horse_optimizer(
+  config : SeHOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // seahorse factor shf decays 1 -> 0 as evaluations are spent
+      let shf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < shf * 0.31 {
+        // spiral predation: contract toward the prey (global best)
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * shf * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < shf * 0.31 + 0.45 {
+        // heavy-tailed drift: rare long jumps keep the shoal exploring
+        let u = RNG::next(current_rng)
+        let mut step = 1.0 / (u + 0.1)
+        if step > 8.0 {
+          step = 8.0
+        }
+        for d in 0..<dim {
+          let nv = xi[d] +
+            step * (2.0 * RNG::next(current_rng) - 1.0) * span * shf * 0.03
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // homing: contract toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * shf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== WBO: Wildebeest Herd Optimization =====
+
+///|
+pub struct WBOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_wbo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> WBOConfig {
+  WBOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Wildebeest Herd Optimization, mechanism-faithful variant of wildebeest herd
+/// migration.  A herd factor whf = e^{-t/2500} decays as evaluations are spent,
+/// and each generation the champion's one-generation displacement
+/// (X_best - X_prev_best) is linearly extrapolated into a predicted trend point
+/// X_pred = 2 X_best - X_prev_best:
+///   * herd migration (r1 < 0.35 whf) - move toward the extrapolated trend
+///     point with a differential kick taken from two random mates,
+///     X_i <- X_i + r2 (X_pred - X_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range whf 0.13;
+///   * graze jitter (r1 < 0.35 whf + 0.40) - fine step that keeps the herd
+///     spread out, X_i <- X_i + r2 (2 r3 - 1) range whf^2;
+///   * rejoin herd (rest) - contract toward the champion,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range whf 0.06.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn wildebeest_herd_optimization(
+  config : WBOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // previous champion gives the trend direction of the herd
+    let prev_best = best_pos
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // herd factor whf decays 1 -> 0 as evaluations are spent
+      let whf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < whf * 0.35 {
+        // herd migration: move toward the extrapolated champion trend point
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let pred = best_pos[d] + (best_pos[d] - prev_best[d])
+          let nv = xi[d] +
+            r2 * (pred - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * whf * 0.13
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < whf * 0.35 + 0.40 {
+        // graze jitter: fine step that keeps the herd spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * whf * whf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // rejoin herd: contract toward the champion
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * whf * 0.06
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== OWL: Owl Optimization Algorithm =====
+
+///|
+pub struct OWLConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_owl_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> OWLConfig {
+  OWLConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Owl Optimization Algorithm, mechanism-faithful variant of owl hunting.  An
+/// owl factor owf = e^{-t/2500} decays as evaluations are spent, and each owl
+/// remembers the direction of its last *successful* move (a pattern-move
+/// memory, unlike BCMO's raw momentum or SAR's best-position memory):
+///   * silent glide (r1 < 0.37 owf) - continue along the remembered success
+///     direction while closing in on the prey (global best), with a
+///     differential kick and a jitter,
+///     X_i <- X_i + r2 (X_best - X_i) + r3 (X_p - X_q) + 0.25 D_i
+///            + r4 (2 r5 - 1) range owf 0.11;
+///   * auditory jitter (r1 < 0.37 owf + 0.39) - fine step that keeps the roost
+///     spread out, X_i <- X_i + r2 (2 r3 - 1) range owf^2;
+///   * swoop (rest) - contract toward the prey (global best),
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range owf 0.05.
+/// The direction memory D_i is refreshed on improvement and forgotten after a
+/// non-improving move.  The global best is tracked separately.
+pub fn owl_optimization(
+  config : OWLConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  // per-owl remembered success direction
+  let dir : Array[Array[Double]] = []
+  for _i in 0..<pop_size {
+    let z : Array[Double] = []
+    for _d in 0..<dim {
+      z.push(0.0)
+    }
+    dir.push(z)
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let di = dir[i]
+      // owl factor owf decays 1 -> 0 as evaluations are spent
+      let owf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      let mut glided = false
+      if r1 < owf * 0.37 {
+        // silent glide: continue the remembered success direction + pull to prey
+        glided = true
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * owf * 0.11 +
+            0.25 * di[d]
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < owf * 0.37 + 0.39 {
+        // auditory jitter: fine step that keeps the roost spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * owf * owf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // swoop: contract toward the prey (global best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * owf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      let fv = evaluate(f, cand)
+      // keep the remembered direction only when a glide improved, else forget
+      let nd : Array[Double] = []
+      if glided && fv < fits[i] {
+        for d in 0..<dim {
+          nd.push(0.5 * (cand[d] - xi[d]))
+        }
+      } else {
+        for _d in 0..<dim {
+          nd.push(0.0)
+        }
+      }
+      dir[i] = nd
+      fits[i] = fv
+      pop[i] = cand
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== RRO: Raven Roosting Optimization =====
+
+///|
+pub struct RROConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_rro_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> RROConfig {
+  RROConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Raven Roosting Optimization, mechanism-faithful variant of ravens choosing
+/// a roost by quality.  A roost factor rrf = e^{-t/2500} decays as evaluations
+/// are spent, and every generation the flock is ranked so a *rank-weighted
+/// roulette* can pick the roost a raven flies to (any rank can be chosen, but
+/// better ranks are likelier):
+///   * change roost (r1 < 0.36 rrf) - fly toward a roulette-selected roost,
+///     adding a differential kick from two random ravens,
+///     X_i <- X_i + r2 (X_roost - X_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range rrf 0.13;
+///   * roost jitter (r1 < 0.36 rrf + 0.40) - fine step that keeps the flock
+///     spread out, X_i <- X_i + r2 (2 r3 - 1) range rrf^2;
+///   * settle (rest) - contract toward the global best,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range rrf 0.06.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn raven_roosting_optimization(
+  config : RROConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // rank the flock and build a rank-weighted cumulative roulette
+    let order = sort_indices(fits)
+    let cum : Array[Double] = []
+    let mut acc = 0.0
+    for k in 0..<pop_size {
+      acc = acc + (pop_size - k).to_double()
+      cum.push(acc)
+    }
+    let total = acc
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // roost factor rrf decays 1 -> 0 as evaluations are spent
+      let rrf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < rrf * 0.36 {
+        // change roost: fly toward a roulette-selected roost + differential kick
+        let u = RNG::next(current_rng) * total
+        let mut pick_k = 0
+        for k in 0..<pop_size {
+          if cum[k] < u {
+            pick_k = k + 1
+          }
+        }
+        let xref = pop[order[pick_k]]
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let kk = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[kk]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xref[d] - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * rrf * 0.13
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < rrf * 0.36 + 0.40 {
+        // roost jitter: fine step that keeps the flock spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * rrf * rrf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // settle: contract toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * rrf * 0.06
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== SaFO: Sailfish Optimizer (2019) =====
+
+///|
+pub struct SaFOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_safo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SaFOConfig {
+  SaFOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Sailfish Optimizer (2019), mechanism-faithful variant of sailfish hunting.
+/// A sailfish factor saf = e^{-t/2500} decays as evaluations are spent, and an
+/// *adaptive fitness-distance balance* (FDB) picks the prey among a few random
+/// candidates - trading a good fitness against being far enough away to stay
+/// exploratory:
+///   * attack (r1 < 0.31 saf) - strike toward the FDB-selected prey with a
+///     differential kick from two random mates,
+///     X_i <- X_i + r2 (X_prey - X_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range saf 0.12;
+///   * patrol jitter (r1 < 0.31 saf + 0.43) - fine step that keeps the school
+///     spread out, X_i <- X_i + r2 (2 r3 - 1) range saf^2;
+///   * strike home (rest) - contract toward the global best,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range saf 0.05.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn sailfish_optimizer(
+  config : SaFOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // fitness range for FDB normalization
+    let mut fit_min = fits[0]
+    let mut fit_max = fits[0]
+    for k in 1..<pop_size {
+      if fits[k] < fit_min {
+        fit_min = fits[k]
+      }
+      if fits[k] > fit_max {
+        fit_max = fits[k]
+      }
+    }
+    let fit_span = if fit_max - fit_min < 1.0e-12 {
+      1.0e-12
+    } else {
+      fit_max - fit_min
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // sailfish factor saf decays 1 -> 0 as evaluations are spent
+      let saf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < saf * 0.31 {
+        // FDB: pick a prey balancing a good fitness against being far away
+        let mut pick = i
+        let mut best_score = 1.0e30
+        for _c in 0..<3 {
+          let cj = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+            pop_size
+          let xc = pop[cj]
+          let nf = (fits[cj] - fit_min) / fit_span
+          let mut dsq = 0.0
+          for d in 0..<dim {
+            let diff = xc[d] - xi[d]
+            dsq = dsq + diff * diff
+          }
+          let mut nd = dsq / (span * span)
+          if nd > 1.0 {
+            nd = 1.0
+          }
+          let score = 0.5 * nf + 0.5 * (1.0 - nd)
+          if score < best_score {
+            best_score = score
+            pick = cj
+          }
+        }
+        let xref = pop[pick]
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let kk = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[kk]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xref[d] - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * saf * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < saf * 0.31 + 0.43 {
+        // patrol jitter: fine step that keeps the school spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * saf * saf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // strike home: contract toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * saf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== GPC: Giza Pyramids Construction (2021) =====
+
+///|
+pub struct GPCConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_gpc_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> GPCConfig {
+  GPCConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Giza Pyramids Construction (2021), mechanism-faithful variant of workers
+/// hauling stone blocks up a pyramid.  A construction factor gpf = e^{-t/2500}
+/// decays as evaluations are spent:
+///   * hauling (r1 < 0.34 gpf) - carry a block toward a point midway between
+///     the crew mate and the apex (global best), plus a differential kick,
+///     X_i <- X_i + r2 (0.5 (X_best + X_p) - X_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range gpf 0.10;
+///   * worker wander (r1 < 0.34 gpf + 0.43) - fine jitter that keeps the crew
+///     spread out, X_i <- X_i + r2 (2 r3 - 1) range gpf^2;
+///   * ascent (rest) - contract toward the apex,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range gpf 0.06.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn giza_pyramids_construction(
+  config : GPCConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // construction factor gpf decays 1 -> 0 as evaluations are spent
+      let gpf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < gpf * 0.34 {
+        // hauling: carry the block toward the crew/apex midpoint + kick
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let mid = 0.5 * (best_pos[d] + xp[d])
+          let nv = xi[d] +
+            r2 * (mid - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * gpf * 0.10
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < gpf * 0.34 + 0.43 {
+        // worker wander: fine step that keeps the crew spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * gpf * gpf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // ascent: contract toward the apex (global best)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * gpf * 0.06
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== SSD: Social Ski-Driver (2019) =====
+
+///|
+pub struct SSDConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ssd_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SSDConfig {
+  SSDConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Social Ski-Driver (2019), mechanism-faithful variant of the ski-driver
+/// social motion.  Each skier keeps a personal best and is driven by two
+/// references at once: its personal best and the midpoint between the personal
+/// best and the global best.  A driver factor ssf = e^{-t/2500} decays as
+/// evaluations are spent:
+///   * ski-drive (r1 < 0.36 ssf) - move under both references with a jitter,
+///     X_i <- X_i + r2 (P_i - X_i) + r3 (0.5 (X_best + P_i) - X_i)
+///            + r4 (2 r5 - 1) range ssf 0.11;
+///   * drift (r1 < 0.36 ssf + 0.41) - fine jitter that keeps the track spread
+///     out, X_i <- X_i + r2 (2 r3 - 1) range ssf^2;
+///   * finish (rest) - contract toward the global best,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range ssf 0.05.
+/// The personal best P_i is refreshed on improvement; the global best is
+/// tracked separately.
+pub fn social_ski_driver(
+  config : SSDConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  // personal best position / value for every skier
+  let pbest : Array[Array[Double]] = []
+  let pbest_fit : Array[Double] = []
+  for i in 0..<pop_size {
+    pbest.push(pop[i])
+    pbest_fit.push(fits[i])
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let pb = pbest[i]
+      // driver factor ssf decays 1 -> 0 as evaluations are spent
+      let ssf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < ssf * 0.36 {
+        // ski-drive: pulled by the personal best and the pbest/gbest midpoint
+        for d in 0..<dim {
+          let mid = 0.5 * (best_pos[d] + pb[d])
+          let nv = xi[d] +
+            r2 * (pb[d] - xi[d]) +
+            r3 * (mid - xi[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * ssf * 0.11
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < ssf * 0.36 + 0.41 {
+        // drift: fine step that keeps the track spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * ssf * ssf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // finish: contract toward the global best
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * ssf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      let fv = evaluate(f, cand)
+      pop[i] = cand
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < pbest_fit[i] {
+        pbest[i] = cand
+        pbest_fit[i] = fv
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== FDO: Fitness Dependent Optimizer (2020) =====
+
+///|
+pub struct FDOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_fdo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> FDOConfig {
+  FDOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Fitness Dependent Optimizer (2020), mechanism-faithful variant of the
+/// fitness-dependent bee swarm.  Each agent owns a relative fitness gap to
+/// the champion, which scales its stride, and picks one of three roles:
+///   * fitness-dependent advance (r1 < 0.33) - a stride weighted pull toward
+///     the champion plus a differential kick from two random mates,
+///     X_i <- X_i + stride fdf r2 (X_best - X_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range fdf 0.08;
+///   * roost jitter (r1 < 0.75) - fine step that keeps the swarm spread out,
+///     X_i <- X_i + r2 (2 r3 - 1) range fdf^2;
+///   * settle (rest) - contract toward the champion,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range fdf 0.05.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn fitness_dependent_optimizer(
+  config : FDOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // update factor fdf decays 1 -> 0 as evaluations are spent
+      let fdf = @math.exp(-evaluations.to_double() / 2500.0)
+      // relative fitness gap to the champion, capped for stability
+      let mut stride = 0.1 +
+        abs_val(fits[i] - best_val) / (abs_val(best_val) + 1.0)
+      if stride > 1.2 {
+        stride = 1.2
+      }
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.33 {
+        // fitness-dependent advance toward the champion + differential kick
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            stride * fdf * r2 * (best_pos[d] - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * fdf * 0.08
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < 0.75 {
+        // roost jitter: fine step that keeps the swarm spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * fdf * fdf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // settle: contract toward the champion
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * fdf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== CFA: Cuttlefish Optimization Algorithm (2013) =====
+
+///|
+pub struct CFAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_cfa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CFAConfig {
+  CFAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Cuttlefish Optimization Algorithm (2013), mechanism-faithful variant of
+/// cuttlefish color-cell reflection and visibility.  A cell factor ctf =
+/// e^{-t/2500} decays as evaluations are spent; every generation the reef
+/// centroid is recomputed so a cell can mirror itself about the centroid
+/// before matching its pattern with the champion:
+///   * reflection (r1 < 0.30 ctf) - mirror the cell about the centroid, then
+///     apply a visibility-weighted pull toward the champion plus a
+///     differential kick, M_i = 2 X_mean - X_i,
+///     X_i <- M_i + r2 (X_best - M_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range ctf 0.12;
+///   * visibility jitter (r1 < 0.30 ctf + 0.44) - fine step that keeps the
+///     reef spread out, X_i <- X_i + r2 (2 r3 - 1) range ctf^2;
+///   * settle (rest) - contract toward the champion,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range ctf 0.06.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn cuttlefish_optimization(
+  config : CFAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // reef centroid, used as the mirror plane for every cell
+    let mean : Array[Double] = []
+    for d in 0..<dim {
+      let mut s = 0.0
+      for j in 0..<pop_size {
+        s = s + pop[j][d]
+      }
+      mean.push(s / pop_size.to_double())
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // cell factor ctf decays 1 -> 0 as evaluations are spent
+      let ctf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < ctf * 0.30 {
+        // reflection: mirror about the centroid, then match toward the champion
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let mirror = 2.0 * mean[d] - xi[d]
+          let nv = mirror +
+            r2 * (best_pos[d] - mirror) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * ctf * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < ctf * 0.30 + 0.44 {
+        // visibility jitter: fine step that keeps the reef spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * ctf * ctf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // settle: contract toward the champion
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * ctf * 0.06
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== OPA: Orca Predation Algorithm (2024) =====
+
+///|
+pub struct OPAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_opa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> OPAConfig {
+  OPAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Orca Predation Algorithm (2024), mechanism-faithful variant of an orca pod
+/// herding prey.  Each orca remembers whether its previous move succeeded;
+/// success biases it toward exploitation (press the attack on the champion)
+/// while failure biases it toward exploration (break off and search):
+///   * press the attack (orcas that improved, r1 < 0.78) - contract toward the
+///     champion with a small jitter,
+///     X_i <- X_i + r2 (X_best - X_i) + r3 (2 r4 - 1) range opf 0.06;
+///   * herding sweep (orcas that improved, rest) - explore with a differential
+///     kick from two random mates,
+///     X_i <- X_i + r2 (X_p - X_q) + r3 (2 r4 - 1) range opf 0.10;
+///   * search dive (orcas that failed, r1 < 0.90) - strike toward the champion
+///     with a differential kick and a wider jitter,
+///     X_i <- X_i + r2 (X_best - X_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range opf 0.08;
+///   * break away (orcas that failed, rest) - a random repositioning blended toward the champion,
+///     X_i <- X_i + r2 (X_best - X_i) + (2 r3 - 1) range opf 0.20.
+/// The success flag is refreshed every move; the global best is tracked
+/// separately.
+pub fn orca_predation_algorithm(
+  config : OPAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  // per-orca success flag from its previous move
+  let improved : Array[Bool] = []
+  for _i in 0..<pop_size {
+    improved.push(true)
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // pod factor opf decays 1 -> 0 as evaluations are spent
+      let opf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if improved[i] {
+        if r1 < 0.78 {
+          // press the attack: contract toward the champion with a small jitter
+          for d in 0..<dim {
+            let nv = xi[d] +
+              r2 * (best_pos[d] - xi[d]) +
+              r3 * (2.0 * r4 - 1.0) * span * opf * 0.06
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        } else {
+          // herding sweep: explore with a differential kick
+          let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+            pop_size
+          let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+            pop_size
+          let xp = pop[j]
+          let xq = pop[k]
+          for d in 0..<dim {
+            let nv = xi[d] +
+              r2 * (xp[d] - xq[d]) +
+              r3 * (2.0 * r4 - 1.0) * span * opf * 0.10
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        }
+      } else if r1 < 0.90 {
+        // search dive: strike toward the champion with a wider jitter
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * opf * 0.08
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // break away: large random repositioning keeps the pod exploring
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            (2.0 * r3 - 1.0) * span * opf * 0.20
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      let fv = evaluate(f, cand)
+      improved[i] = fv < fits[i]
+      pop[i] = cand
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== APuf: Arctic Puffin Optimization (2023) =====
+
+///|
+pub struct APufConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_apuf_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> APufConfig {
+  APufConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Arctic Puffin Optimization (2023), mechanism-faithful variant of puffin
+/// foraging.  A puffin factor puf = e^{-t/2500} decays as evaluations are
+/// spent, and each *dimension* keeps an adaptive step scale s_d in [0.2, 2]
+/// that expands for the coordinates that moved on a successful move and
+/// shrinks otherwise - a dimension-wise (not per-individual scalar) step
+/// adaptation:
+///   * aerial cruise (r1 < 0.33 puf) - differential exploration between two
+///     random mates with a dimension-scaled jitter,
+///     X_i <- X_i + r2 (X_p - X_q) + r3 (2 r4 - 1) range puf 0.12 s_d;
+///   * dive (r1 < 0.33 puf + 0.40) - fold toward the champion with a
+///     dimension-scaled jitter,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range puf 0.06 s_d;
+///   * surface jitter (rest) - fine step that keeps the colony spread out,
+///     X_i <- X_i + r2 (2 r3 - 1) range puf^2 s_d.
+/// After each move every coordinate that contributed at least 2% of the range
+/// to a successful displacement gets s_d <- min(2, 1.08 s_d); all other
+/// coordinates get s_d <- max(0.2, 0.96 s_d), and a failed move multiplies
+/// every s_d by 0.98.  The global best is tracked separately.
+pub fn arctic_puffin_optimization(
+  config : APufConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  // per-dimension adaptive step scale
+  let dscale : Array[Double] = []
+  for _d in 0..<dim {
+    dscale.push(1.0)
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // puffin factor puf decays 1 -> 0 as evaluations are spent
+      let puf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < puf * 0.33 {
+        // aerial cruise: differential exploration with dimension-scaled jitter
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (xp[d] - xq[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * puf * 0.12 * dscale[d]
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < puf * 0.33 + 0.40 {
+        // dive: fold toward the champion with dimension-scaled jitter
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * puf * 0.06 * dscale[d]
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // surface jitter: fine step that keeps the colony spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * puf * puf * dscale[d]
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      let fv = evaluate(f, cand)
+      let improved = fv < fits[i]
+      // dimension-wise step adaptation
+      for d in 0..<dim {
+        if improved {
+          if abs_val(cand[d] - xi[d]) >= 0.02 * span {
+            dscale[d] = min(2.0, dscale[d] * 1.08)
+          } else {
+            dscale[d] = max(0.2, dscale[d] * 0.96)
+          }
+        } else {
+          dscale[d] = max(0.2, dscale[d] * 0.98)
+        }
+      }
+      pop[i] = cand
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== WPA: Wolf Pack Algorithm (2011) =====
+
+///|
+pub struct WPAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_wpa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> WPAConfig {
+  WPAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Wolf Pack Algorithm (2011), mechanism-faithful variant of wolf-pack hunting.
+/// A pack factor wpf = e^{-t/2500} decays as evaluations are spent, and the
+/// pack separates the *scouting* role from the *calling* and *besieging* roles:
+///   * scouting (r1 < 0.33 wpf) - every coordinate takes an independent random
+///     step so scouts sweep the terrain instead of collapsing on the champion,
+///     X_i[d] <- X_i[d] + (2 r2 - 1) range wpf 0.12;
+///   * calling (r1 < 0.33 wpf + 0.40) - the lead wolf summons the pack: pull
+///     toward the champion with a differential kick from two random mates,
+///     X_i <- X_i + r2 (X_best - X_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range wpf 0.10;
+///   * besieging (rest) - close in on the champion in small steps,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range wpf 0.05.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn wolf_pack_algorithm(
+  config : WPAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // pack factor wpf decays 1 -> 0 as evaluations are spent
+      let wpf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < wpf * 0.33 {
+        // scouting: independent random step on every coordinate
+        for d in 0..<dim {
+          let nv = xi[d] + (2.0 * r2 - 1.0) * span * wpf * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < wpf * 0.33 + 0.40 {
+        // calling: the lead wolf summons the pack, plus a differential kick
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * wpf * 0.10
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // besieging: close in on the champion with small steps
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * wpf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== Racc: Raccoon Optimization Algorithm (2022) =====
+
+///|
+pub struct RaccConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_racc_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> RaccConfig {
+  RaccConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Raccoon Optimization Algorithm (2022), mechanism-faithful variant of
+/// raccoon foraging.  A band factor raf = e^{-t/2500} decays as evaluations
+/// are spent:
+///   * mirror forage (r1 < 0.34 raf) - reflect the raccoon through the
+///     midpoint between the champion and a random mate,
+///     M_i = X_best + X_r - X_i, then add a jitter,
+///     X_i <- M_i + r2 (2 r3 - 1) range raf 0.10;
+///   * paw jitter (r1 < 0.34 raf + 0.42) - fine step that keeps the band
+///     spread out, X_i <- X_i + r2 (2 r3 - 1) range raf^2;
+///   * settle (rest) - contract toward the champion,
+///     X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range raf 0.05.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn raccoon_optimization(
+  config : RaccConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // band factor raf decays 1 -> 0 as evaluations are spent
+      let raf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < raf * 0.34 {
+        // mirror forage: reflect about the champion/mate midpoint + jitter
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xr = pop[j]
+        for d in 0..<dim {
+          let mirror = best_pos[d] + xr[d] - xi[d]
+          let nv = mirror + r2 * (2.0 * r3 - 1.0) * span * raf * 0.10
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < raf * 0.34 + 0.42 {
+        // paw jitter: fine step that keeps the band spread out
+        for d in 0..<dim {
+          let nv = xi[d] + r2 * (2.0 * r3 - 1.0) * span * raf * raf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // settle: contract toward the champion
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * raf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== Monkey Search Algorithm (2007) =====
+
+///|
+pub struct MonkeySearchConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_monkey_search_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> MonkeySearchConfig {
+  MonkeySearchConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Monkey Search (2007), mechanism-faithful variant of monkeys moving through
+/// a forest.  A monkey factor msf = e^{-t/2500} decays as evaluations are
+/// spent, and each monkey picks one of three moves:
+///   * climb (r1 < 0.36 msf) - fine local refinement around the champion,
+///     X_i <- X_best + r2 (X_i - X_best) + r3 (2 r4 - 1) range msf^2;
+///   * watch-jump (r1 < 0.36 msf + 0.38) - leap toward the champion with a
+///     differential kick from two random mates,
+///     X_i <- X_i + r2 (X_best - X_i) + r3 (X_p - X_q)
+///            + r4 (2 r5 - 1) range msf 0.10;
+///   * somersault (rest) - a large leap blended toward the champion,
+///     X_i <- X_i + r2 (X_best - X_i) + (2 r3 - 1) range msf 0.25.
+/// Individuals move unconditionally while the global best is tracked
+/// separately.
+pub fn monkey_search_algorithm(
+  config : MonkeySearchConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      // monkey factor msf decays 1 -> 0 as evaluations are spent
+      let msf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let r4 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < msf * 0.36 {
+        // climb: fine local refinement around the champion
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            r3 * (2.0 * r4 - 1.0) * span * msf * msf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < msf * 0.36 + 0.38 {
+        // watch-jump: leap toward the champion with a differential kick
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let k = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[j]
+        let xq = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            r3 * (xp[d] - xq[d]) +
+            r4 * (2.0 * RNG::next(current_rng) - 1.0) * span * msf * 0.10
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // somersault: large leap blended toward the champion
+        for d in 0..<dim {
+          let nv = xi[d] +
+            r2 * (best_pos[d] - xi[d]) +
+            (2.0 * r3 - 1.0) * span * msf * 0.25
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== Bird Swarm Algorithm (2016) =====
+
+///|
+pub struct BswaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bswa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BswaConfig {
+  BswaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Bird Swarm Algorithm (2016).  Each bird keeps a personal best and the
+/// swarm tracks a global best; every round the swarm centroid and the mean
+/// fitness are recomputed, then each bird acts with one of three rules:
+///   * foraging (r1 < 0.88) - either a pull toward its personal best
+///     (30% of the time, coefficient 1.5) or toward the global best
+///     (coefficient 2.0), the two references being mutually exclusive;
+///   * vigilance (r1 < 0.92) - the sign of (fit_i - mean_fit) decides the
+///     direction: birds better than the average drift gently toward the
+///     centroid with amplitude A1 = exp(-mean_fit/fit_i) 0.5, while worse
+///     birds are pushed away from it with amplitude A2 = exp(-gap/mean_fit)
+///     plus a small jitter, which keeps sub-populations from collapsing;
+///   * flight (r1 >= 0.92) - a large leap toward the champion plus a random
+///     excursion, mimicking the sudden relocation of a flock.
+/// A swarm factor bsf = e^{-t/2500} decays every amplitude as evaluations
+/// are spent, so the rules tighten into local refinement.
+pub fn bird_swarm_algorithm(
+  config : BswaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 20 {
+    20
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let pbest : Array[Array[Double]] = []
+  let pbest_fit : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  pbest.push(best_pos)
+  pbest_fit.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    pbest.push(p)
+    pbest_fit.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // Swarm centroid and mean fitness drive the vigilance rule.
+    let mean_pos : Array[Double] = []
+    for _d in 0..<dim {
+      mean_pos.push(0.0)
+    }
+    let mut fit_sum = 0.0
+    for i in 0..<pop_size {
+      fit_sum = fit_sum + fits[i]
+      for d in 0..<dim {
+        mean_pos[d] = mean_pos[d] + pop[i][d]
+      }
+    }
+    let inv_pop = 1.0 / pop_size.to_double()
+    let mean_fit = fit_sum * inv_pop
+    for d in 0..<dim {
+      mean_pos[d] = mean_pos[d] * inv_pop
+    }
+
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let bsf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.92 {
+        if r1 < 0.88 {
+          // foraging: personal best or global best, mutually exclusive
+          if r2 < 0.30 {
+            for d in 0..<dim {
+              let nv = xi[d] + 1.5 * r3 * (pbest[i][d] - xi[d]) * bsf
+              cand.push(max(bounds.min, min(bounds.max, nv)))
+            }
+          } else {
+            for d in 0..<dim {
+              let nv = xi[d] + 2.0 * r3 * (best_pos[d] - xi[d]) * bsf
+              cand.push(max(bounds.min, min(bounds.max, nv)))
+            }
+          }
+        } else {
+          // vigilance: sign of the fitness gap picks approach or retreat
+          let gap = fits[i] - mean_fit
+          if gap < 0.0 {
+            let a1 = @math.exp(-mean_fit / (fits[i] + 1.0e-9)) * 0.5
+            for d in 0..<dim {
+              let nv = xi[d] + a1 * r2 * (mean_pos[d] - xi[d]) * bsf
+              cand.push(max(bounds.min, min(bounds.max, nv)))
+            }
+          } else {
+            let a2 = @math.exp(-gap / (mean_fit + 1.0e-9)) * 0.5
+            for d in 0..<dim {
+              let nv = xi[d] -
+                a2 * r2 * (mean_pos[d] - xi[d]) * bsf +
+                r3 * (2.0 * RNG::next(current_rng) - 1.0) * span * 0.02 * bsf
+              cand.push(max(bounds.min, min(bounds.max, nv)))
+            }
+          }
+        }
+      } else {
+        // flight: sudden relocation toward the champion plus a random draw
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (best_pos[d] - xi[d]) * (0.5 + r2) * bsf +
+            r3 * (2.0 * RNG::next(current_rng) - 1.0) * span * 0.15 * bsf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < pbest_fit[i] {
+        pbest_fit[i] = fv
+        pbest[i] = cand
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== Tree Growth Algorithm (2018) =====
+
+///|
+pub struct TGAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_tga_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> TGAConfig {
+  TGAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Tree Growth Algorithm (2018).  Every round the forest is ranked by fitness
+/// and split into roles, with the growth factor tgf = e^{-t/2500} shrinking
+/// all strides as evaluations are spent:
+///   * the best third (well-lit trees) grows toward the light, i.e. toward
+///     the global best, with a differential kick from two random trees;
+///   * the middle trees absorb water from the soil around the better of two
+///     neighbouring trees plus a weak pull toward the best, a local
+///     differential exploration at tgf^2 scale;
+///   * the worst tenth (crowded-out trees) are replaced by a random seedling
+///     grafted halfway onto the best-lit tree, so competition keeps the
+///     forest diverse instead of letting it collapse.
+pub fn tree_growth_algorithm(
+  config : TGAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 20 {
+    20
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let n_lit = if pop_size / 3 < 3 { 3 } else { pop_size / 3 }
+  let n_crowded = if pop_size / 10 < 2 { 2 } else { pop_size / 10 }
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // rank the forest by fitness: order[0] is the best-lit tree
+    let order = sort_indices(fits)
+    let rank : Array[Int32] = []
+    for _k in 0..<pop_size {
+      rank.push(0)
+    }
+    for k in 0..<pop_size {
+      rank[order[k]] = k
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let tgf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if rank[i] < n_lit {
+        // growth toward the light (global best) with a differential kick
+        let j = (r2 * pop_size.to_double()).to_int() % pop_size
+        let k = (r3 * pop_size.to_double()).to_int() % pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            2.0 * r1 * tgf * (best_pos[d] - xi[d]) +
+            0.5 * r3 * (xj[d] - xk[d]) * tgf +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.04 * tgf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if rank[i] < pop_size - n_crowded {
+        // water absorption: local exploration around the better of two trees
+        let j = (r2 * pop_size.to_double()).to_int() % pop_size
+        let k = (r3 * pop_size.to_double()).to_int() % pop_size
+        let xj = if fits[j] <= fits[k] { pop[j] } else { pop[k] }
+        for d in 0..<dim {
+          let nv = xi[d] +
+            0.9 * r1 * tgf * (xj[d] - xi[d]) +
+            0.3 * tgf * (best_pos[d] - xi[d]) +
+            (2.0 * r3 - 1.0) * span * 0.08 * tgf * tgf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // competition: a crowded-out tree is replaced by a seedling that is a
+        // random draw grafted halfway onto the best-lit tree
+        let seedling = random_solution(dim, bounds, current_rng)
+        for d in 0..<dim {
+          let nv = 0.5 * seedling[d] +
+            0.5 * best_pos[d] +
+            (2.0 * r2 - 1.0) * span * 0.03 * tgf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== Plant Propagation Algorithm (2014) =====
+
+///|
+pub struct PPAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ppa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> PPAConfig {
+  PPAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Plant Propagation Algorithm (2014).  Each round the plants are ranked by
+/// fitness and reproduce through runners, with the propagation factor
+/// ppf = e^{-t/2500} shrinking all distances as evaluations are spent:
+///   * a well-adapted plant (low rank ratio rn) sends out many runners over a
+///     short distance, so it refines its own neighbourhood;
+///   * a poorly adapted plant sends out fewer runners that travel far, which
+///     spreads the species into unexplored ground;
+///   * 35% of the runners head toward the best plant instead of a random
+///     direction, giving the population a pull toward the global optimum, and
+///     a runner replaces its parent only when it is better (competition).
+pub fn plant_propagation_algorithm(
+  config : PPAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  let denom = if pop_size > 1 { (pop_size - 1).to_double() } else { 1.0 }
+
+  while evaluations < max_evals {
+    // rank the plants: order[0] is the best adapted
+    let order = sort_indices(fits)
+    let rank : Array[Int32] = []
+    for _k in 0..<pop_size {
+      rank.push(0)
+    }
+    for k in 0..<pop_size {
+      rank[order[k]] = k
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let ppf = @math.exp(-evaluations.to_double() / 2500.0)
+      let rn = rank[i].to_double() / denom
+      // well-adapted plants send many short runners, poor ones few long ones
+      let runner_count = 1 + ((1.0 - rn) * 2.0).to_int()
+      let reach = span * (0.02 + 0.30 * rn) * ppf
+      let mut child_pos : Array[Double] = xi
+      let mut child_fit = fits[i]
+      for _c in 0..<runner_count {
+        if evaluations >= max_evals {
+          break
+        }
+        let cand : Array[Double] = []
+        if RNG::next(current_rng) < 0.35 {
+          // runner growing toward the best plant
+          let w = RNG::next(current_rng) * 0.5 + 0.3
+          for d in 0..<dim {
+            let nv = xi[d] +
+              w * (best_pos[d] - xi[d]) +
+              (2.0 * RNG::next(current_rng) - 1.0) * reach * 0.25
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        } else {
+          // runner in a random direction
+          for d in 0..<dim {
+            let nv = xi[d] + (2.0 * RNG::next(current_rng) - 1.0) * reach
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        if fv < child_fit {
+          child_fit = fv
+          child_pos = cand
+        }
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+      pop[i] = child_pos
+      fits[i] = child_fit
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== Honey Bee Mating Optimization (2001) =====
+
+///|
+pub struct HBMOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_hbmo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> HBMOConfig {
+  HBMOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Honey Bee Mating Optimization (2001).  The best individual is the queen
+/// and every other bee is a drone that may mate with her.  The annealing
+/// speed speed = e^{-t/2500} controls both the mating acceptance and the
+/// brood care:
+///   * a drone with normalized fitness gap g = |fit_i - fit_best| /
+///     (|fit_i| + |fit_best| + eps) is accepted with probability
+///     p = e^{-g / speed}, so early (fast) rounds accept diverse drones while
+///     late (slow) rounds only accept drones almost as good as the queen;
+///   * an accepted drone crosses with the queen,
+///     brood = queen + w (drone - queen) + jitter, inheriting part of the
+///     drone genome;
+///   * a rejected drone stays as a worker and patrols its neighbourhood with
+///     a weak pull toward the queen plus a fine jitter, so the hive keeps
+///     converging even when mating is rare.
+/// The brood replaces its drone only when it is better, and the queen is
+/// replaced whenever a brood beats her.
+pub fn honey_bee_mating_optimization(
+  config : HBMOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // annealing mating speed, floored so late rounds still allow mating
+    let speed = 0.2 + 0.8 * @math.exp(-evaluations.to_double() / 2500.0)
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let gap = abs_val(fits[i] - best_val) /
+        (abs_val(fits[i]) + abs_val(best_val) + 1.0e-9)
+      let p_mate = @math.exp(-gap / (speed + 1.0e-9))
+      let cand : Array[Double] = []
+      if r1 < p_mate {
+        // mating: cross the drone genome into the queen
+        let w = 0.3 + 0.6 * r2
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            w * (xi[d] - best_pos[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.03 * speed
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // worker patrol: weak pull toward the queen plus a fine jitter
+        for d in 0..<dim {
+          let nv = xi[d] +
+            0.35 * r2 * (best_pos[d] - xi[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.02 * speed
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < fits[i] {
+        pop[i] = cand
+        fits[i] = fv
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== Crayfish Optimization Algorithm (2023) =====
+
+///|
+pub struct CrayfishConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_crayfish_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CrayfishConfig {
+  CrayfishConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Crayfish Optimization Algorithm (2023).  The pond temperature rises from
+/// 20 to 30 degrees as evaluations are spent, which raises the chance of a
+/// summer resort, while the crayfish factor cof = e^{-t/2500} shrinks all
+/// strides:
+///   * foraging - move toward the better of two randomly picked crayfish,
+///     plus a differential kick and a jitter;
+///   * summer resort - contract toward the cave, i.e. the global best, with a
+///     fine jitter that tightens the search;
+///   * competition - the winner keeps refining near the cave while the loser
+///     is pushed away from its rival to stay diverse.
+pub fn crayfish_optimization(
+  config : CrayfishConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let max_evals_d = max_evals.to_double()
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // pond temperature rises 20 -> 30 degrees
+    let temp = 20.0 + 10.0 * evaluations.to_double() / max_evals_d
+    let p_resort = 0.3 + 0.2 * (temp - 20.0) / 10.0
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let cof = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.45 {
+        // foraging: follow the better of two random crayfish
+        let j = (r2 * pop_size.to_double()).to_int() % pop_size
+        let k = (r3 * pop_size.to_double()).to_int() % pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        let xfood = if fits[j] <= fits[k] { xj } else { xk }
+        for d in 0..<dim {
+          let nv = xi[d] +
+            1.8 * cof * (xfood[d] - xi[d]) +
+            0.4 * r3 * cof * (xj[d] - xk[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.012 * cof
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < 0.45 + p_resort {
+        // summer resort: contract toward the cave (global best)
+        for d in 0..<dim {
+          let nv = xi[d] +
+            1.8 * cof * (best_pos[d] - xi[d]) +
+            (2.0 * r2 - 1.0) * span * 0.010 * cof
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // competition: winner refines, loser retreats from its rival
+        let j = (r2 * pop_size.to_double()).to_int() % pop_size
+        let xj = pop[j]
+        if fits[i] <= fits[j] {
+          for d in 0..<dim {
+            let nv = xi[d] +
+              0.8 * cof * (best_pos[d] - xi[d]) +
+              (2.0 * r3 - 1.0) * span * 0.010 * cof
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        } else {
+          for d in 0..<dim {
+            let nv = xi[d] +
+              0.4 * cof * (best_pos[d] - xi[d]) -
+              0.3 * r2 * cof * (xj[d] - xi[d]) +
+              (2.0 * r3 - 1.0) * span * 0.010 * cof
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== Queuing Search Algorithm (2019) =====
+
+///|
+pub struct QSAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_qsa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> QSAConfig {
+  QSAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Queuing Search Algorithm (2019).  The queue factor qsf = e^{-t/2500}
+/// shrinks all strides as evaluations are spent.  Each round the population
+/// is ranked and the best few become service windows (leaders):
+///   * a leader improves its service efficiency by contracting toward the
+///     global best with a fine jitter;
+///   * the other individuals join the window chosen by their index, moving
+///     toward that window's leader with a differential kick and a jitter;
+///   * some customers spend the round waiting and only perform a fine jitter,
+///     which keeps the queue diverse.
+/// Leaders are re-elected from the ranked population every round.
+pub fn queuing_search_algorithm(
+  config : QSAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let n_windows = if pop_size / 8 < 2 { 2 } else { pop_size / 8 }
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // rank the queue: order[0] is the best served individual
+    let order = sort_indices(fits)
+    let rank : Array[Int32] = []
+    for _k in 0..<pop_size {
+      rank.push(0)
+    }
+    for k in 0..<pop_size {
+      rank[order[k]] = k
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let qsf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if rank[i] < n_windows {
+        // service window: contract toward the global best
+        for d in 0..<dim {
+          let nv = xi[d] +
+            1.4 * qsf * (best_pos[d] - xi[d]) +
+            (2.0 * r2 - 1.0) * span * 0.03 * qsf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < 0.55 {
+        // join the queue: move toward the assigned window leader
+        let leader = pop[order[i % n_windows]]
+        let j = (r2 * pop_size.to_double()).to_int() % pop_size
+        let k = (r3 * pop_size.to_double()).to_int() % pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            1.5 * qsf * (leader[d] - xi[d]) +
+            0.7 * r2 * qsf * (xj[d] - xk[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.03 * qsf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        // waiting: usually a fine jitter, occasionally a queue jump into a
+        // fresh region so the search can escape multi-modal traps
+      } else if r2 < 0.15 {
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.35 * qsf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        for d in 0..<dim {
+          let nv = xi[d] + (2.0 * r3 - 1.0) * span * 0.12 * qsf * qsf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== Starfish Optimization Algorithm (2024) =====
+
+///|
+pub struct StarfishConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_starfish_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> StarfishConfig {
+  StarfishConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Starfish Optimization Algorithm (2024).  The regeneration factor
+/// sff = e^{-t/2500} shrinks all strides as evaluations are spent:
+///   * foraging - follow a randomly chosen arm, i.e. a random swarm member,
+///     with a differential kick and a jitter;
+///   * regeneration - only a random subset of the dimensions (the damaged
+///     arm) contracts toward the global best, so the remaining coordinates
+///     retain their diversity and the search keeps exploring;
+///   * autotomy - a fine jitter, occasionally replaced by a wide arm twitch
+///     that relocates part of the body.
+pub fn starfish_optimization(
+  config : StarfishConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let sff = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.30 {
+        // foraging: follow the better of two random arms, with a weak pull
+        // toward the best and a differential kick
+        let j = (r2 * pop_size.to_double()).to_int() % pop_size
+        let k = (r3 * pop_size.to_double()).to_int() % pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        let xfood = if fits[j] <= fits[k] { xj } else { xk }
+        for d in 0..<dim {
+          let nv = xi[d] +
+            1.0 * sff * (xfood[d] - xi[d]) +
+            0.45 * sff * (best_pos[d] - xi[d]) +
+            0.35 * r2 * sff * (xj[d] - xk[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.08 * sff
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < 0.85 {
+        // regeneration: only a random subset of the dimensions regrows
+        // toward the global best
+        for d in 0..<dim {
+          if RNG::next(current_rng) < 0.72 {
+            let nv = xi[d] +
+              2.0 * sff * (best_pos[d] - xi[d]) +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.015 * sff
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          } else {
+            cand.push(xi[d])
+          }
+        }
+        // autotomy: fine jitter, occasionally a wide arm twitch
+      } else if r3 < 0.12 {
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.30 * sff
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05 * sff * sff
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== Tiger Beetle Optimization (2023) =====
+
+///|
+pub struct TBOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_tbo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> TBOConfig {
+  TBOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Tiger Beetle Optimization (2023).  Each beetle keeps a persistent prey
+/// target instead of drawing a fresh reference every round, with the chase
+/// factor tbf = e^{-t/2500} shrinking all strides:
+///   * chase - keep pursuing the same prey target while it stays better than
+///     the beetle, with a differential kick, a weak pull toward the global
+///     best and a jitter;
+///   * ambush - stay near the burrow and refine with a fine jitter, which
+///     keeps the swarm diverse;
+///   * relocate - pick a new prey and lunge toward it with a wide excursion.
+/// Whenever a chase fails to improve the beetle, its prey target is replaced
+/// by a fresh random one (failure-triggered retargeting), so a beetle does
+/// not stay locked on a stale target.
+pub fn tiger_beetle_optimization(
+  config : TBOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  // every beetle starts with its own persistent prey target
+  let prey : Array[Int32] = []
+  for _i in 0..<pop_size {
+    prey.push(
+      (RNG::next(current_rng) * pop_size.to_double()).to_int() % pop_size,
+    )
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let old_fit = fits[i]
+      let tbf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      let mut chased = false
+      if r1 < 0.55 {
+        // chase: keep the same prey while it is still worth pursuing; if the
+        // target has become worse than the beetle, chase the global best
+        let promising = fits[prey[i]] <= old_fit
+        let xp = if promising { pop[prey[i]] } else { best_pos }
+        let j = (r2 * pop_size.to_double()).to_int() % pop_size
+        let k = (r3 * pop_size.to_double()).to_int() % pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            1.4 * tbf * (xp[d] - xi[d]) +
+            0.3 * tbf * (best_pos[d] - xi[d]) +
+            0.4 * r2 * tbf * (xj[d] - xk[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.06 * tbf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        chased = true
+      } else if r1 < 0.85 {
+        // ambush: stay near the burrow, a fine jitter keeps diversity
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.08 * tbf * tbf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // relocate: pick a fresh prey and lunge toward it
+        let p = (r2 * pop_size.to_double()).to_int() % pop_size
+        prey[i] = p
+        let xp = pop[p]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (xp[d] - xi[d]) * (0.3 + 0.6 * r3) * tbf +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10 * tbf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+      // failure-triggered retargeting: a failed chase means the prey is stale
+      if chased && fv >= old_fit {
+        prey[i] = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== Lyrebird Optimization Algorithm (2023) =====
+
+///|
+pub struct LyrebirdConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_lyrebird_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> LyrebirdConfig {
+  LyrebirdConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Lyrebird Optimization Algorithm (2023).  The mimicry factor
+/// lbf = e^{-t/2500} shrinks all strides as evaluations are spent:
+///   * mimicry - a contiguous block of the song (a random half of the
+///     dimensions) is imitated from the better of two random tutors, while
+///     the remaining dimensions keep a pull toward the global best, so the
+///     song is assembled from a borrowed phrase plus its own best phrase;
+///   * escape - flee a randomly chosen threat, which keeps the flock diverse;
+///   * refine - a fine jitter around the global best tightens the search.
+pub fn lyrebird_optimization(
+  config : LyrebirdConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let block_len = if dim / 2 < 1 { 1 } else { dim / 2 }
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let lbf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.55 {
+        // mimicry: borrow a contiguous phrase from a random tutor
+        let j = (r2 * pop_size.to_double()).to_int() % pop_size
+        let k = (r3 * pop_size.to_double()).to_int() % pop_size
+        let tutor = if fits[j] <= fits[k] { pop[j] } else { pop[k] }
+        let start = (r2 * dim.to_double()).to_int() % dim
+        for d in 0..<dim {
+          let in_block = if start + block_len <= dim {
+            d >= start && d < start + block_len
+          } else {
+            d >= start || d < start + block_len - dim
+          }
+          if in_block {
+            let nv = xi[d] +
+              1.1 * lbf * (tutor[d] - xi[d]) +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.08 * lbf
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          } else {
+            let nv = xi[d] +
+              0.9 * lbf * (best_pos[d] - xi[d]) +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.04 * lbf
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        }
+      } else if r1 < 0.80 {
+        // escape: flee a random threat
+        let j = (r2 * pop_size.to_double()).to_int() % pop_size
+        let xt = pop[j]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            0.5 * r2 * lbf * (xi[d] - xt[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.06 * lbf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // refine: a fine jitter around the global best
+        for d in 0..<dim {
+          let nv = xi[d] +
+            1.3 * lbf * (best_pos[d] - xi[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.02 * lbf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== Social Emotional Optimization Algorithm (2010) =====
+
+///|
+pub struct SEOAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_seoa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SEOAConfig {
+  SEOAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Social Emotional Optimization Algorithm (2010).  Every individual keeps an
+/// emotional state emotion_i in [0.05, 1] that rises after a successful move
+/// and falls after a failed one, while the social factor esf = e^{-t/2500}
+/// shrinks all strides:
+///   * aggressive - with probability emotion_i the individual attacks toward
+///     the global best, with a differential kick and a jitter;
+///   * defensive - otherwise it retreats from a random peer and jitters, which
+///     keeps the population diverse and lets anxious individuals explore.
+/// Confident (successful) individuals thus exploit more, while anxious ones
+/// keep exploring.
+pub fn social_emotional_optimization(
+  config : SEOAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  // initial emotional states are spread in [0.3, 0.7)
+  let emotion : Array[Double] = []
+  for _i in 0..<pop_size {
+    emotion.push(0.3 + 0.4 * RNG::next(current_rng))
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let old_fit = fits[i]
+      let esf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < emotion[i] {
+        // aggressive behavior: attack toward the global best
+        let j = (r2 * pop_size.to_double()).to_int() % pop_size
+        let k = (r3 * pop_size.to_double()).to_int() % pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            1.6 * esf * (best_pos[d] - xi[d]) +
+            0.45 * r2 * esf * (xj[d] - xk[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05 * esf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // defensive behavior: retreat from a random peer
+        let j = (r2 * pop_size.to_double()).to_int() % pop_size
+        let xj = pop[j]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            0.6 * r2 * esf * (xi[d] - xj[d]) +
+            0.2 * esf * (best_pos[d] - xi[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.06 * esf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      // emotional update from the success or failure of the move
+      if fv < old_fit {
+        emotion[i] = min(1.0, emotion[i] + 0.3)
+      } else {
+        emotion[i] = max(0.05, emotion[i] - 0.2)
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== Guineafowl Optimizer (2022) =====
+
+///|
+pub struct GuineafowlConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_guineafowl_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> GuineafowlConfig {
+  GuineafowlConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Guineafowl Optimizer (2022).  The flock carries a shared alarm counter that
+/// rises on every round without improvement and resets whenever the best
+/// feeding spot improves, while the foraging factor gff = e^{-t/2500} shrinks
+/// all strides:
+///   * forage - head for the best feeding spot with a differential kick and a
+///     jitter;
+///   * patrol - a fine jitter that keeps the flock diverse;
+///   * regroup - drift back toward the flock centroid;
+///   * startle - once the alarm reaches the threshold, the whole flock
+///     scatters away from the centroid for one round, then the alarm resets.
+/// The population-level alarm counter (rather than a per-individual memory or
+/// a per-step probability) is what synchronises the collective escape.
+pub fn guineafowl_optimization(
+  config : GuineafowlConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  let inv_pop = 1.0 / pop_size.to_double()
+  let mut alarm = 0
+
+  while evaluations < max_evals {
+    // flock centroid for regrouping and startle directions
+    let centroid : Array[Double] = []
+    for _d in 0..<dim {
+      centroid.push(0.0)
+    }
+    for i in 0..<pop_size {
+      for d in 0..<dim {
+        centroid[d] = centroid[d] + pop[i][d]
+      }
+    }
+    for d in 0..<dim {
+      centroid[d] = centroid[d] * inv_pop
+    }
+
+    let start_best = best_val
+    let scattered = alarm >= 5
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let gff = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if scattered {
+        // flock startle: scatter away from the flock centre
+        for d in 0..<dim {
+          let nv = xi[d] +
+            1.0 * gff * (xi[d] - centroid[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.20 * gff
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < 0.65 {
+        // forage: head for the best feeding spot
+        let j = (r2 * pop_size.to_double()).to_int() % pop_size
+        let k = (r3 * pop_size.to_double()).to_int() % pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            1.5 * gff * (best_pos[d] - xi[d]) +
+            0.45 * r2 * gff * (xj[d] - xk[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.06 * gff
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < 0.85 {
+        // patrol: a fine jitter keeps the flock diverse
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05 * gff * gff
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // regroup: drift back toward the flock centre
+        for d in 0..<dim {
+          let nv = xi[d] +
+            0.8 * gff * (centroid[d] - xi[d]) +
+            (2.0 * r2 - 1.0) * span * 0.03 * gff
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+
+    // shared alarm: reset on improvement, rise on stagnation
+    if best_val < start_best {
+      alarm = 0
+    } else {
+      alarm = alarm + 1
+    }
+    if scattered {
+      alarm = 0
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== Dolphin Echolocation Optimization (2013) =====
+
+///|
+pub struct DolphinConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_dolphin_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> DolphinConfig {
+  DolphinConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Dolphin Echolocation Optimization (2013).  Every dolphin keeps its own
+/// echolocation radius, which widens after a successful ping and narrows after
+/// a failed one, while the sonar factor dsf = e^{-t/2500} shrinks the pull
+/// toward the champion:
+///   * echo search - probe a random point inside the individual radius, so a
+///     dolphin that keeps failing explores a wider volume;
+///   * strongest echo - head toward the global best, refining locally once the
+///     radius has contracted.
+pub fn dolphin_optimization(
+  config : DolphinConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  let radius : Array[Double] = []
+  for _i in 0..<pop_size {
+    radius.push(span * 0.2)
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let old_fit = fits[i]
+      let dsf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.5 {
+        // echo search: probe inside the individual sonar radius
+        for d in 0..<dim {
+          let nv = xi[d] + (2.0 * RNG::next(current_rng) - 1.0) * radius[i]
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // strongest echo: head toward the champion
+        let j = (r2 * pop_size.to_double()).to_int() % pop_size
+        let k = (r3 * pop_size.to_double()).to_int() % pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            1.4 * dsf * (best_pos[d] - xi[d]) +
+            0.35 * r2 * dsf * (xj[d] - xk[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.03 * dsf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      // sonar radius adapts to the outcome of the ping
+      if fv < old_fit {
+        radius[i] = min(span * 0.5, radius[i] * 1.15)
+      } else {
+        radius[i] = max(span * 0.002, radius[i] * 0.85)
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

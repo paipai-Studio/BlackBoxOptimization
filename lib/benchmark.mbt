@@ -1302,6 +1302,750 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       henry_gas_solubility_optimization(make_hgso_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "COOT",
+    run: (e, d, b, r, f) => {
+      coot_optimization_algorithm(make_coot_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "DOA",
+    run: (e, d, b, r, f) => {
+      dingo_optimization_algorithm(make_doa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "STOA",
+    run: (e, d, b, r, f) => {
+      sooty_tern_optimization_algorithm(make_stoa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "GKSO",
+    run: (e, d, b, r, f) => {
+      genghis_khan_shark_optimizer(make_gkso_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "FLA",
+    run: (e, d, b, r, f) => {
+      ficks_law_algorithm(make_fla_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "HO",
+    run: (e, d, b, r, f) => {
+      hippopotamus_optimization_algorithm(make_ho_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "NMRA",
+    run: (e, d, b, r, f) => {
+      naked_mole_rat_algorithm(make_nmra_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "FFO",
+    run: (e, d, b, r, f) => {
+      fennec_fox_optimization_algorithm(make_ffo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "EPO",
+    run: (e, d, b, r, f) => {
+      emperor_penguin_optimization_algorithm(make_epo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "CPO",
+    run: (e, d, b, r, f) => {
+      crested_porcupine_optimizer(make_cpo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "MTBO",
+    run: (e, d, b, r, f) => {
+      mountaineering_team_based_optimization(
+        make_mtbo_config(e, d, b, 25),
+        f,
+        r,
+      )
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "CryStAl",
+    run: (e, d, b, r, f) => {
+      crystal_structure_algorithm(
+        make_crystal_structure_config(e, d, b, 25),
+        f,
+        r,
+      )
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "NOA",
+    run: (e, d, b, r, f) => {
+      nutcracker_optimization_algorithm(make_noa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "ESOA",
+    run: (e, d, b, r, f) => {
+      egret_swarm_optimization_algorithm(make_esoa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "MOA",
+    run: (e, d, b, r, f) => {
+      meerkat_optimization_algorithm(make_moa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "AOS",
+    run: (e, d, b, r, f) => {
+      atomic_orbital_search(make_aos_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "MA",
+    run: (e, d, b, r, f) => {
+      mayfly_optimization_algorithm(make_ma_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SSO",
+    run: (e, d, b, r, f) => {
+      social_spider_optimization(make_sso_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SLnO",
+    run: (e, d, b, r, f) => {
+      sea_lion_optimization_algorithm(make_sea_lion_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "FOA",
+    run: (e, d, b, r, f) => {
+      fruit_fly_optimization_algorithm(make_foa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SFO",
+    run: (e, d, b, r, f) => {
+      sunflower_optimization_algorithm(make_sfo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "NNA",
+    run: (e, d, b, r, f) => {
+      neural_network_algorithm(make_nna_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "PBO",
+    run: (e, d, b, r, f) => {
+      polar_bear_optimization(make_pbo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "FSS",
+    run: (e, d, b, r, f) => {
+      fish_school_search(make_fss_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "CFO",
+    run: (e, d, b, r, f) => {
+      central_force_optimization(make_cfo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "CGO",
+    run: (e, d, b, r, f) => {
+      chaos_game_optimization(make_cgo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "CDO",
+    run: (e, d, b, r, f) => {
+      chernobyl_disaster_optimizer(make_cdo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "ILS",
+    run: (e, d, b, r, f) => {
+      iterated_local_search(make_ils_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SCE",
+    run: (e, d, b, r, f) => {
+      shuffled_complex_evolution(make_sce_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "GRASP",
+    run: (e, d, b, r, f) => {
+      greedy_randomized_adaptive_search(make_grasp_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "BO",
+    run: (e, d, b, r, f) => bonobo_optimizer(make_bo_config(e, d, b, 25), f, r),
+  })
+  entries.push(AlgoEntry::{
+    name: "FSA",
+    run: (e, d, b, r, f) => {
+      flamingo_search_algorithm(make_fsa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SMO",
+    run: (e, d, b, r, f) => {
+      spider_monkey_optimization(make_smo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "HLO",
+    run: (e, d, b, r, f) => {
+      human_learning_optimization(make_hlo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "FDA",
+    run: (e, d, b, r, f) => {
+      flow_direction_algorithm(make_fda_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "CRO",
+    run: (e, d, b, r, f) => {
+      coral_reefs_optimization(make_cro_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "AAA",
+    run: (e, d, b, r, f) => {
+      artificial_algae_algorithm(make_aaa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "VSA",
+    run: (e, d, b, r, f) => {
+      vortex_search_algorithm(make_vsa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "VPL",
+    run: (e, d, b, r, f) => {
+      volleyball_premier_league(make_vpl_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "WEO",
+    run: (e, d, b, r, f) => {
+      water_evaporation_optimization(make_weo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SNS",
+    run: (e, d, b, r, f) => {
+      social_network_search(make_sns_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "TCO",
+    run: (e, d, b, r, f) => {
+      termite_colony_optimization(make_tco_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "RO",
+    run: (e, d, b, r, f) => ray_optimization(make_ro_config(e, d, b, 25), f, r),
+  })
+  entries.push(AlgoEntry::{
+    name: "GbSA",
+    run: (e, d, b, r, f) => {
+      galaxy_based_search_algorithm(make_gbsa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "BA",
+    run: (e, d, b, r, f) => bees_algorithm(make_ba_config(e, d, b, 25), f, r),
+  })
+  entries.push(AlgoEntry::{
+    name: "CO",
+    run: (e, d, b, r, f) => cheetah_optimizer(make_co_config(e, d, b, 25), f, r),
+  })
+  entries.push(AlgoEntry::{
+    name: "CSS",
+    run: (e, d, b, r, f) => {
+      charged_system_search(make_css_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "MBA",
+    run: (e, d, b, r, f) => {
+      mine_blast_algorithm(make_mba_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "PCA",
+    run: (e, d, b, r, f) => {
+      particle_collision_algorithm(make_pca_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "IMO",
+    run: (e, d, b, r, f) => {
+      ions_motion_optimization(make_imo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "EMA",
+    run: (e, d, b, r, f) => {
+      exchange_market_algorithm(make_ema_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "WCO",
+    run: (e, d, b, r, f) => {
+      world_cup_optimization(make_wco_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "AEFA",
+    run: (e, d, b, r, f) => {
+      artificial_electric_field_algorithm(make_aefa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "OIO",
+    run: (e, d, b, r, f) => {
+      optics_inspired_optimization(make_oio_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "LAPO",
+    run: (e, d, b, r, f) => {
+      lightning_attachment_procedure_optimization(
+        make_lapo_config(e, d, b, 25),
+        f,
+        r,
+      )
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "FGBO",
+    run: (e, d, b, r, f) => {
+      football_game_based_optimization(make_fgbo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "EA",
+    run: (e, d, b, r, f) => {
+      earthquake_algorithm(make_ea_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "LAHC",
+    run: (e, d, b, r, f) => {
+      late_acceptance_hill_climbing(make_lahc_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "HuS",
+    run: (e, d, b, r, f) => {
+      hunting_search_algorithm(make_hus_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "RRT",
+    run: (e, d, b, r, f) => {
+      record_to_record_travel(make_rrt_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "NRO",
+    run: (e, d, b, r, f) => {
+      nuclear_reaction_optimization(make_nro_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "HTS",
+    run: (e, d, b, r, f) => {
+      heat_transfer_search(make_hts_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "PGO",
+    run: (e, d, b, r, f) => {
+      plasma_generation_optimization(make_pgo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "IWD",
+    run: (e, d, b, r, f) => {
+      intelligent_water_drops(make_iwd_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "RFD",
+    run: (e, d, b, r, f) => {
+      river_formation_dynamics(make_rfd_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "LSA",
+    run: (e, d, b, r, f) => {
+      lightning_search_algorithm(make_lsa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SS",
+    run: (e, d, b, r, f) => scatter_search(make_ss_config(e, d, b, 25), f, r),
+  })
+  entries.push(AlgoEntry::{
+    name: "OBA",
+    run: (e, d, b, r, f) => {
+      old_bachelor_acceptance(make_oba_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "APO",
+    run: (e, d, b, r, f) => {
+      artificial_physics_optimization(make_apo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "HBO",
+    run: (e, d, b, r, f) => {
+      heap_based_optimizer(make_hbo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SAO",
+    run: (e, d, b, r, f) => {
+      snow_ablation_optimizer(make_sao_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "BRO",
+    run: (e, d, b, r, f) => {
+      battle_royale_optimization(make_bro_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "EFO",
+    run: (e, d, b, r, f) => {
+      electromagnetic_field_optimization(make_efo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "GBMO",
+    run: (e, d, b, r, f) => {
+      gases_brownian_motion_optimization(make_gbmo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "DSA",
+    run: (e, d, b, r, f) => {
+      differential_search_algorithm(make_dsa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "GSK",
+    run: (e, d, b, r, f) => {
+      gaining_sharing_knowledge(make_gsk_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "ALNS",
+    run: (e, d, b, r, f) => {
+      adaptive_large_neighborhood_search(make_alns_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SGO",
+    run: (e, d, b, r, f) => {
+      social_group_optimization(make_sgo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "ASO",
+    run: (e, d, b, r, f) => {
+      atom_search_optimization(make_aso_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "BCMO",
+    run: (e, d, b, r, f) => {
+      balancing_composite_motion_optimization(
+        make_bcmo_config(e, d, b, 25),
+        f,
+        r,
+      )
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "MKE",
+    run: (e, d, b, r, f) => {
+      monkey_king_evolution(make_mke_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "RFO",
+    run: (e, d, b, r, f) => {
+      red_fox_optimization(make_rfo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SAR",
+    run: (e, d, b, r, f) => {
+      search_and_rescue_optimization(make_sar_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "ChSA",
+    run: (e, d, b, r, f) => {
+      chameleon_swarm_algorithm(make_chsa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "RDA",
+    run: (e, d, b, r, f) => {
+      red_deer_algorithm(make_rda_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SqSA",
+    run: (e, d, b, r, f) => {
+      squirrel_search_algorithm(make_sqsa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "Puma",
+    run: (e, d, b, r, f) => puma_optimizer(make_puma_config(e, d, b, 25), f, r),
+  })
+  entries.push(AlgoEntry::{
+    name: "StMO",
+    run: (e, d, b, r, f) => {
+      starling_murmuration_optimizer(make_stmo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SFOA",
+    run: (e, d, b, r, f) => {
+      swordfish_optimization(make_sfoa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "ABO",
+    run: (e, d, b, r, f) => {
+      african_buffalo_optimization(make_abo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "Gannet",
+    run: (e, d, b, r, f) => {
+      gannet_optimization(make_gannet_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "Narwhal",
+    run: (e, d, b, r, f) => {
+      narwhal_optimizer(make_narwhal_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "Serval",
+    run: (e, d, b, r, f) => {
+      serval_optimization(make_serval_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "ChSO",
+    run: (e, d, b, r, f) => {
+      chicken_swarm_optimization(make_chso_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "PR",
+    run: (e, d, b, r, f) => path_relinking(make_pr_config(e, d, b, 25), f, r),
+  })
+  entries.push(AlgoEntry::{
+    name: "CrSO",
+    run: (e, d, b, r, f) => {
+      cockroach_swarm_optimization(make_crso_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "JS",
+    run: (e, d, b, r, f) => {
+      jellyfish_search_optimizer(make_js_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "WSA",
+    run: (e, d, b, r, f) => {
+      water_strider_algorithm(make_wsa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SeHO",
+    run: (e, d, b, r, f) => {
+      sea_horse_optimizer(make_seho_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "WBO",
+    run: (e, d, b, r, f) => {
+      wildebeest_herd_optimization(make_wbo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "OWL",
+    run: (e, d, b, r, f) => owl_optimization(make_owl_config(e, d, b, 25), f, r),
+  })
+  entries.push(AlgoEntry::{
+    name: "RRO",
+    run: (e, d, b, r, f) => {
+      raven_roosting_optimization(make_rro_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SaFO",
+    run: (e, d, b, r, f) => {
+      sailfish_optimizer(make_safo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "GPC",
+    run: (e, d, b, r, f) => {
+      giza_pyramids_construction(make_gpc_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SSD",
+    run: (e, d, b, r, f) => {
+      social_ski_driver(make_ssd_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "FDO",
+    run: (e, d, b, r, f) => {
+      fitness_dependent_optimizer(make_fdo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "CFA",
+    run: (e, d, b, r, f) => {
+      cuttlefish_optimization(make_cfa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "OPA",
+    run: (e, d, b, r, f) => {
+      orca_predation_algorithm(make_opa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "APuf",
+    run: (e, d, b, r, f) => {
+      arctic_puffin_optimization(make_apuf_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "WPA",
+    run: (e, d, b, r, f) => {
+      wolf_pack_algorithm(make_wpa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "Racc",
+    run: (e, d, b, r, f) => {
+      raccoon_optimization(make_racc_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "Monkey",
+    run: (e, d, b, r, f) => {
+      monkey_search_algorithm(make_monkey_search_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "BSwA",
+    run: (e, d, b, r, f) => {
+      bird_swarm_algorithm(make_bswa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "TGA",
+    run: (e, d, b, r, f) => {
+      tree_growth_algorithm(make_tga_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "PPA",
+    run: (e, d, b, r, f) => {
+      plant_propagation_algorithm(make_ppa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "HBMO",
+    run: (e, d, b, r, f) => {
+      honey_bee_mating_optimization(make_hbmo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "Crayfish",
+    run: (e, d, b, r, f) => {
+      crayfish_optimization(make_crayfish_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "QSA",
+    run: (e, d, b, r, f) => {
+      queuing_search_algorithm(make_qsa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "Starfish",
+    run: (e, d, b, r, f) => {
+      starfish_optimization(make_starfish_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "TBO",
+    run: (e, d, b, r, f) => {
+      tiger_beetle_optimization(make_tbo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "Lyrebird",
+    run: (e, d, b, r, f) => {
+      lyrebird_optimization(make_lyrebird_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SEOA",
+    run: (e, d, b, r, f) => {
+      social_emotional_optimization(make_seoa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "GFO",
+    run: (e, d, b, r, f) => {
+      guineafowl_optimization(make_guineafowl_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "DEO",
+    run: (e, d, b, r, f) => {
+      dolphin_optimization(make_dolphin_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
