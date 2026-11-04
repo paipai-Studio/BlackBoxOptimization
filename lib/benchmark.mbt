@@ -2158,6 +2158,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       newuoa_optimizer(make_newuoa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "PA",
+    run: (e, d, b, r, f) => {
+      population_annealing(make_population_annealing_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

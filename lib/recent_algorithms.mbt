@@ -35619,3 +35619,177 @@ pub fn newuoa_optimizer(
     evaluations,
   }
 }
+
+// ===== PA: Population Annealing (2003) =====
+
+///|
+pub struct PopulationAnnealingConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_population_annealing_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> PopulationAnnealingConfig {
+  PopulationAnnealingConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Population Annealing (Hukushima & Iba 2003). A population of replicas is
+/// evolved at one common annealing temperature with Metropolis moves, and
+/// every few generations the population is systematically resampled in
+/// proportion to its Boltzmann weights: fitter replicas are copied and less
+/// fit ones disappear. Each resampled replica receives a small perturbation so
+/// that duplicated copies do not become identical. Unlike parallel tempering
+/// (which swaps replicas across different temperatures) the defining move here
+/// is the Boltzmann-weighted replication/discard of the whole population at a
+/// single scheduled temperature. The historical best is tracked separately.
+pub fn population_annealing(
+  config : PopulationAnnealingConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let pop_size = if config.population_size <= 0 {
+    1
+  } else {
+    config.population_size
+  }
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _i in 0..<pop_size {
+    let sol = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, sol)
+    evaluations = evaluations + 1
+    pop.push(sol)
+    fits.push(v)
+    if !have_best || v < best_val {
+      best_val = v
+      best_pos = sol
+      have_best = true
+    }
+  }
+
+  let f0_abs = if best_val < 0.0 { -best_val } else { best_val }
+  let t0 = 0.20 * (1.0 + f0_abs)
+  let mut generation = 0
+
+  while evaluations < max_evals {
+    let raw_frac = evaluations.to_double() / max_evals.to_double()
+    let frac = if raw_frac > 1.0 { 1.0 } else { raw_frac }
+    let decay = 1.0 - frac
+    let temp = t0 * (decay * decay + 0.02) + 1.0e-9
+    let step = span * (0.12 * decay + 0.005)
+    let pull = 0.35 * decay
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = xi[d] +
+          pull * (best_pos[d] - xi[d]) +
+          (2.0 * RNG::next(current_rng) - 1.0) * step
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      let de = fv - fits[i]
+      let accept = if de <= 0.0 {
+        true
+      } else {
+        RNG::next(current_rng) < @math.exp(-de / temp)
+      }
+      if accept {
+        pop[i] = cand
+        fits[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+    generation = generation + 1
+    if generation % 4 == 0 && frac < 0.75 && evaluations < max_evals {
+      // Boltzmann-weighted resampling of the whole population
+      let mut fmin = fits[0]
+      for i in 1..<pop_size {
+        if fits[i] < fmin {
+          fmin = fits[i]
+        }
+      }
+      let w : Array[Double] = []
+      let mut total = 0.0
+      for i in 0..<pop_size {
+        let dw = @math.exp(-(fits[i] - fmin) / temp)
+        let wi = if dw > 1.0e-12 { dw } else { 1.0e-12 }
+        w.push(wi)
+        total = total + wi
+      }
+      let newpop : Array[Array[Double]] = []
+      for _i in 0..<pop_size {
+        let u = RNG::next(current_rng) * total
+        let mut acc = 0.0
+        let mut pick = 0
+        let mut found = false
+        for k in 0..<pop_size {
+          acc = acc + w[k]
+          if acc >= u && !found {
+            pick = k
+            found = true
+          }
+        }
+        let parent = pop[pick]
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let nv = parent[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.04 * decay
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        newpop.push(cand)
+      }
+      for i in 0..<pop_size {
+        if evaluations >= max_evals {
+          break
+        }
+        let cand = newpop[i]
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        pop[i] = cand
+        fits[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
