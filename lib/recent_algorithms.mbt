@@ -34820,3 +34820,126 @@ pub fn dual_annealing(
     evaluations,
   }
 }
+
+// ===== SQA: Simulated Quantum Annealing (1998) =====
+
+///|
+pub struct SqaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_sqa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SqaConfig {
+  SqaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Simulated Quantum Annealing (Kadowaki & Nishimori 1998). Besides the
+/// classical thermal fluctuation of simulated annealing, a move may be a
+/// quantum tunnelling event: the transverse field Gamma drives a whole-vector
+/// displacement along one shared direction (every coordinate moves together,
+/// as a tunnelling spin flip would), with amplitude decaying as Gamma -> 0.
+/// The other moves are ordinary per-coordinate heat fluctuations plus a
+/// decaying bias toward the incumbent best. Candidates follow the Metropolis
+/// rule, and the budget is split among random restarts so a trapped anneal can
+/// be abandoned for a fresh basin.
+pub fn simulated_quantum_annealing(
+  config : SqaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let restarts = 8
+  let raw_seg = max_evals / restarts
+  let seg_budget = if raw_seg < 16 { 16 } else { raw_seg }
+
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _r in 0..<restarts {
+    if evaluations >= max_evals {
+      break
+    }
+    let mut x = random_solution(dim, bounds, current_rng)
+    let mut fx = evaluate(f, x)
+    evaluations = evaluations + 1
+    if !have_best || fx < best_val {
+      best_val = fx
+      best_pos = x
+      have_best = true
+    }
+    let mut seg_used = 1
+    let f0 = fx
+    let f0_abs = if f0 < 0.0 { -f0 } else { f0 }
+    let t0 = 0.20 * (1.0 + f0_abs)
+    while seg_used < seg_budget && evaluations < max_evals {
+      let frac = seg_used.to_double() / seg_budget.to_double()
+      let decay = 1.0 - frac
+      let gamma = decay * decay
+      let temp = t0 * gamma + 1.0e-9
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.25 {
+        // quantum tunnelling: one shared displacement for every coordinate
+        let tunnel = (2.0 * RNG::next(current_rng) - 1.0) * span * 0.30 * gamma
+        for d in 0..<dim {
+          let nv = x[d] +
+            tunnel +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.03 * decay
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // classical thermal fluctuation with a decaying bias to the best
+        let pull = 0.30 * decay
+        for d in 0..<dim {
+          let nv = x[d] +
+            pull * (best_pos[d] - x[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * (0.20 * decay + 0.01)
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      seg_used = seg_used + 1
+      let de = fv - fx
+      let accept = if de <= 0.0 {
+        true
+      } else {
+        RNG::next(current_rng) < @math.exp(-de / temp)
+      }
+      if accept {
+        x = cand
+        fx = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

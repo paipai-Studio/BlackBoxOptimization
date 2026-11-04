@@ -2128,6 +2128,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       dual_annealing(make_dual_annealing_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SQA",
+    run: (e, d, b, r, f) => {
+      simulated_quantum_annealing(make_sqa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

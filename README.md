@@ -1,10 +1,10 @@
 # BlackBoxOptimization
 
-基于 MoonBit 实现的黑盒优化算法框架，支持 314 种经典优化算法，提供统一的接口和基准测试框架。
+基于 MoonBit 实现的黑盒优化算法框架，支持 315 种经典优化算法，提供统一的接口和基准测试框架。
 
 ## 算法分类
 
-本框架实现了 **314 种**黑盒优化算法，按设计灵感和机制分为以下类别：
+本框架实现了 **315 种**黑盒优化算法，按设计灵感和机制分为以下类别：
 
 ### 🔍 单点搜索算法
 最简单的优化策略，从单个初始解出发，通过迭代改进逐步逼近最优值。
@@ -20,6 +20,7 @@
 | 平行回火优化 | PTO | 多温度副本并行 Metropolis 移动（冷副本贪心精修、热副本热噪声探索）+ 相邻温度对 Metropolis 交换传递发现 (1986) |
 | BFGS 拟牛顿法 | BFGS | 数值梯度 + 逆 Hessian 近似（BFGS 更新）+ Armijo 回溯线搜索 + 停滞动态重启与 informed 逃逸 (1970) |
 | 双重退火算法 | DAnl | 外层模拟退火（二次降温 + Metropolis 接受）与内层贪婪模式搜索局部精修交替 + 多起点分段预算 (1997) |
+| 模拟量子退火算法 | SQA | 经典热涨落（逐维扰动 + Metropolis）与量子隧穿（横向场驱动的全维同向大位移，幅度随横向场衰减）混合 + 衰减向最优偏置 + 多起点分段预算 (1998) |
 
 > **通用参数**: 所有算法均包含 `max_evals`（最大评估次数）、`dim`（维度）、`bounds`（搜索边界）三个基础参数。
 
@@ -28,7 +29,7 @@
 | Random Search | 无需额外参数 | - |
 | Hill Climbing | 无需额外参数 | - |
 | Simulated Annealing | `initial_temp`（初始温度）, `cooling_rate`（降温速率）, `step_size`（步长） | 100.0, 0.995, 0.5 |
-| SPSA / Basin Hopping / BAS / PTO / BFGS / DAnl | 仅需 `population_size` | 25 |
+| SPSA / Basin Hopping / BAS / PTO / BFGS / DAnl / SQA | 仅需 `population_size` | 25 |
 
 ### 🔧 局部搜索算法
 强化局部开发能力，通过记忆或惩罚机制避免陷入循环。
@@ -543,7 +544,7 @@ moon run main
 ### 运行测试
 
 ```bash
-# 运行所有测试（650 个测试用例）
+# 运行所有测试（652 个测试用例）
 moon test
 
 # 代码检查
@@ -1000,7 +1001,7 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 
 | 类别 | 代表算法 | 特点 |
 |------|----------|------|
-| **🔍 单点搜索** | 随机搜索、爬山法、模拟退火、SPSA、盆地跳跃、BAS、PTO、DAnl | 简单、易于实现，适合低维问题 |
+| **🔍 单点搜索** | 随机搜索、爬山法、模拟退火、SPSA、盆地跳跃、BAS、PTO、DAnl、SQA | 简单、易于实现，适合低维问题 |
 | **🔧 局部搜索** | 禁忌搜索、引导局部搜索、大洪水、变邻域、阈值接受 | 强化局部开发，避免陷入局部最优 |
 | **🧬 进化算法** | DE、GA、jDE、SHADE、JADE、SaDE、Memetic、CLONALG、ICA、BBO、BSA | 基于种群进化，鲁棒性好 |
 | **🐝 群体智能** | PSO、萤火虫、蚁群、蜂群、灰狼、鲸群、蝙蝠、和声、麻雀搜索、哈里斯鹰、GOA、SOA、CSO、GTO、SMA、AO、ChOA、DO、ZOA、CPSO、LPSO、QPSO、UPSO、ACOR、COOT、DOA、STOA、GKSO、FLA、HO、NMRA、FFO、EPO、CPO、MTBO、CryStAl、NOA、ESOA、MOA、AOS、MA、SSO、SLnO、FOA、SFO、NNA、PBO、FSS、CFO、CGO、CDO、ILS、SCE、GRASP、BO、FSA、SMO、HLO、FDA、CRO、AAA、VSA、VPL、WEO、SNS、TCO、RO、GbSA、BA、CO、CSS、MBA、PCA、IMO、EMA、WCO、AEFA、OIO、LAPO、FGBO、EA、LAHC、HuS、RRT、NRO、HTS、PGO、IWD、RFD、LSA、SS、OBA、APO、HBO、SAO、BRO、EFO、GBMO、DSA、GSK、ALNS、SGO、ASO、BCMO、MKE、RFO、SAR、ChSA、RDA、SqSA、Puma、StMO、SFOA、ABO、Gannet、Narwhal、Serval、ChSO、PR、CrSO、JS、WSA、SeHO、WBO、OWL、RRO、SaFO、GPC、SSD、FDO、CFA、OPA、APuf、WPA、Racc、Monkey、BSwA、TGA、PPA、HBMO、Crayfish、QSA、Starfish、TBO、Lyrebird、SEOA、GFO、DEO、ManSA、EWA、GrSA、FrOA、ChRO、SPBO、CLPSO、ExtO、SOMA、SDS 等 | 基于群体行为，全局搜索能力强 |
