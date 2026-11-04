@@ -2070,6 +2070,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       group_search_optimization(make_grsa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "FrOA",
+    run: (e, d, b, r, f) => {
+      forest_optimization(make_froa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

@@ -33137,3 +33137,174 @@ pub fn group_search_optimization(
     evaluations,
   }
 }
+
+// ===== FrOA: Forest Optimization Algorithm (2015) =====
+
+///|
+pub struct ForestConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_froa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ForestConfig {
+  ForestConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Forest Optimization Algorithm (Ghaemi & Feizi-Derakhshi 2015): trees
+/// spread seeds in two modes - local seeding mutates a single randomly
+/// chosen dimension of the incumbent (a coordinate-level move unlike the
+/// all-dimension updates of every other algorithm here), and
+/// distance-limited seeding leaps far toward the champion.  Every tree
+/// carries an age counter that grows each generation regardless of success;
+/// a sapling that beats its parent is adopted and its age resets, while a
+/// dead tree (age >= 8) is replaced by a random sapling or one near the
+/// champion.  The forest factor forf = e^{-t/2500} shrinks all steps.
+pub fn forest_optimization(
+  config : ForestConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  // tree age grows every generation; a successful sapling resets it
+  let age : Array[Int32] = []
+  for _i in 0..<pop_size {
+    age.push(0)
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let old_fit = fits[i]
+      let forf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      let mut new_age = age[i] + 1
+      let mut adopt = true
+      if r1 < 0.58 {
+        // local seeding: mutate one randomly chosen dimension only
+        let d = (RNG::next(current_rng) * dim.to_double()).to_int() % dim
+        for k in 0..<dim {
+          let nv = if k == d {
+            xi[k] + (2.0 * RNG::next(current_rng) - 1.0) * span * 0.15 * forf
+          } else {
+            xi[k]
+          }
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fv0 = evaluate(f, cand)
+        evaluations = evaluations + 1
+        // survival of the fittest: an inferior sapling does not replace
+        // its parent, the tree simply keeps ageing
+        if fv0 < old_fit {
+          new_age = 0
+          let fv = fv0
+          pop[i] = cand
+          fits[i] = fv
+          if fv < best_val {
+            best_val = fv
+            best_pos = cand
+          }
+        } else {
+          adopt = false
+        }
+      } else if r1 < 0.75 {
+        // distance-limited seeding: leap far toward the champion
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            1.2 * forf * (best_pos[d] - xi[d]) +
+            0.3 * (xj[d] - xi[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10 * forf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if age[i] >= 8 {
+        // dead tree: replace by a random sapling or one near the champion
+        new_age = 0
+        if RNG::next(current_rng) < 0.5 {
+          let p = random_solution(dim, bounds, current_rng)
+          for d in 0..<dim {
+            cand.push(p[d])
+          }
+        } else {
+          for d in 0..<dim {
+            let nv = best_pos[d] +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05 * forf
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        }
+      } else {
+        // standing tree: fine jitter keeps the forest diverse
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * forf * forf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      if adopt {
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        pop[i] = cand
+        fits[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+      age[i] = new_age
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
