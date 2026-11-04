@@ -2140,6 +2140,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       cobyla_optimizer(make_cobyla_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "NS",
+    run: (e, d, b, r, f) => {
+      nested_sampling(make_nested_sampling_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

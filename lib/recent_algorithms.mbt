@@ -35123,3 +35123,154 @@ pub fn cobyla_optimizer(
     evaluations,
   }
 }
+
+// ===== NS: Nested Sampling (2004) =====
+
+///|
+pub struct NestedSamplingConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_nested_sampling_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> NestedSamplingConfig {
+  NestedSamplingConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Nested Sampling (Skilling 2004). A fixed set of live points is maintained
+/// and, each round, the worst live point is discarded and replaced by a new
+/// sample drawn under the constraint that it must beat the discarded point.
+/// This gradually compresses the live set onto the high-likelihood region while
+/// the discarded points provide the shrinkage sequence. The constrained draw is
+/// implemented as a short random-walk MCMC from a randomly chosen surviving
+/// point (efficient even when the constrained region is tiny), with a
+/// best-centred fallback and a uniform re-seed when the walk fails repeatedly.
+/// The historical best is tracked separately.
+pub fn nested_sampling(
+  config : NestedSamplingConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let pop_size = if config.population_size <= 1 {
+    1
+  } else {
+    config.population_size
+  }
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _i in 0..<pop_size {
+    let sol = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, sol)
+    evaluations = evaluations + 1
+    pop.push(sol)
+    fits.push(v)
+    if !have_best || v < best_val {
+      best_val = v
+      best_pos = sol
+      have_best = true
+    }
+  }
+
+  while evaluations < max_evals {
+    // discard the worst live point; the replacement must beat its value
+    let mut worst = 0
+    for i in 1..<pop_size {
+      if fits[i] > fits[worst] {
+        worst = i
+      }
+    }
+    let threshold = fits[worst]
+    let mut accepted = false
+    let mut tries = 0
+    let max_tries = 8
+    while tries < max_tries && evaluations < max_evals && !accepted {
+      let raw_j = ((RNG::next(current_rng) * pop_size.to_double()).to_int() + 1) %
+        pop_size
+      let mut j = raw_j
+      if j == worst {
+        j = (j + 1) % pop_size
+      }
+      let xj = pop[j]
+      let decay = 1.0 - evaluations.to_double() / max_evals.to_double()
+      let step = span * (0.12 * decay + 0.001)
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = xj[d] + (2.0 * RNG::next(current_rng) - 1.0) * step
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      tries = tries + 1
+      if fv < threshold {
+        pop[worst] = cand
+        fits[worst] = fv
+        accepted = true
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+    if !accepted && evaluations < max_evals {
+      // fallback: shrink toward the incumbent best, then re-seed if needed
+      let decay = 1.0 - evaluations.to_double() / max_evals.to_double()
+      let step = span * (0.08 * decay + 0.001)
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = best_pos[d] + (2.0 * RNG::next(current_rng) - 1.0) * step
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < threshold {
+        pop[worst] = cand
+        fits[worst] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      } else if evaluations < max_evals {
+        // keep the live set diverse: replace with a fresh uniform sample
+        let fresh = random_solution(dim, bounds, current_rng)
+        let ff = evaluate(f, fresh)
+        evaluations = evaluations + 1
+        pop[worst] = fresh
+        fits[worst] = ff
+        if ff < best_val {
+          best_val = ff
+          best_pos = fresh
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
