@@ -2202,6 +2202,16 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       lshade_algorithm(make_lshade_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "1+1ES",
+    run: (e, d, b, r, f) => {
+      one_plus_one_evolution_strategy(
+        make_one_plus_one_es_config(e, d, b, 25),
+        f,
+        r,
+      )
+    },
+  })
   entries
 }
 

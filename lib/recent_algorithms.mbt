@@ -36926,3 +36926,141 @@ pub fn lshade_algorithm(
     evaluations,
   }
 }
+
+// ===== (1+1)-ES with the 1/5 success rule (1973) =====
+
+///|
+pub struct OnePlusOneEsConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_one_plus_one_es_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> OnePlusOneEsConfig {
+  OnePlusOneEsConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// (1+1) Evolution Strategy with Rechenberg's 1/5 success rule (Rechenberg
+/// 1973). A single parent mutates every coordinate with Gaussian noise scaled
+/// by a global step size sigma, and an offspring replaces the parent only when
+/// it improves. Every window of ten trials the success rate is compared with
+/// 1/5: sigma is divided by 0.82 when more than one fifth succeeded (the step
+/// is too small) and multiplied by 0.82 otherwise (the step is too large). The
+/// 1/5 rule is the defining adaptation mechanism, unlike the globally shrinking
+/// sigma of the (mu+lambda) ES or the rank-based natural gradient of
+/// xNES/CMA-ES. Random restarts, a long-stall jump toward the incumbent best
+/// and historical-best tracking make the single point robust. population_size
+/// is accepted for a uniform config interface but not used.
+pub fn one_plus_one_evolution_strategy(
+  config : OnePlusOneEsConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let restarts = 8
+  let raw_seg = max_evals / restarts
+  let seg_budget = if raw_seg < 24 { 24 } else { raw_seg }
+
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _r in 0..<restarts {
+    if evaluations >= max_evals {
+      break
+    }
+    let mut x = random_solution(dim, bounds, current_rng)
+    let mut fx = evaluate(f, x)
+    evaluations = evaluations + 1
+    if !have_best || fx < best_val {
+      best_val = fx
+      best_pos = x
+      have_best = true
+    }
+    let mut sigma = span * 0.25
+    let mut succ = 0
+    let mut tries = 0
+    let mut seg_used = 1
+    let mut stall = 0
+    while seg_used < seg_budget && evaluations < max_evals {
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let z = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+        let nv = x[d] + sigma * z
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      seg_used = seg_used + 1
+      tries = tries + 1
+      if fv < fx {
+        x = cand
+        fx = fv
+        succ = succ + 1
+        stall = 0
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      } else {
+        stall = stall + 1
+      }
+      if tries >= 10 {
+        let rate = succ.to_double() / 10.0
+        if rate > 0.2 {
+          sigma = min(sigma / 0.82, span * 0.5)
+        } else {
+          sigma = max(sigma * 0.82, span * 1.0e-7)
+        }
+        succ = 0
+        tries = 0
+      }
+      if stall >= 40 && evaluations < max_evals {
+        // long stall: jump toward the incumbent best
+        let jump : Array[Double] = []
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10
+          jump.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fj = evaluate(f, jump)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        x = jump
+        fx = fj
+        sigma = span * 0.10
+        succ = 0
+        tries = 0
+        stall = 0
+        if fj < best_val {
+          best_val = fj
+          best_pos = jump
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
