@@ -38377,3 +38377,217 @@ pub fn subplex_optimizer(
     evaluations,
   }
 }
+
+// ===== MLSL: multi-level single linkage (1987) =====
+
+///|
+pub struct MlslConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_mlsl_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> MlslConfig {
+  MlslConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn mlsl_halton(index : Int32, base : Int32) -> Double {
+  let mut result = 0.0
+  let mut f = 1.0
+  let mut i = index
+  while i > 0 {
+    f = f / base.to_double()
+    result = result + f * (i % base).to_double()
+    i = i / base
+  }
+  result
+}
+
+///|
+fn mlsl_base(d : Int32) -> Int32 {
+  let primes : Array[Int32] = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29]
+  let mut b = 31
+  if d < 10 {
+    b = primes[d]
+  }
+  b
+}
+
+///|
+/// Multi-Level Single-Linkage (Rinnooy Kan & Timmer 1987). Points are drawn
+/// from a low-discrepancy Halton sequence over the box, and a local pattern
+/// search is launched from a sample only when it is not already covered by an
+/// earlier local minimum: a point is skipped when it lies within the current
+/// critical distance of a previously found minimum. The critical distance
+/// shrinks like `(log k / k)^(1/dim)`, so early samples start many local
+/// searches while later samples are clustered and mostly skipped - the
+/// single-linkage clustering that distinguishes MLSL from plain multistart.
+/// Each local search uses a fixed budget, so a larger global budget strictly
+/// continues the same sequence and the historical best is monotone.
+pub fn multi_level_single_linkage(
+  config : MlslConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+
+  let shift : Array[Double] = []
+  for _d in 0..<dim {
+    shift.push(RNG::next(current_rng))
+  }
+
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let minima : Array[Array[Double]] = []
+  let mut idx = 1
+  let batch = 16
+  let local_budget = 140
+
+  while evaluations < max_evals {
+    let pts : Array[Array[Double]] = []
+    let fs : Array[Double] = []
+    for _b in 0..<batch {
+      if evaluations >= max_evals {
+        break
+      }
+      let p : Array[Double] = []
+      for d in 0..<dim {
+        let h = mlsl_halton(idx, mlsl_base(d))
+        let raw = h + shift[d]
+        let wrapped = raw - raw.to_int().to_double()
+        let v = bounds.min + wrapped * span
+        p.push(max(bounds.min, min(bounds.max, v)))
+      }
+      idx = idx + 1
+      let fv = evaluate(f, p)
+      evaluations = evaluations + 1
+      pts.push(p)
+      fs.push(fv)
+      if !have_best || fv < best_val {
+        best_val = fv
+        best_pos = p
+        have_best = true
+      }
+    }
+    if pts.length() == 0 {
+      break
+    }
+    let order = sort_indices(fs)
+    for k in 0..<pts.length() {
+      if evaluations >= max_evals {
+        break
+      }
+      let p = pts[order[k]]
+      let pf = fs[order[k]]
+      let kk = idx.to_double()
+      let crit = span *
+        0.15 *
+        @math.pow(@math.ln(kk) / kk, 1.0 / dim.to_double())
+      let mut skip = false
+      for q in 0..<minima.length() {
+        let mp = minima[q]
+        let mut dsq = 0.0
+        for d in 0..<dim {
+          let delta = p[d] - mp[d]
+          dsq = dsq + delta * delta
+        }
+        if dsq < crit * crit {
+          skip = true
+        }
+      }
+      if !skip {
+        let mut x = p
+        let mut fx = pf
+        let mut step = span * 0.15
+        let mut used = 0
+        while used < local_budget && evaluations < max_evals {
+          let mut best_c = x
+          let mut best_f = fx
+          let mut improved = false
+          for d in 0..<dim {
+            if evaluations >= max_evals {
+              break
+            }
+            let plus : Array[Double] = []
+            let minus : Array[Double] = []
+            for q in 0..<dim {
+              if q == d {
+                plus.push(max(bounds.min, min(bounds.max, x[q] + step)))
+                minus.push(max(bounds.min, min(bounds.max, x[q] - step)))
+              } else {
+                plus.push(x[q])
+                minus.push(x[q])
+              }
+            }
+            let fp = evaluate(f, plus)
+            evaluations = evaluations + 1
+            used = used + 1
+            if evaluations < max_evals {
+              let fm = evaluate(f, minus)
+              evaluations = evaluations + 1
+              used = used + 1
+              if fp < best_f {
+                best_f = fp
+                best_c = plus
+                improved = true
+              }
+              if fm < best_f {
+                best_f = fm
+                best_c = minus
+                improved = true
+              }
+            } else if fp < best_f {
+              best_f = fp
+              best_c = plus
+              improved = true
+            }
+          }
+          if improved {
+            x = best_c
+            fx = best_f
+            step = min(step * 1.2, span * 0.5)
+            if fx < best_val {
+              best_val = fx
+              best_pos = x
+            }
+          } else {
+            step = step * 0.5
+            if step < span * 1.0e-5 {
+              break
+            }
+          }
+        }
+        minima.push(x)
+        if fx < best_val {
+          best_val = fx
+          best_pos = x
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

@@ -2242,6 +2242,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       subplex_optimizer(make_subplex_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "MLSL",
+    run: (e, d, b, r, f) => {
+      multi_level_single_linkage(make_mlsl_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
