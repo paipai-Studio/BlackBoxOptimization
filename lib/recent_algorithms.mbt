@@ -36521,3 +36521,173 @@ pub fn multilevel_coordinate_search(
     evaluations,
   }
 }
+
+// ===== WL: Wang-Landau sampling (2001) =====
+
+///|
+fn wl_bin(
+  bounds : Bounds,
+  span : Double,
+  bins : Int32,
+  value : Double,
+) -> Int32 {
+  let norm = (value - bounds.min) / span
+  let raw = (norm * bins.to_double()).to_int()
+  if raw < 0 {
+    0
+  } else if raw >= bins {
+    bins - 1
+  } else {
+    raw
+  }
+}
+
+///|
+fn wl_penalty(
+  counts : Array[Int32],
+  dim : Int32,
+  bins : Int32,
+  bounds : Bounds,
+  span : Double,
+  point : Array[Double],
+  total : Int32,
+) -> Double {
+  let mut sum = 0.0
+  for d in 0..<dim {
+    let idx = wl_bin(bounds, span, bins, point[d])
+    sum = sum + counts[d * bins + idx].to_double()
+  }
+  sum / (total.to_double() + 1.0)
+}
+
+///|
+pub struct WlConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_wl_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> WlConfig {
+  WlConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Wang-Landau sampling (Wang & Landau 2001), adapted to continuous black-box
+/// minimization. A per-coordinate visit histogram is maintained (each dimension
+/// is split into a fixed number of bins) and a growing penalty factor biases
+/// the walk away from already visited bins: the candidate score is
+/// `f + lambda * visit_density`, with lambda increasing with the evaluation
+/// budget. Early in the run lambda is negligible so the chain descends, while
+/// later it favours unexplored bins, which helps escape local basins. The
+/// historical best is tracked on the raw objective, not on the penalised score.
+/// Note that this is a single-point method (population_size is accepted for a
+/// uniform config interface but not used).
+pub fn wang_landau_sampling(
+  config : WlConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let bins = 6
+  let restarts = 8
+  let raw_seg = max_evals / restarts
+  let seg_budget = if raw_seg < 24 { 24 } else { raw_seg }
+
+  let counts : Array[Int32] = []
+  for _i in 0..<(dim * bins) {
+    counts.push(0)
+  }
+  let mut total = 0
+
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _r in 0..<restarts {
+    if evaluations >= max_evals {
+      break
+    }
+    let mut x = random_solution(dim, bounds, current_rng)
+    let mut fx = evaluate(f, x)
+    evaluations = evaluations + 1
+    if !have_best || fx < best_val {
+      best_val = fx
+      best_pos = x
+      have_best = true
+    }
+    let f0_abs = if fx < 0.0 { -fx } else { fx }
+    let fscale = 1.0 + f0_abs
+    let mut step = span * 0.30
+    let mut seg_used = 1
+    let mut stall = 0
+    while seg_used < seg_budget && evaluations < max_evals {
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = x[d] + (2.0 * RNG::next(current_rng) - 1.0) * step
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      seg_used = seg_used + 1
+      step = max(step * 0.99, span * 1.0e-5)
+      let global_frac = evaluations.to_double() / max_evals.to_double()
+      let lam = fscale * 0.10 * global_frac
+      let penalty_x = wl_penalty(counts, dim, bins, bounds, span, x, total)
+      let penalty_c = wl_penalty(counts, dim, bins, bounds, span, cand, total)
+      if fv + lam * penalty_c <= fx + lam * penalty_x {
+        x = cand
+        fx = fv
+        for d in 0..<dim {
+          let idx = wl_bin(bounds, span, bins, x[d])
+          counts[d * bins + idx] = counts[d * bins + idx] + 1
+        }
+        total = total + 1
+        stall = 0
+      } else {
+        stall = stall + 1
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+      if stall >= 80 && evaluations < max_evals {
+        // histogram walk stalled: sample a fresh region
+        let fresh = random_solution(dim, bounds, current_rng)
+        let ff = evaluate(f, fresh)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        x = fresh
+        fx = ff
+        step = span * 0.30
+        stall = 0
+        if ff < best_val {
+          best_val = ff
+          best_pos = fresh
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

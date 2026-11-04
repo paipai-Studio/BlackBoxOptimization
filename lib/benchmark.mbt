@@ -2190,6 +2190,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       multilevel_coordinate_search(make_mcs_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "WL",
+    run: (e, d, b, r, f) => {
+      wang_landau_sampling(make_wl_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
