@@ -38840,3 +38840,265 @@ pub fn lipschitz_branch_and_bound(
     evaluations,
   }
 }
+
+///|
+pub struct MTSConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_mts_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> MTSConfig {
+  MTSConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn mts_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+fn mts_copy(x : Array[Double]) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<x.length() {
+    y.push(x[i])
+  }
+  y
+}
+
+///|
+fn mts_move(
+  x : Array[Double],
+  d : Int32,
+  delta : Double,
+  b : Bounds,
+) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<x.length() {
+    if i == d {
+      y.push(mts_clip(x[i] + delta, b))
+    } else {
+      y.push(x[i])
+    }
+  }
+  y
+}
+
+///|
+fn mts_move_pair(
+  x : Array[Double],
+  d1 : Int32,
+  delta1 : Double,
+  d2 : Int32,
+  delta2 : Double,
+  b : Bounds,
+) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<x.length() {
+    if i == d1 {
+      y.push(mts_clip(x[i] + delta1, b))
+    } else if i == d2 {
+      y.push(mts_clip(x[i] + delta2, b))
+    } else {
+      y.push(x[i])
+    }
+  }
+  y
+}
+
+///|
+/// Multiple Trajectory Search (Tseng and Chen, 2008). Several independent
+/// trajectories run local searches with two complementary operators: LS1 tries
+/// a +/- step along each coordinate (expanding on success, halving on failure),
+/// while LS2 probes the four sign combinations of a *pair* of coordinates,
+/// which rotates the step frame and escapes coordinate-wise stagnation. After
+/// every full round the worst trajectory is re-seeded from the incumbent best
+/// with a small random perturbation, so the budget keeps being spent near
+/// promising basins while the trajectories stay diversified. The historical
+/// best is monotone and the schedule is a strict prefix of larger budgets.
+/// population_size selects the number of trajectories (clamped to 2..4).
+pub fn multiple_trajectory_search(
+  config : MTSConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let min_step = span * 1.0e-10
+  let mut n_traj = config.population_size / 6
+  if n_traj < 2 {
+    n_traj = 2
+  }
+  if n_traj > 4 {
+    n_traj = 4
+  }
+
+  let xs : Array[Array[Double]] = []
+  let fs : Array[Double] = []
+  let steps : Array[Array[Double]] = []
+  let mut evaluations = 0
+  for _t in 0..<n_traj {
+    let x : Array[Double] = []
+    let st : Array[Double] = []
+    for _d in 0..<dim {
+      x.push(bounds.min + RNG::next(current_rng) * span)
+      st.push(span * 0.25)
+    }
+    let v = evaluate(f, x)
+    evaluations = evaluations + 1
+    xs.push(x)
+    fs.push(v)
+    steps.push(st)
+  }
+
+  let mut best_pos = xs[0]
+  let mut best_val = fs[0]
+  for i in 1..<n_traj {
+    if fs[i] < best_val {
+      best_val = fs[i]
+      best_pos = xs[i]
+    }
+  }
+
+  let mut t = 0
+  while evaluations < max_evals {
+    let before = evaluations
+    let mut cx = xs[t]
+    let mut fcur = fs[t]
+    let st = steps[t]
+
+    for d in 0..<dim {
+      if evaluations >= max_evals {
+        break
+      }
+      let sd = st[d]
+      let mut moved = false
+      let yp = mts_move(cx, d, sd, bounds)
+      let fp = evaluate(f, yp)
+      evaluations = evaluations + 1
+      if fp < fcur {
+        cx = yp
+        fcur = fp
+        moved = true
+      } else if evaluations < max_evals {
+        let ym = mts_move(cx, d, 0.0 - sd, bounds)
+        let fm = evaluate(f, ym)
+        evaluations = evaluations + 1
+        if fm < fcur {
+          cx = ym
+          fcur = fm
+          moved = true
+        }
+      }
+      if moved {
+        let grow = sd * 1.2
+        st[d] = if grow > span * 0.5 { span * 0.5 } else { grow }
+      } else {
+        let shrink = sd * 0.5
+        st[d] = if shrink < min_step { min_step } else { shrink }
+      }
+      if fcur < best_val {
+        best_val = fcur
+        best_pos = mts_copy(cx)
+      }
+    }
+
+    for d in 0..<dim {
+      if evaluations + 4 > max_evals {
+        break
+      }
+      let j = (d + 1) % dim
+      let mut best_pair = fcur
+      let mut best_y : Array[Double] = []
+      let mut has_pair = false
+      for s1 in 0..<2 {
+        for s2 in 0..<2 {
+          let dd1 = if s1 == 0 { st[d] } else { 0.0 - st[d] }
+          let dd2 = if s2 == 0 { st[j] } else { 0.0 - st[j] }
+          let y = mts_move_pair(cx, d, dd1, j, dd2, bounds)
+          let v = evaluate(f, y)
+          evaluations = evaluations + 1
+          if v < best_pair {
+            best_pair = v
+            best_y = y
+            has_pair = true
+          }
+        }
+      }
+      if has_pair {
+        cx = best_y
+        fcur = best_pair
+      }
+      if fcur < best_val {
+        best_val = fcur
+        best_pos = mts_copy(cx)
+      }
+    }
+
+    xs[t] = cx
+    fs[t] = fcur
+
+    if evaluations == before {
+      break
+    }
+
+    t = (t + 1) % n_traj
+
+    if t == 0 && evaluations < max_evals && n_traj >= 2 {
+      let mut bt = 0
+      let mut wt = 0
+      for i in 1..<n_traj {
+        if fs[i] < fs[bt] {
+          bt = i
+        }
+        if fs[i] > fs[wt] {
+          wt = i
+        }
+      }
+      if wt != bt {
+        let wx : Array[Double] = []
+        let ws : Array[Double] = []
+        for d in 0..<dim {
+          let r = RNG::next(current_rng) * 2.0 - 1.0
+          wx.push(mts_clip(best_pos[d] + r * span * 0.1, bounds))
+          ws.push(span * 0.1)
+        }
+        xs[wt] = wx
+        steps[wt] = ws
+        let wv = evaluate(f, wx)
+        evaluations = evaluations + 1
+        fs[wt] = wv
+        if wv < best_val {
+          best_val = wv
+          best_pos = wx
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

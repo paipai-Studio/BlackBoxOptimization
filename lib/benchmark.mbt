@@ -2254,6 +2254,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       lipschitz_branch_and_bound(make_lipschitz_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "MTS",
+    run: (e, d, b, r, f) => {
+      multiple_trajectory_search(make_mts_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
