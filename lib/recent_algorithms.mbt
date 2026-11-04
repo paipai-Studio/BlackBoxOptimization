@@ -32949,3 +32949,191 @@ pub fn earthworm_optimization(
     evaluations,
   }
 }
+
+// ===== GrSA: Group Search Optimizer (2010) =====
+
+///|
+pub struct GroupSearchConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_grsa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> GroupSearchConfig {
+  GroupSearchConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Group Search Optimizer (He, Wu & Saunders 2010): the fittest individual
+/// is the producer - it visually probes three points (straight ahead and
+/// two random angles around the current heading) and moves to the best one,
+/// keeping the heading on success and re-drawing it on failure.  The rest
+/// are scroungers that area-copy toward the producer, while every 7th
+/// member is a ranger performing large random walks to keep the swarm
+/// diverse.  The group factor gsf = e^{-t/2500} shrinks the step sizes.
+pub fn group_search_optimization(
+  config : GroupSearchConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  // producer's persistent visual heading (unit vector, re-drawn on failure)
+  let heading : Array[Double] = []
+  let mut hnrm2 = 0.0
+  for _d in 0..<dim {
+    let v = 2.0 * RNG::next(current_rng) - 1.0
+    heading.push(v)
+    hnrm2 = hnrm2 + v * v
+  }
+  let mut hnrm = hnrm2.sqrt() + 1.0e-300
+  for d in 0..<dim {
+    heading[d] = heading[d] / hnrm
+  }
+
+  while evaluations < max_evals {
+    // rank the swarm: order[0] is the producer of this generation
+    let order = sort_indices(fits)
+    let pidx = order[0]
+    let gsf = @math.exp(-evaluations.to_double() / 2500.0)
+    let step = span * 0.25 * gsf
+
+    // producer: probe straight ahead and two random angles, move to the best
+    let u : Array[Double] = []
+    let mut unrm2 = 0.0
+    for _d in 0..<dim {
+      let v = 2.0 * RNG::next(current_rng) - 1.0
+      u.push(v)
+      unrm2 = unrm2 + v * v
+    }
+    let unrm = unrm2.sqrt() + 1.0e-300
+    for d in 0..<dim {
+      u[d] = u[d] / unrm
+    }
+    let phi = 0.7854 * RNG::next(current_rng)
+    let cphi = @math.cos(phi)
+    let sphi = @math.sin(phi)
+    let probes : Array[(Array[Double], Double)] = []
+    for k in 0..<3 {
+      let sgn = if k == 0 { 0.0 } else if k == 1 { sphi } else { -sphi }
+      let pt : Array[Double] = []
+      for d in 0..<dim {
+        let nv = pop[pidx][d] + step * (cphi * heading[d] + sgn * u[d])
+        pt.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, pt)
+      evaluations = evaluations + 1
+      probes.push((pt, fv))
+    }
+    let mut bi = 0
+    for k in 1..<3 {
+      if probes[k].1 < probes[bi].1 {
+        bi = k
+      }
+    }
+    let mut prod_pos : Array[Double] = pop[pidx]
+    let mut prod_fit = fits[pidx]
+    if probes[bi].1 < prod_fit {
+      prod_pos = probes[bi].0
+      prod_fit = probes[bi].1
+      pop[pidx] = prod_pos
+      fits[pidx] = prod_fit
+      if prod_fit < best_val {
+        best_val = prod_fit
+        best_pos = prod_pos
+      }
+    } else {
+      // all probes failed: re-draw the heading at random
+      let mut hn2 = 0.0
+      for d in 0..<dim {
+        let v = 2.0 * RNG::next(current_rng) - 1.0
+        heading[d] = v
+        hn2 = hn2 + v * v
+      }
+      hnrm = hn2.sqrt() + 1.0e-300
+      for d in 0..<dim {
+        heading[d] = heading[d] / hnrm
+      }
+    }
+
+    // followers: scroungers copy the producer's patch, rangers roam
+    for k in 1..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let i = order[k]
+      let xi = pop[i]
+      let cand : Array[Double] = []
+      if k % 7 == 0 {
+        // ranger: large random walk keeps the swarm diverse
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.25 * gsf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // scrounger: area-copy the producer's position with jitter
+        for d in 0..<dim {
+          let nv = xi[d] +
+            RNG::next(current_rng) * (prod_pos[d] - xi[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.06 * gsf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

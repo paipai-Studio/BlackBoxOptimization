@@ -2064,6 +2064,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       earthworm_optimization(make_ewa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "GrSA",
+    run: (e, d, b, r, f) => {
+      group_search_optimization(make_grsa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
