@@ -33308,3 +33308,184 @@ pub fn forest_optimization(
     evaluations,
   }
 }
+
+// ===== ChRO: Chemical Reaction Optimization (2010) =====
+
+///|
+pub struct ChemicalReactionConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_chro_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ChemicalReactionConfig {
+  ChemicalReactionConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Chemical Reaction Optimization (Lam & Li 2010): every molecule carries a
+/// kinetic-energy buffer on top of its potential energy (the fitness).
+/// Collisions - a wall hit or a two-molecule encounter - can pay for an
+/// inferior candidate out of the buffer (a fraction of the exchanged energy
+/// is lost as heat), so the molecule may temporarily wander uphill instead
+/// of being greedy; when the buffer cannot cover the move the molecule
+/// bounces back unchanged.  Once the buffer runs dry the molecule either
+/// decomposes with a fresh burst of kinetic energy or synthesizes with a
+/// random partner, merging their buffers.  The reaction factor
+/// chf = e^{-t/2500} shrinks the collision amplitudes.
+pub fn chemical_reaction_optimization(
+  config : ChemicalReactionConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  // kinetic-energy buffer of every molecule; any surplus above ke_max
+  // overflows into the shared buffer pool and is discarded, so no molecule
+  // can accumulate unlimited paying power
+  let ke : Array[Double] = []
+  for _i in 0..<pop_size {
+    ke.push(span * 0.1)
+  }
+  let ke_max = span * 0.1
+  let ke_floor = span * 0.02
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let pe = fits[i]
+      let chf = @math.exp(-evaluations.to_double() / 2500.0)
+      let mut final_pos : Array[Double] = xi
+      let mut final_fit = pe
+      let mut new_ke = ke[i]
+      if ke[i] > ke_floor {
+        // energetic molecule: collide with the wall or with a partner
+        let r1 = RNG::next(current_rng)
+        if r1 < 0.5 {
+          // on-wall collision: local perturbation paid out of the buffer
+          let cand : Array[Double] = []
+          for d in 0..<dim {
+            let nv = xi[d] +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.12 * chf
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+          let fp = evaluate(f, cand)
+          evaluations = evaluations + 1
+          if fp < pe + ke[i] * 0.25 {
+            // accepted: the buffer pays for the change (at most a quarter
+            // of it per hit), half of the exchanged energy is lost as heat
+            // and any surplus beyond ke_max overflows away
+            final_pos = cand
+            final_fit = fp
+            new_ke = min((pe + ke[i] - fp) * 0.5, ke_max)
+          }
+          // otherwise the molecule bounces back unchanged
+        } else {
+          // inter-molecular collision: drift toward a random partner
+          let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+            pop_size
+          let xj = pop[j]
+          let w = RNG::next(current_rng)
+          let cand : Array[Double] = []
+          for d in 0..<dim {
+            let nv = xi[d] + w * (xj[d] - xi[d])
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+          let fp = evaluate(f, cand)
+          evaluations = evaluations + 1
+          if fp < pe + ke[i] * 0.25 {
+            final_pos = cand
+            final_fit = fp
+            new_ke = min((pe + ke[i] - fp) * 0.5, ke_max)
+          }
+        }
+      } else {
+        // energy exhausted: decompose or synthesize
+        let r1 = RNG::next(current_rng)
+        if r1 < 0.5 {
+          // decomposition: burst apart with freshly injected energy
+          let cand : Array[Double] = []
+          for d in 0..<dim {
+            let nv = xi[d] +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.30 * chf
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+          final_pos = cand
+          final_fit = evaluate(f, cand)
+          evaluations = evaluations + 1
+          new_ke = min((pe + ke[i]) * 0.5 + span * 0.05, ke_max)
+        } else {
+          // synthesis: merge with a random partner, buffers combine
+          let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+            pop_size
+          let xj = pop[j]
+          let cand : Array[Double] = []
+          for d in 0..<dim {
+            let nv = (xi[d] + xj[d]) * 0.5
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+          final_pos = cand
+          final_fit = evaluate(f, cand)
+          evaluations = evaluations + 1
+          new_ke = min((ke[i] + ke[j]) * 0.5 + span * 0.05, ke_max)
+        }
+      }
+      pop[i] = final_pos
+      fits[i] = final_fit
+      ke[i] = new_ke
+      if final_fit < best_val {
+        best_val = final_fit
+        best_pos = final_pos
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

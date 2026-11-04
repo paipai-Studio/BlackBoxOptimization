@@ -2076,6 +2076,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       forest_optimization(make_froa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "ChRO",
+    run: (e, d, b, r, f) => {
+      chemical_reaction_optimization(make_chro_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
