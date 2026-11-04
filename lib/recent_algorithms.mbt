@@ -31810,3 +31810,157 @@ pub fn starfish_optimization(
     evaluations,
   }
 }
+
+// ===== Tiger Beetle Optimization (2023) =====
+
+///|
+pub struct TBOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_tbo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> TBOConfig {
+  TBOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Tiger Beetle Optimization (2023).  Each beetle keeps a persistent prey
+/// target instead of drawing a fresh reference every round, with the chase
+/// factor tbf = e^{-t/2500} shrinking all strides:
+///   * chase - keep pursuing the same prey target while it stays better than
+///     the beetle, with a differential kick, a weak pull toward the global
+///     best and a jitter;
+///   * ambush - stay near the burrow and refine with a fine jitter, which
+///     keeps the swarm diverse;
+///   * relocate - pick a new prey and lunge toward it with a wide excursion.
+/// Whenever a chase fails to improve the beetle, its prey target is replaced
+/// by a fresh random one (failure-triggered retargeting), so a beetle does
+/// not stay locked on a stale target.
+pub fn tiger_beetle_optimization(
+  config : TBOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  // every beetle starts with its own persistent prey target
+  let prey : Array[Int32] = []
+  for _i in 0..<pop_size {
+    prey.push(
+      (RNG::next(current_rng) * pop_size.to_double()).to_int() % pop_size,
+    )
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let old_fit = fits[i]
+      let tbf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      let mut chased = false
+      if r1 < 0.55 {
+        // chase: keep the same prey while it is still worth pursuing; if the
+        // target has become worse than the beetle, chase the global best
+        let promising = fits[prey[i]] <= old_fit
+        let xp = if promising { pop[prey[i]] } else { best_pos }
+        let j = (r2 * pop_size.to_double()).to_int() % pop_size
+        let k = (r3 * pop_size.to_double()).to_int() % pop_size
+        let xj = pop[j]
+        let xk = pop[k]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            1.4 * tbf * (xp[d] - xi[d]) +
+            0.3 * tbf * (best_pos[d] - xi[d]) +
+            0.4 * r2 * tbf * (xj[d] - xk[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.06 * tbf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        chased = true
+      } else if r1 < 0.85 {
+        // ambush: stay near the burrow, a fine jitter keeps diversity
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.08 * tbf * tbf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // relocate: pick a fresh prey and lunge toward it
+        let p = (r2 * pop_size.to_double()).to_int() % pop_size
+        prey[i] = p
+        let xp = pop[p]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (xp[d] - xi[d]) * (0.3 + 0.6 * r3) * tbf +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10 * tbf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+      // failure-triggered retargeting: a failed chase means the prey is stale
+      if chased && fv >= old_fit {
+        prey[i] = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

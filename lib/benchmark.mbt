@@ -2016,6 +2016,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       starfish_optimization(make_starfish_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "TBO",
+    run: (e, d, b, r, f) => {
+      tiger_beetle_optimization(make_tbo_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
