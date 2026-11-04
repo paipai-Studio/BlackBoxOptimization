@@ -32542,3 +32542,136 @@ pub fn dolphin_optimization(
     evaluations,
   }
 }
+
+// ===== BAS: Beetle Antennae Search (2017) =====
+
+///|
+pub struct BeetleAntennaeConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bas_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BeetleAntennaeConfig {
+  BeetleAntennaeConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Beetle Antennae Search (Jiang & Wang 2017): a single beetle senses the
+/// landscape with two antennae placed symmetrically around the incumbent
+/// along one random unit heading.  Only the sign of the antenna comparison
+/// decides which way the beetle crawls next - no per-dimension gradient
+/// weights are formed (unlike SPSA's trust-region gradient estimate) -
+/// while the antennae spacing and the crawl step share a single
+/// exponentially decaying schedule.  A fading jitter guards against late
+/// stagnation on multimodal landscapes and the historical best is tracked
+/// separately.
+pub fn beetle_antennae_search(
+  config : BeetleAntennaeConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+
+  let mut x = random_solution(dim, bounds, current_rng)
+  let mut fx = evaluate(f, x)
+  let mut evaluations = 1
+  let mut best_pos : Array[Double] = x
+  let mut best_val = fx
+
+  while evaluations < max_evals {
+    let heat = @math.exp(-evaluations.to_double() / 2500.0)
+    // one random unit heading shared by both antennae
+    let mut nrm2 = 0.0
+    let d : Array[Double] = []
+    for _i in 0..<dim {
+      let v = 2.0 * RNG::next(current_rng) - 1.0
+      d.push(v)
+      nrm2 = nrm2 + v * v
+    }
+    let nrm = nrm2.sqrt() + 1.0e-300
+    // antennae spacing and crawl step share the decaying schedule
+    let antenna = span * 0.15 * heat
+    let step = span * 0.20 * heat
+    let x_left : Array[Double] = []
+    for di in 0..<dim {
+      x_left.push(
+        max(bounds.min, min(bounds.max, x[di] + antenna * d[di] / nrm)),
+      )
+    }
+    let fl = evaluate(f, x_left)
+    evaluations = evaluations + 1
+    let x_right : Array[Double] = []
+    for di in 0..<dim {
+      x_right.push(
+        max(bounds.min, min(bounds.max, x[di] - antenna * d[di] / nrm)),
+      )
+    }
+    let fr = evaluate(f, x_right)
+    evaluations = evaluations + 1
+    // crawl toward the better antenna: the sign of the comparison is the
+    // only information carried into the move
+    let sgn = if fl < fr { 1.0 } else { -1.0 }
+    if evaluations < max_evals {
+      let cand : Array[Double] = []
+      for di in 0..<dim {
+        cand.push(
+          max(bounds.min, min(bounds.max, x[di] + sgn * step * d[di] / nrm)),
+        )
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      x = cand
+      fx = fv
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+    // fading jitter against late stagnation on multimodal landscapes
+    if evaluations < max_evals && RNG::next(current_rng) < 0.25 {
+      let cand : Array[Double] = []
+      for di in 0..<dim {
+        cand.push(
+          max(
+            bounds.min,
+            min(
+              bounds.max,
+              x[di] + (2.0 * RNG::next(current_rng) - 1.0) * span * 0.03 * heat,
+            ),
+          ),
+        )
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      x = cand
+      fx = fv
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

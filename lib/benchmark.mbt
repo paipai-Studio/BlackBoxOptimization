@@ -2046,6 +2046,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       dolphin_optimization(make_dolphin_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "BAS",
+    run: (e, d, b, r, f) => {
+      beetle_antennae_search(make_bas_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
