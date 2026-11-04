@@ -36339,3 +36339,185 @@ pub fn demon_algorithm(
     evaluations,
   }
 }
+
+// ===== MCS: Multilevel Coordinate Search (1999) =====
+
+///|
+pub struct McsConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_mcs_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> McsConfig {
+  McsConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Multilevel Coordinate Search (Huyer & Neumaier 1999). A list of boxes is
+/// maintained; each box stores a base point, a per-coordinate step vector and
+/// a level. Each round the box with the lowest level (least refined) is split
+/// along one coordinate: the two points base ± step on that coordinate are
+/// evaluated, the better one becomes the new base, that coordinate's step is
+/// halved and the level grows, while the other side is kept as a sibling box
+/// so the unexplored half remains covered. Boxes that reach the level limit are
+/// no longer split; when no splittable box remains the search restarts with a
+/// fresh random box. This deterministic coordinate-oriented cover is distinct
+/// from DIRECT's best/widest rectangle trisection and from COBYLA/NEWUOA's
+/// trust regions. Note that this is a box-list method (population_size is
+/// accepted for a uniform config interface but not used).
+pub fn multilevel_coordinate_search(
+  config : McsConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let max_level = 20
+  let max_boxes = 64
+
+  let bases : Array[Array[Double]] = []
+  let steps : Array[Array[Double]] = []
+  let levels : Array[Int32] = []
+  let fits : Array[Double] = []
+
+  let first = random_solution(dim, bounds, current_rng)
+  let fv = evaluate(f, first)
+  let mut evaluations = 1
+  bases.push(first)
+  let s0 : Array[Double] = []
+  for _d in 0..<dim {
+    s0.push(span * 0.25)
+  }
+  steps.push(s0)
+  levels.push(0)
+  fits.push(fv)
+  let mut best_pos = first
+  let mut best_val = fv
+
+  while evaluations < max_evals {
+    // pick the least-refined splittable box (ties: better fitness)
+    let mut pick = -1
+    for i in 0..<bases.length() {
+      if levels[i] < max_level {
+        if pick < 0 ||
+          levels[i] < levels[pick] ||
+          (levels[i] == levels[pick] && fits[i] < fits[pick]) {
+          pick = i
+        }
+      }
+    }
+    if pick < 0 {
+      // no box can be split: restart a fresh box
+      let fresh = random_solution(dim, bounds, current_rng)
+      let ff = evaluate(f, fresh)
+      evaluations = evaluations + 1
+      if ff < best_val {
+        best_val = ff
+        best_pos = fresh
+      }
+      let mut worst = 0
+      for i in 1..<bases.length() {
+        if fits[i] > fits[worst] {
+          worst = i
+        }
+      }
+      bases[worst] = fresh
+      let sr : Array[Double] = []
+      for _k in 0..<dim {
+        sr.push(span * 0.25)
+      }
+      steps[worst] = sr
+      levels[worst] = 0
+      fits[worst] = ff
+    } else {
+      let d = levels[pick] % dim
+      let base = bases[pick]
+      let half = steps[pick][d]
+      let left : Array[Double] = []
+      let right : Array[Double] = []
+      for k in 0..<dim {
+        let lv = if k == d {
+          max(bounds.min, min(bounds.max, base[k] - half))
+        } else {
+          base[k]
+        }
+        let rv = if k == d {
+          max(bounds.min, min(bounds.max, base[k] + half))
+        } else {
+          base[k]
+        }
+        left.push(lv)
+        right.push(rv)
+      }
+      let fl = evaluate(f, left)
+      evaluations = evaluations + 1
+      let mut has_right = false
+      let mut fr = 0.0
+      if evaluations < max_evals {
+        fr = evaluate(f, right)
+        evaluations = evaluations + 1
+        has_right = true
+      }
+      let use_right = has_right && fr < fl
+      let child = if use_right { right } else { left }
+      let fchild = if use_right { fr } else { fl }
+      let sibling = if use_right { left } else { right }
+      let fsib = if use_right { fl } else { fr }
+      bases[pick] = child
+      fits[pick] = fchild
+      steps[pick][d] = half * 0.5
+      levels[pick] = levels[pick] + 1
+      if fchild < best_val {
+        best_val = fchild
+        best_pos = child
+      }
+      if has_right && evaluations < max_evals {
+        let ss : Array[Double] = []
+        for k in 0..<dim {
+          ss.push(steps[pick][k])
+        }
+        if bases.length() < max_boxes {
+          bases.push(sibling)
+          steps.push(ss)
+          levels.push(levels[pick])
+          fits.push(fsib)
+        } else {
+          let mut worst = if pick == 0 { 1 } else { 0 }
+          for i in 0..<bases.length() {
+            if i != pick && fits[i] > fits[worst] {
+              worst = i
+            }
+          }
+          if fsib < fits[worst] {
+            bases[worst] = sibling
+            steps[worst] = ss
+            levels[worst] = levels[pick]
+            fits[worst] = fsib
+          }
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

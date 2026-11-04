@@ -2184,6 +2184,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       demon_algorithm(make_demon_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "MCS",
+    run: (e, d, b, r, f) => {
+      multilevel_coordinate_search(make_mcs_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
