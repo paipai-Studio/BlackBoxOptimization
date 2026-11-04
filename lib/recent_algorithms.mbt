@@ -34364,3 +34364,160 @@ pub fn extremal_optimization(
     evaluations,
   }
 }
+
+// ===== SOMA: Self-Organizing Migrating Algorithm (1999) =====
+
+///|
+pub struct SomaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_soma_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SomaConfig {
+  SomaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Self-Organizing Migrating Algorithm (Zelinka 1999). Each individual
+/// migrates along the vector toward a leader and is evaluated at several
+/// points on that path (multi-point path sampling) instead of a single
+/// candidate, and the best sample becomes its new position. A perturbation
+/// (PRT) vector keeps most coordinates exactly on the path while letting a
+/// few dimensions deviate, and migration alternates between all-to-one
+/// (leader = global best) and all-to-random (leader = a random peer). A
+/// fine local jitter keeps diversity alive so the population does not
+/// collapse onto the leader. The historical best is tracked separately.
+pub fn self_organizing_migration(
+  config : SomaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let pop_size = if config.population_size <= 0 {
+    1
+  } else {
+    config.population_size
+  }
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _i in 0..<pop_size {
+    let sol = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, sol)
+    evaluations = evaluations + 1
+    pop.push(sol)
+    fits.push(v)
+    if !have_best || v < best_val {
+      best_val = v
+      best_pos = sol
+      have_best = true
+    }
+  }
+
+  while evaluations < max_evals {
+    let sof = @math.exp(-evaluations.to_double() / 2500.0)
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let r1 = RNG::next(current_rng)
+      if r1 < 0.80 {
+        // leader: all-to-one (global best) or all-to-random (a peer)
+        let leader = if r1 < 0.45 {
+          best_pos
+        } else {
+          let j = (
+              (RNG::next(current_rng) * pop_size.to_double()).to_int() + i + 1
+            ) %
+            pop_size
+          pop[j]
+        }
+        // PRT vector: most dimensions follow the path exactly, a few deviate
+        let prt : Array[Double] = []
+        for _d in 0..<dim {
+          prt.push(
+            if RNG::next(current_rng) < 0.90 {
+              1.0
+            } else {
+              0.05 + 0.25 * RNG::next(current_rng)
+            },
+          )
+        }
+        // multi-point path sampling along xi -> leader
+        let ts : Array[Double] = [0.33, 0.66, 1.0]
+        let mut best_cand = xi
+        let mut best_fv = fits[i]
+        for s in 0..<ts.length() {
+          if evaluations >= max_evals {
+            break
+          }
+          let t = ts[s]
+          let cand : Array[Double] = []
+          for d in 0..<dim {
+            let nv = xi[d] +
+              t * prt[d] * (leader[d] - xi[d]) +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.06 * sof * t
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+          let fv = evaluate(f, cand)
+          evaluations = evaluations + 1
+          if fv < best_fv {
+            best_fv = fv
+            best_cand = cand
+          }
+        }
+        pop[i] = best_cand
+        fits[i] = best_fv
+        if best_fv < best_val {
+          best_val = best_fv
+          best_pos = best_cand
+        }
+      } else {
+        // fine local jitter: keeps the swarm from collapsing onto one leader
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * sof * sof
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        pop[i] = cand
+        fits[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

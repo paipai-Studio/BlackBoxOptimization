@@ -2110,6 +2110,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
     name: "BFGS",
     run: (e, d, b, r, f) => bfgs_optimizer(make_bfgs_config(e, d, b, 25), f, r),
   })
+  entries.push(AlgoEntry::{
+    name: "SOMA",
+    run: (e, d, b, r, f) => {
+      self_organizing_migration(make_soma_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
