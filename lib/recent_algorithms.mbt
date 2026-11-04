@@ -35442,3 +35442,180 @@ pub fn mesh_adaptive_direct_search(
     evaluations,
   }
 }
+
+// ===== NEWUOA: derivative-free quadratic trust region (2004) =====
+
+///|
+pub struct NewuoaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_newuoa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> NewuoaConfig {
+  NewuoaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// NEWUOA-style derivative-free quadratic trust region (Powell 2004). Each
+/// iteration estimates, coordinate by coordinate, a central-difference
+/// gradient and a diagonal second derivative with two evaluations per
+/// dimension, then takes a Newton step clipped to the trust radius rho. The
+/// radius expands on success and contracts on failure, and a repeatedly
+/// collapsed model triggers an informed jump near the incumbent best. Unlike
+/// COBYLA (a purely linear model) this captures curvature without gradient
+/// information, and unlike BFGS it accumulates no Hessian and uses a trust
+/// region rather than a line search. The budget is split among random
+/// restarts and the historical best is tracked separately. Note that this is a
+/// single-point method (population_size is accepted for a uniform config
+/// interface but not used), matching the SPSA/BAS/BFGS convention.
+pub fn newuoa_optimizer(
+  config : NewuoaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let restarts = 8
+  let raw_seg = max_evals / restarts
+  let seg_budget = if raw_seg < 24 { 24 } else { raw_seg }
+
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _r in 0..<restarts {
+    if evaluations >= max_evals {
+      break
+    }
+    let mut x = random_solution(dim, bounds, current_rng)
+    let mut fx = evaluate(f, x)
+    evaluations = evaluations + 1
+    if !have_best || fx < best_val {
+      best_val = fx
+      best_pos = x
+      have_best = true
+    }
+    let mut rho = span * 0.10
+    let mut seg_used = 1
+    let mut stall = 0
+    while seg_used < seg_budget && evaluations < max_evals {
+      let h = max(rho * 0.5, span * 1.0e-4)
+      let g : Array[Double] = []
+      let curv : Array[Double] = []
+      for _d in 0..<dim {
+        g.push(0.0)
+        curv.push(0.0)
+      }
+      let mut g_ok = true
+      for d in 0..<dim {
+        if evaluations + 2 > max_evals {
+          g_ok = false
+          break
+        }
+        let plus : Array[Double] = []
+        for k in 0..<dim {
+          let v = if k == d {
+            max(bounds.min, min(bounds.max, x[k] + h))
+          } else {
+            x[k]
+          }
+          plus.push(v)
+        }
+        let fp = evaluate(f, plus)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        let minus : Array[Double] = []
+        for k in 0..<dim {
+          let v = if k == d {
+            max(bounds.min, min(bounds.max, x[k] - h))
+          } else {
+            x[k]
+          }
+          minus.push(v)
+        }
+        let fm = evaluate(f, minus)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        g[d] = (fp - fm) / (2.0 * h)
+        curv[d] = (fp - 2.0 * fx + fm) / (h * h)
+      }
+      if !g_ok {
+        break
+      }
+      let step : Array[Double] = []
+      let mut snorm = 0.0
+      for d in 0..<dim {
+        let hess = max(curv[d], 1.0e-8)
+        let s = -g[d] / hess
+        step.push(s)
+        snorm = snorm + s * s
+      }
+      let sn = snorm.sqrt()
+      let scale = if sn > rho { rho / sn } else { 1.0 }
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = x[d] + scale * step[d]
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      seg_used = seg_used + 1
+      if fv < fx {
+        x = cand
+        fx = fv
+        stall = 0
+        rho = min(rho * 1.3, span * 0.50)
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      } else {
+        stall = stall + 1
+        rho = max(rho * 0.5, span * 1.0e-5)
+      }
+      if stall >= 6 && evaluations < max_evals {
+        // model exhausted: jump near the best and reset the trust region
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.15
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        x = cand
+        fx = fv
+        rho = span * 0.10
+        stall = 0
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

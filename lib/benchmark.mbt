@@ -2152,6 +2152,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       mesh_adaptive_direct_search(make_mads_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "NEWUOA",
+    run: (e, d, b, r, f) => {
+      newuoa_optimizer(make_newuoa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
