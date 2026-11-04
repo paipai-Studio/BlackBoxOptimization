@@ -1974,6 +1974,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       monkey_search_algorithm(make_monkey_search_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "BSwA",
+    run: (e, d, b, r, f) => {
+      bird_swarm_algorithm(make_bswa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

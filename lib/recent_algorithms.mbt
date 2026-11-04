@@ -30784,3 +30784,178 @@ pub fn monkey_search_algorithm(
     evaluations,
   }
 }
+
+// ===== Bird Swarm Algorithm (2016) =====
+
+///|
+pub struct BswaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bswa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BswaConfig {
+  BswaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Bird Swarm Algorithm (2016).  Each bird keeps a personal best and the
+/// swarm tracks a global best; every round the swarm centroid and the mean
+/// fitness are recomputed, then each bird acts with one of three rules:
+///   * foraging (r1 < 0.88) - either a pull toward its personal best
+///     (30% of the time, coefficient 1.5) or toward the global best
+///     (coefficient 2.0), the two references being mutually exclusive;
+///   * vigilance (r1 < 0.92) - the sign of (fit_i - mean_fit) decides the
+///     direction: birds better than the average drift gently toward the
+///     centroid with amplitude A1 = exp(-mean_fit/fit_i) 0.5, while worse
+///     birds are pushed away from it with amplitude A2 = exp(-gap/mean_fit)
+///     plus a small jitter, which keeps sub-populations from collapsing;
+///   * flight (r1 >= 0.92) - a large leap toward the champion plus a random
+///     excursion, mimicking the sudden relocation of a flock.
+/// A swarm factor bsf = e^{-t/2500} decays every amplitude as evaluations
+/// are spent, so the rules tighten into local refinement.
+pub fn bird_swarm_algorithm(
+  config : BswaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 20 {
+    20
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let pbest : Array[Array[Double]] = []
+  let pbest_fit : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  pbest.push(best_pos)
+  pbest_fit.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    pbest.push(p)
+    pbest_fit.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    // Swarm centroid and mean fitness drive the vigilance rule.
+    let mean_pos : Array[Double] = []
+    for _d in 0..<dim {
+      mean_pos.push(0.0)
+    }
+    let mut fit_sum = 0.0
+    for i in 0..<pop_size {
+      fit_sum = fit_sum + fits[i]
+      for d in 0..<dim {
+        mean_pos[d] = mean_pos[d] + pop[i][d]
+      }
+    }
+    let inv_pop = 1.0 / pop_size.to_double()
+    let mean_fit = fit_sum * inv_pop
+    for d in 0..<dim {
+      mean_pos[d] = mean_pos[d] * inv_pop
+    }
+
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let bsf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let r2 = RNG::next(current_rng)
+      let r3 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.92 {
+        if r1 < 0.88 {
+          // foraging: personal best or global best, mutually exclusive
+          if r2 < 0.30 {
+            for d in 0..<dim {
+              let nv = xi[d] + 1.5 * r3 * (pbest[i][d] - xi[d]) * bsf
+              cand.push(max(bounds.min, min(bounds.max, nv)))
+            }
+          } else {
+            for d in 0..<dim {
+              let nv = xi[d] + 2.0 * r3 * (best_pos[d] - xi[d]) * bsf
+              cand.push(max(bounds.min, min(bounds.max, nv)))
+            }
+          }
+        } else {
+          // vigilance: sign of the fitness gap picks approach or retreat
+          let gap = fits[i] - mean_fit
+          if gap < 0.0 {
+            let a1 = @math.exp(-mean_fit / (fits[i] + 1.0e-9)) * 0.5
+            for d in 0..<dim {
+              let nv = xi[d] + a1 * r2 * (mean_pos[d] - xi[d]) * bsf
+              cand.push(max(bounds.min, min(bounds.max, nv)))
+            }
+          } else {
+            let a2 = @math.exp(-gap / (mean_fit + 1.0e-9)) * 0.5
+            for d in 0..<dim {
+              let nv = xi[d] -
+                a2 * r2 * (mean_pos[d] - xi[d]) * bsf +
+                r3 * (2.0 * RNG::next(current_rng) - 1.0) * span * 0.02 * bsf
+              cand.push(max(bounds.min, min(bounds.max, nv)))
+            }
+          }
+        }
+      } else {
+        // flight: sudden relocation toward the champion plus a random draw
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (best_pos[d] - xi[d]) * (0.5 + r2) * bsf +
+            r3 * (2.0 * RNG::next(current_rng) - 1.0) * span * 0.15 * bsf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < pbest_fit[i] {
+        pbest_fit[i] = fv
+        pbest[i] = cand
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
