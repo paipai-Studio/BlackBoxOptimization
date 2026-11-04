@@ -2122,6 +2122,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       stochastic_diffusion_search(make_sds_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "DAnl",
+    run: (e, d, b, r, f) => {
+      dual_annealing(make_dual_annealing_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
