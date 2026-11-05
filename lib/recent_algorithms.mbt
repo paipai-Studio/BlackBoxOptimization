@@ -39784,3 +39784,385 @@ pub fn efficient_global_optimization(
     evaluations,
   }
 }
+
+///|
+pub struct GRConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_gr_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> GRConfig {
+  GRConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn gr_abs(v : Double) -> Double {
+  if v < 0.0 {
+    -v
+  } else {
+    v
+  }
+}
+
+///|
+fn gr_clip01(v : Double) -> Double {
+  if v < 0.0 {
+    0.0
+  } else if v > 1.0 {
+    1.0
+  } else {
+    v
+  }
+}
+
+///|
+fn gr_gauss(rng : RNG) -> Double {
+  let u1 = RNG::next(rng)
+  let u2 = RNG::next(rng)
+  let safe = if u1 < 1.0e-12 { 1.0e-12 } else { u1 }
+  (-2.0 * @math.ln(safe)).sqrt() * @math.cos(TWO_PI * u2)
+}
+
+///|
+fn gr_to_raw(u : Array[Double], b : Bounds, span : Double) -> Array[Double] {
+  let x : Array[Double] = []
+  for d in 0..<u.length() {
+    x.push(b.min + u[d] * span)
+  }
+  x
+}
+
+///|
+fn gr_solve(
+  a : Array[Array[Double]],
+  rhs : Array[Double],
+  m : Int32,
+) -> Array[Double] {
+  let b : Array[Double] = []
+  for i in 0..<m {
+    b.push(rhs[i])
+  }
+  for col in 0..<m {
+    let mut piv = col
+    let mut pv = gr_abs(a[col][col])
+    let start = col + 1
+    for r in start..<m {
+      let v = gr_abs(a[r][col])
+      if v > pv {
+        pv = v
+        piv = r
+      }
+    }
+    if piv != col {
+      let row_tmp = a[col]
+      a[col] = a[piv]
+      a[piv] = row_tmp
+      let val_tmp = b[col]
+      b[col] = b[piv]
+      b[piv] = val_tmp
+    }
+    let diag = if a[col][col] == 0.0 { 1.0e-12 } else { a[col][col] }
+    for r in start..<m {
+      let factor = a[r][col] / diag
+      if factor != 0.0 {
+        for c in col..<m {
+          a[r][c] = a[r][c] - factor * a[col][c]
+        }
+        b[r] = b[r] - factor * b[col]
+      }
+    }
+  }
+  let sol : Array[Double] = []
+  for _i in 0..<m {
+    sol.push(0.0)
+  }
+  let mut i = m - 1
+  while i >= 0 {
+    let mut s = b[i]
+    let start = i + 1
+    for c in start..<m {
+      s = s - a[i][c] * sol[c]
+    }
+    let diag = if a[i][i] == 0.0 { 1.0e-12 } else { a[i][i] }
+    sol[i] = s / diag
+    i = i - 1
+  }
+  sol
+}
+
+///|
+fn gr_predict(
+  u : Array[Double],
+  us : Array[Array[Double]],
+  sol : Array[Double],
+  n : Int32,
+  dim : Int32,
+) -> Double {
+  let mut s = 0.0
+  for i in 0..<n {
+    let mut sq = 0.0
+    for d in 0..<dim {
+      let df = u[d] - us[i][d]
+      sq = sq + df * df
+    }
+    let r = sq.sqrt()
+    s = s + sol[i] * r * r * r
+  }
+  s = s + sol[n]
+  for d in 0..<dim {
+    s = s + sol[n + 1 + d] * u[d]
+  }
+  s
+}
+
+///|
+fn gr_copy(x : Array[Double]) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<x.length() {
+    y.push(x[i])
+  }
+  y
+}
+
+///|
+fn gr_add_sample(
+  us : Array[Array[Double]],
+  fs : Array[Double],
+  u : Array[Double],
+  v : Double,
+  cap : Int32,
+  head : Int32,
+) -> Int32 {
+  if us.length() < cap {
+    us.push(u)
+    fs.push(v)
+    head
+  } else {
+    us[head] = u
+    fs[head] = v
+    (head + 1) % cap
+  }
+}
+
+///|
+/// Gutmann-Ramm global optimization (2006). A cubic radial-basis-function
+/// interpolant `s(x) = sum lambda_i ||x - x_i||^3 + c0 + c^T x` is fitted to a
+/// sliding window of observations (Gaussian elimination with partial pivoting,
+/// coordinates normalised to [0,1] for conditioning). The next point minimises
+/// the **indicator function** `g(x) = (s(x) - f_best) / dist(x, samples)`, which
+/// balances predicted improvement against the distance to known points and thus
+/// samples sparsely covered regions. This is a surrogate-model route distinct
+/// from EGO (Gaussian-process posterior mean/variance and Expected Improvement):
+/// the RBF interpolant is an exact deterministic interpolant, the acquisition is
+/// distance-weighted rather than probabilistic, and no kernel hyper-parameter is
+/// tuned. A stagnant run injects uniform samples; the schedule depends only on
+/// evaluations already spent, so larger budgets strictly continue the same run
+/// and the historical best is monotone. population_size is accepted for a
+/// uniform config interface.
+pub fn gutmann_ramm_optimization(
+  config : GRConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let cap = 32
+  let n_cand = 48
+  let mut n_start = dim * 2
+  if n_start < 8 {
+    n_start = 8
+  }
+  if n_start > max_evals {
+    n_start = max_evals
+  }
+
+  let us : Array[Array[Double]] = []
+  let fs : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_u : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut evaluations = 0
+  let mut head = 0
+
+  for _i in 0..<n_start {
+    let u : Array[Double] = []
+    for _d in 0..<dim {
+      u.push(RNG::next(current_rng))
+    }
+    let x = gr_to_raw(u, bounds, span)
+    let v = evaluate(f, x)
+    evaluations = evaluations + 1
+    us.push(u)
+    fs.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = x
+      best_u = u
+    }
+  }
+
+  let mut stall = 0
+  let mut round = 0
+  let mut lstep = 0.20
+  while evaluations < max_evals {
+    let n = us.length()
+    let m = n + dim + 1
+    let a : Array[Array[Double]] = []
+    for _i in 0..<m {
+      let row : Array[Double] = []
+      for _j in 0..<m {
+        row.push(0.0)
+      }
+      a.push(row)
+    }
+    for i in 0..<n {
+      for j in 0..<n {
+        let mut sq = 0.0
+        for d in 0..<dim {
+          let df = us[i][d] - us[j][d]
+          sq = sq + df * df
+        }
+        let r = sq.sqrt()
+        let mut phi = r * r * r
+        if i == j {
+          phi = phi + 1.0e-8
+        }
+        a[i][j] = phi
+      }
+      a[i][n] = 1.0
+      for d in 0..<dim {
+        a[i][n + 1 + d] = us[i][d]
+      }
+    }
+    for j in 0..<n {
+      a[n][j] = 1.0
+    }
+    for d in 0..<dim {
+      for j in 0..<n {
+        a[n + 1 + d][j] = us[j][d]
+      }
+    }
+    let rhs : Array[Double] = []
+    for i in 0..<n {
+      rhs.push(fs[i])
+    }
+    for _j in 0..<(dim + 1) {
+      rhs.push(0.0)
+    }
+    let sol = gr_solve(a, rhs, m)
+
+    let mut cand_u : Array[Double] = []
+    let mut cand_g = 1.0e300
+    for c in 0..<n_cand {
+      let q : Array[Double] = []
+      if c < n_cand * 2 / 3 {
+        for _d in 0..<dim {
+          q.push(RNG::next(current_rng))
+        }
+      } else {
+        for d in 0..<dim {
+          q.push(gr_clip01(best_u[d] + 0.12 * gr_gauss(current_rng)))
+        }
+      }
+      let s = gr_predict(q, us, sol, n, dim)
+      let mut dmin = 1.0e300
+      for i in 0..<n {
+        let mut sq = 0.0
+        for d in 0..<dim {
+          let df = q[d] - us[i][d]
+          sq = sq + df * df
+        }
+        if sq < dmin {
+          dmin = sq
+        }
+      }
+      let dist = dmin.sqrt()
+      let g = (s - best_val) / (dist + 1.0e-6)
+      if g < cand_g {
+        cand_g = g
+        cand_u = q
+      }
+    }
+
+    if cand_u.length() == dim {
+      let x = gr_to_raw(cand_u, bounds, span)
+      let v = evaluate(f, x)
+      evaluations = evaluations + 1
+      if v < best_val {
+        best_val = v
+        best_pos = x
+        best_u = cand_u
+        stall = 0
+      } else {
+        stall = stall + 1
+      }
+      head = gr_add_sample(us, fs, cand_u, v, cap, head)
+    } else {
+      stall = stall + 1
+    }
+
+    if stall >= 30 && evaluations + 3 <= max_evals {
+      for _k in 0..<3 {
+        let q : Array[Double] = []
+        for _d in 0..<dim {
+          q.push(RNG::next(current_rng))
+        }
+        let x = gr_to_raw(q, bounds, span)
+        let v = evaluate(f, x)
+        evaluations = evaluations + 1
+        if v < best_val {
+          best_val = v
+          best_pos = x
+          best_u = q
+        }
+        head = gr_add_sample(us, fs, q, v, cap, head)
+      }
+      stall = 0
+    }
+
+    if round % 3 == 0 && evaluations < max_evals {
+      let dr = (RNG::next(current_rng) * dim.to_double()).to_int()
+      let dsel = if dr >= dim { dim - 1 } else { dr }
+      let sgn = if RNG::next(current_rng) < 0.5 { 1.0 } else { 0.0 - 1.0 }
+      let q = gr_copy(best_u)
+      q[dsel] = gr_clip01(best_u[dsel] + sgn * lstep)
+      let x = gr_to_raw(q, bounds, span)
+      let v = evaluate(f, x)
+      evaluations = evaluations + 1
+      if v < best_val {
+        best_val = v
+        best_pos = x
+        best_u = q
+        stall = 0
+      }
+      head = gr_add_sample(us, fs, q, v, cap, head)
+      lstep = lstep * 0.95
+      if lstep < 1.0e-8 {
+        lstep = 0.05
+      }
+    }
+    round = round + 1
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

@@ -2272,6 +2272,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       efficient_global_optimization(make_ego_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "GR",
+    run: (e, d, b, r, f) => {
+      gutmann_ramm_optimization(make_gr_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
