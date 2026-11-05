@@ -2266,6 +2266,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       tree_parzen_estimator(make_tpe_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "EGO",
+    run: (e, d, b, r, f) => {
+      efficient_global_optimization(make_ego_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

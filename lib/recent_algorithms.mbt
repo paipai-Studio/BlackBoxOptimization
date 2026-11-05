@@ -39399,3 +39399,388 @@ pub fn tree_parzen_estimator(
     evaluations,
   }
 }
+
+///|
+pub struct EGOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ego_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> EGOConfig {
+  EGOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn ego_copy(x : Array[Double]) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<x.length() {
+    y.push(x[i])
+  }
+  y
+}
+
+///|
+fn ego_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+fn ego_gauss(rng : RNG) -> Double {
+  let u1 = RNG::next(rng)
+  let u2 = RNG::next(rng)
+  let safe = if u1 < 1.0e-12 { 1.0e-12 } else { u1 }
+  (-2.0 * @math.ln(safe)).sqrt() * @math.cos(TWO_PI * u2)
+}
+
+///|
+fn ego_normal_cdf(z : Double) -> Double {
+  let x = z / 1.4142135623730951
+  let ax = if x < 0.0 { 0.0 - x } else { x }
+  let t = 1.0 / (1.0 + 0.3275911 * ax)
+  let poly = t *
+    (
+      0.254829592 +
+      t *
+      (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429)))
+    )
+  let erf_abs = 1.0 - poly * @math.exp(0.0 - ax * ax)
+  let erf = if x < 0.0 { 0.0 - erf_abs } else { erf_abs }
+  0.5 * (1.0 + erf)
+}
+
+///|
+fn ego_normal_pdf(z : Double) -> Double {
+  0.3989422804014327 * @math.exp(0.0 - 0.5 * z * z)
+}
+
+///|
+fn ego_cholesky(a : Array[Array[Double]], n : Int32) -> Array[Array[Double]] {
+  let l : Array[Array[Double]] = []
+  for _i in 0..<n {
+    let row : Array[Double] = []
+    for _j in 0..<n {
+      row.push(0.0)
+    }
+    l.push(row)
+  }
+  for i in 0..<n {
+    let iend = i + 1
+    for j in 0..<iend {
+      let mut s = a[i][j]
+      for k in 0..<j {
+        s = s - l[i][k] * l[j][k]
+      }
+      if i == j {
+        let diag = if s < 1.0e-12 { 1.0e-12 } else { s }
+        l[i][j] = diag.sqrt()
+      } else {
+        l[i][j] = s / l[j][j]
+      }
+    }
+  }
+  l
+}
+
+///|
+fn ego_forward(
+  l : Array[Array[Double]],
+  b : Array[Double],
+  n : Int32,
+) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<n {
+    let mut s = b[i]
+    for k in 0..<i {
+      s = s - l[i][k] * y[k]
+    }
+    y.push(s / l[i][i])
+  }
+  y
+}
+
+///|
+fn ego_backward(
+  l : Array[Array[Double]],
+  b : Array[Double],
+  n : Int32,
+) -> Array[Double] {
+  let y : Array[Double] = []
+  for _i in 0..<n {
+    y.push(0.0)
+  }
+  let mut i = n - 1
+  while i >= 0 {
+    let mut s = b[i]
+    let mut k = i + 1
+    while k < n {
+      s = s - l[k][i] * y[k]
+      k = k + 1
+    }
+    y[i] = s / l[i][i]
+    i = i - 1
+  }
+  y
+}
+
+///|
+/// Efficient Global Optimization (Jones, Schonlau and Welch, 1998), the
+/// canonical GP-EI Bayesian optimisation loop. A squared-exponential Gaussian
+/// process is fitted to a bounded window of observations (Cholesky
+/// factorisation of the kernel matrix with a tiny nugget for stability); the
+/// next point maximises the Expected Improvement
+/// `EI = (f_best - mu) * Phi(z) + sigma * phi(z)` over a mix of uniform and
+/// incumbent-centred candidates. This is the library's first surrogate-model
+/// Bayesian-optimisation route, distinct from TPE (two KDEs and a density
+/// ratio), CEM/UMDA (parametric distribution updates) and NS (live-point
+/// compression). A stagnant run periodically injects a uniform sample; the
+/// schedule depends only on evaluations already spent, so a larger budget is a
+/// strict continuation and the historical best is monotone. population_size is
+/// accepted for a uniform config interface.
+pub fn efficient_global_optimization(
+  config : EGOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let cap = 32
+  let n_cand = 16
+  let ell2 = 0.045 * span * span
+  let mut n_start = dim * 2
+  if n_start < 8 {
+    n_start = 8
+  }
+  if n_start > max_evals {
+    n_start = max_evals
+  }
+
+  let xs : Array[Array[Double]] = []
+  let fs : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut evaluations = 0
+  let mut head = 0
+  for _i in 0..<n_start {
+    let x : Array[Double] = []
+    for _d in 0..<dim {
+      x.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    let v = evaluate(f, x)
+    evaluations = evaluations + 1
+    xs.push(x)
+    fs.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = ego_copy(x)
+    }
+  }
+
+  let mut stall = 0
+  let mut round = 0
+  let mut lstep = span * 0.15
+  while evaluations < max_evals {
+    let n = xs.length()
+    let mut ymean = 0.0
+    for i in 0..<n {
+      ymean = ymean + fs[i]
+    }
+    ymean = ymean / n.to_double()
+    let mut yvar = 0.0
+    for i in 0..<n {
+      let df = fs[i] - ymean
+      yvar = yvar + df * df
+    }
+    yvar = yvar / n.to_double()
+    let scale = if yvar < 1.0e-12 { 1.0e-8 } else { yvar }
+    let noise = if yvar < 1.0e-12 { 1.0e-8 } else { yvar * 1.0e-6 }
+
+    let kmat : Array[Array[Double]] = []
+    for i in 0..<n {
+      let row : Array[Double] = []
+      for j in 0..<n {
+        let mut sq = 0.0
+        for d in 0..<dim {
+          let df = xs[i][d] - xs[j][d]
+          sq = sq + df * df
+        }
+        let mut kval = scale * @math.exp(0.0 - sq / ell2)
+        if i == j {
+          kval = kval + noise
+        }
+        row.push(kval)
+      }
+      kmat.push(row)
+    }
+    let lmat = ego_cholesky(kmat, n)
+    let centered : Array[Double] = []
+    for i in 0..<n {
+      centered.push(fs[i] - ymean)
+    }
+    let zf = ego_forward(lmat, centered, n)
+    let alpha = ego_backward(lmat, zf, n)
+
+    let mut cand_best : Array[Double] = []
+    let mut cand_ei = -1.0e300
+    for c in 0..<n_cand {
+      let q : Array[Double] = []
+      if c < n_cand / 2 {
+        for _d in 0..<dim {
+          q.push(bounds.min + RNG::next(current_rng) * span)
+        }
+      } else {
+        for d in 0..<dim {
+          q.push(
+            ego_clip(best_pos[d] + 0.15 * span * ego_gauss(current_rng), bounds),
+          )
+        }
+      }
+      let ks : Array[Double] = []
+      for i in 0..<n {
+        let mut sq = 0.0
+        for d in 0..<dim {
+          let df = q[d] - xs[i][d]
+          sq = sq + df * df
+        }
+        ks.push(scale * @math.exp(0.0 - sq / ell2))
+      }
+      let wf = ego_forward(lmat, ks, n)
+      let wb = ego_backward(lmat, wf, n)
+      let mut mu = ymean
+      let mut dot = 0.0
+      for i in 0..<n {
+        mu = mu + ks[i] * alpha[i]
+        dot = dot + ks[i] * wb[i]
+      }
+      let mut s2 = scale - dot
+      if s2 < 1.0e-10 {
+        s2 = 1.0e-10
+      }
+      let sigma = s2.sqrt()
+      let zz = (best_val - mu) / sigma
+      let ei = (best_val - mu) * ego_normal_cdf(zz) + sigma * ego_normal_pdf(zz)
+      if ei > cand_ei {
+        cand_ei = ei
+        cand_best = q
+      }
+    }
+
+    if cand_best.length() == dim {
+      let v = evaluate(f, cand_best)
+      evaluations = evaluations + 1
+      if v < best_val {
+        best_val = v
+        best_pos = ego_copy(cand_best)
+        stall = 0
+      } else {
+        stall = stall + 1
+      }
+      if xs.length() < cap {
+        xs.push(cand_best)
+        fs.push(v)
+      } else {
+        xs[head] = cand_best
+        fs[head] = v
+        head = (head + 1) % cap
+      }
+    } else {
+      stall = stall + 1
+    }
+
+    if stall >= 30 && evaluations + 21 <= max_evals {
+      let q0 : Array[Double] = []
+      for _d in 0..<dim {
+        q0.push(bounds.min + RNG::next(current_rng) * span)
+      }
+      let mut qs = q0
+      let mut qv = evaluate(f, qs)
+      evaluations = evaluations + 1
+      let mut qstep = span * 0.12
+      let mut tries = 0
+      while tries < 20 {
+        let dr = (RNG::next(current_rng) * dim.to_double()).to_int()
+        let dsel = if dr >= dim { dim - 1 } else { dr }
+        let sgn = if RNG::next(current_rng) < 0.5 { 1.0 } else { 0.0 - 1.0 }
+        let cand = ego_copy(qs)
+        cand[dsel] = ego_clip(qs[dsel] + sgn * qstep, bounds)
+        let cv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        if cv < qv {
+          qv = cv
+          qs = cand
+        }
+        tries = tries + 1
+        if tries % 5 == 0 {
+          qstep = qstep * 0.6
+        }
+      }
+      if qv < best_val {
+        best_val = qv
+        best_pos = qs
+      }
+      if xs.length() < cap {
+        xs.push(qs)
+        fs.push(qv)
+      } else {
+        xs[head] = qs
+        fs[head] = qv
+        head = (head + 1) % cap
+      }
+      stall = 0
+    }
+
+    if round % 3 == 0 && evaluations < max_evals {
+      let dr = (RNG::next(current_rng) * dim.to_double()).to_int()
+      let dsel = if dr >= dim { dim - 1 } else { dr }
+      let sgn = if RNG::next(current_rng) < 0.5 { 1.0 } else { 0.0 - 1.0 }
+      let q = ego_copy(best_pos)
+      q[dsel] = ego_clip(best_pos[dsel] + sgn * lstep, bounds)
+      let v = evaluate(f, q)
+      evaluations = evaluations + 1
+      if v < best_val {
+        best_val = v
+        best_pos = q
+        stall = 0
+      }
+      if xs.length() < cap {
+        xs.push(q)
+        fs.push(v)
+      } else {
+        xs[head] = q
+        fs[head] = v
+        head = (head + 1) % cap
+      }
+      lstep = lstep * 0.92
+      if lstep < span * 1.0e-8 {
+        lstep = span * 0.05
+      }
+    }
+    round = round + 1
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
