@@ -2302,6 +2302,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       deer_hunting_optimization(make_dho_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "CHC",
+    run: (e, d, b, r, f) => {
+      cross_generation_elitist_algorithm(make_chc_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

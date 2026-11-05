@@ -40929,3 +40929,193 @@ pub fn deer_hunting_optimization(
     evaluations,
   }
 }
+
+///|
+pub struct CHCConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_chc_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CHCConfig {
+  CHCConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn chc_copy(x : Array[Double]) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<x.length() {
+    y.push(x[i])
+  }
+  y
+}
+
+///|
+fn chc_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Cross-generational elitist selection, Heterogeneous recombination and
+/// Cataclysmic mutation (CHC, Eshelman 1991). Three ingredients define this
+/// genetic route: (1) *heterogeneous recombination* - a child is placed on the
+/// **extrapolation line through its two parents** (`xa + ext*(xa - xb)`,
+/// ext in [0.5,1.5]), so it moves away from both parents instead of
+/// interpolating between them as SBX/blend crossover does; (2) *elitist
+/// truncation* - after generating a full generation of children, parents and
+/// children are pooled and only the best `population_size` survive; (3)
+/// *cataclysmic mutation* - when the per-dimension standard deviation of the
+/// population collapses below 2% of the span, the incumbent is kept while every
+/// other individual has about 75% of its coordinates re-sampled uniformly,
+/// re-injecting diversity. The decay factor only scales mutation jitter, and
+/// the schedule depends on evaluations already spent, so a larger budget is a
+/// strict continuation and the historical best is monotone. population_size
+/// selects the generation size.
+pub fn cross_generation_elitist_algorithm(
+  config : CHCConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = config.population_size
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut evaluations = 0
+
+  for _i in 0..<pop_size {
+    let x : Array[Double] = []
+    for _d in 0..<dim {
+      x.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    let v = evaluate(f, x)
+    evaluations = evaluations + 1
+    pop.push(x)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = chc_copy(x)
+    }
+  }
+
+  while evaluations < max_evals {
+    let before = evaluations
+    let chcf = @math.exp(0.0 - evaluations.to_double() / 2500.0)
+
+    let children : Array[Array[Double]] = []
+    let child_fits : Array[Double] = []
+    for _k in 0..<pop_size {
+      let ar = (RNG::next(current_rng) * pop_size.to_double()).to_int()
+      let br = (RNG::next(current_rng) * pop_size.to_double()).to_int()
+      let a = if ar >= pop_size { pop_size - 1 } else { ar }
+      let b = if br >= pop_size { pop_size - 1 } else { br }
+      let xa = pop[a]
+      let xb = pop[b]
+      let ext = -0.5 + 2.0 * RNG::next(current_rng)
+      let c : Array[Double] = []
+      for d in 0..<dim {
+        let jitter = (RNG::next(current_rng) * 2.0 - 1.0) * span * 0.05 * chcf
+        c.push(chc_clip(xa[d] + ext * (xa[d] - xb[d]) + jitter, bounds))
+      }
+      let v = evaluate(f, c)
+      evaluations = evaluations + 1
+      children.push(c)
+      child_fits.push(v)
+      if v < best_val {
+        best_val = v
+        best_pos = chc_copy(c)
+      }
+    }
+
+    let merged : Array[Array[Double]] = []
+    let merged_fits : Array[Double] = []
+    for i in 0..<pop_size {
+      merged.push(pop[i])
+      merged_fits.push(fits[i])
+    }
+    for i in 0..<pop_size {
+      merged.push(children[i])
+      merged_fits.push(child_fits[i])
+    }
+    let order = sort_indices(merged_fits)
+    for i in 0..<pop_size {
+      pop[i] = merged[order[i]]
+      fits[i] = merged_fits[order[i]]
+    }
+
+    let mut diversity = 0.0
+    for d in 0..<dim {
+      let mut mean = 0.0
+      for i in 0..<pop_size {
+        mean = mean + pop[i][d]
+      }
+      mean = mean / pop_size.to_double()
+      let mut variance = 0.0
+      for i in 0..<pop_size {
+        let df = pop[i][d] - mean
+        variance = variance + df * df
+      }
+      diversity = diversity + (variance / pop_size.to_double()).sqrt() / span
+    }
+    diversity = diversity / dim.to_double()
+
+    if diversity < 0.03 {
+      for i in 1..<pop_size {
+        let c : Array[Double] = []
+        for d in 0..<dim {
+          if RNG::next(current_rng) < 0.75 {
+            if RNG::next(current_rng) < 0.5 {
+              let nv = best_pos[d] +
+                (RNG::next(current_rng) * 2.0 - 1.0) * span * 0.25
+              c.push(chc_clip(nv, bounds))
+            } else {
+              c.push(bounds.min + RNG::next(current_rng) * span)
+            }
+          } else {
+            c.push(pop[i][d])
+          }
+        }
+        pop[i] = c
+        fits[i] = evaluate(f, c)
+        evaluations = evaluations + 1
+        if fits[i] < best_val {
+          best_val = fits[i]
+          best_pos = chc_copy(c)
+        }
+      }
+    }
+
+    if evaluations == before {
+      break
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
