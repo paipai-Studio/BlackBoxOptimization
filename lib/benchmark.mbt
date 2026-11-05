@@ -2260,6 +2260,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       multiple_trajectory_search(make_mts_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "TPE",
+    run: (e, d, b, r, f) => {
+      tree_parzen_estimator(make_tpe_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

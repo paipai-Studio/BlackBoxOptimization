@@ -39102,3 +39102,300 @@ pub fn multiple_trajectory_search(
     evaluations,
   }
 }
+
+///|
+pub struct TPEConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_tpe_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> TPEConfig {
+  TPEConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn tpe_gauss(rng : RNG) -> Double {
+  let u1 = RNG::next(rng)
+  let u2 = RNG::next(rng)
+  let safe = if u1 < 1.0e-12 { 1.0e-12 } else { u1 }
+  (-2.0 * @math.ln(safe)).sqrt() * @math.cos(TWO_PI * u2)
+}
+
+///|
+fn tpe_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+fn tpe_copy(x : Array[Double]) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<x.length() {
+    y.push(x[i])
+  }
+  y
+}
+
+///|
+fn tpe_add_sample(
+  xs : Array[Array[Double]],
+  fs : Array[Double],
+  x : Array[Double],
+  v : Double,
+  cap : Int32,
+  rng : RNG,
+) -> Unit {
+  let n = xs.length()
+  if n < cap {
+    xs.push(x)
+    fs.push(v)
+  } else {
+    let j = 1 + (RNG::next(rng) * (n - 1).to_double()).to_int()
+    let jj = if j >= n { n - 1 } else { j }
+    xs[jj] = x
+    fs[jj] = v
+  }
+}
+
+///|
+fn tpe_log_kde(
+  c : Array[Double],
+  xs : Array[Array[Double]],
+  idxs : Array[Int32],
+  cnt : Int32,
+  h : Array[Double],
+  dim : Int32,
+) -> Double {
+  let vals : Array[Double] = []
+  let mut mx = -1.0e300
+  for k in 0..<cnt {
+    let p = xs[idxs[k]]
+    let mut q = 0.0
+    for d in 0..<dim {
+      let z = (c[d] - p[d]) / h[d]
+      q = q + z * z
+    }
+    let v = -0.5 * q
+    vals.push(v)
+    if v > mx {
+      mx = v
+    }
+  }
+  let mut s = 0.0
+  for k in 0..<vals.length() {
+    s = s + @math.exp(vals[k] - mx)
+  }
+  mx + @math.ln(s)
+}
+
+///|
+/// Tree-structured Parzen Estimator (Bergstra et al., 2011). Observations are
+/// split by a quantile into a *good* set l(x) and a *bad* set g(x); each set is
+/// modelled by a product of per-dimension Gaussian kernels whose bandwidths are
+/// the observed standard deviations. New points are drawn from l(x) and the one
+/// maximising the density ratio l(x)/g(x) (the Expected-Improvement proxy used
+/// by TPE) is evaluated. A shrinking local refinement around the incumbent is
+/// interleaved every fourth round so that the model keeps exploiting once l(x)
+/// has collapsed. The schedule depends only on evaluations already spent, so a
+/// larger budget is a strict continuation of a smaller one and the historical
+/// best is monotone. population_size is accepted for a uniform interface.
+pub fn tree_parzen_estimator(
+  config : TPEConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let cap = 120
+  let n_cand = 12
+  let bad_sample = 16
+  let xs : Array[Array[Double]] = []
+  let fs : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut evaluations = 0
+  let max_start = max_evals
+  let mut n_start = dim * 2
+  if n_start < 8 {
+    n_start = 8
+  }
+  if n_start > max_start {
+    n_start = max_start
+  }
+  for _i in 0..<n_start {
+    let x : Array[Double] = []
+    for _d in 0..<dim {
+      x.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    let v = evaluate(f, x)
+    evaluations = evaluations + 1
+    xs.push(x)
+    fs.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = tpe_copy(x)
+    }
+  }
+
+  let mut round = 0
+  let mut stall = 0
+  while evaluations < max_evals {
+    let round_start_best = best_val
+    let n = xs.length()
+    let order = sort_indices(fs)
+    let mut n_good = (n.to_double() * 0.2).to_int()
+    if n_good < 2 {
+      n_good = 2
+    }
+    if n_good > n - 1 {
+      n_good = n - 1
+    }
+    let shrink = 1.0 / (1.0 + round.to_double() * 0.001)
+    let h_low = span * 1.0e-3 * shrink
+    let hg : Array[Double] = []
+    let hb : Array[Double] = []
+    for d in 0..<dim {
+      let mut mg = 0.0
+      for k in 0..<n_good {
+        mg = mg + xs[order[k]][d]
+      }
+      mg = mg / n_good.to_double()
+      let mut vg = 0.0
+      for k in 0..<n_good {
+        let df = xs[order[k]][d] - mg
+        vg = vg + df * df
+      }
+      vg = vg / n_good.to_double()
+      let sg = vg.sqrt()
+      hg.push(if sg < h_low { h_low } else { sg })
+      let nb = n - n_good
+      let mut mb = 0.0
+      for k in n_good..<n {
+        mb = mb + xs[order[k]][d]
+      }
+      mb = mb / nb.to_double()
+      let mut vb = 0.0
+      for k in n_good..<n {
+        let df = xs[order[k]][d] - mb
+        vb = vb + df * df
+      }
+      vb = vb / nb.to_double()
+      let sb = vb.sqrt()
+      hb.push(if sb < h_low { h_low } else { sb })
+    }
+
+    let pool : Array[Int32] = []
+    for k in n_good..<n {
+      pool.push(order[k])
+    }
+    let nb = n - n_good
+    let nb_use = if nb < bad_sample { nb } else { bad_sample }
+    let bad_idx : Array[Int32] = []
+    for k in 0..<nb_use {
+      let j = k + (RNG::next(current_rng) * (nb - k).to_double()).to_int()
+      let jj = if j >= nb { nb - 1 } else { j }
+      let tmp = pool[k]
+      pool[k] = pool[jj]
+      pool[jj] = tmp
+      bad_idx.push(pool[k])
+    }
+
+    let mut cand_best : Array[Double] = []
+    let mut cand_score = -1.0e300
+    for _c in 0..<n_cand {
+      let gi = (RNG::next(current_rng) * n_good.to_double()).to_int()
+      let gidx = if gi >= n_good { n_good - 1 } else { gi }
+      let g = xs[order[gidx]]
+      let c : Array[Double] = []
+      for d in 0..<dim {
+        c.push(tpe_clip(g[d] + hg[d] * tpe_gauss(current_rng), bounds))
+      }
+      let lg = tpe_log_kde(c, xs, order, n_good, hg, dim)
+      let lb = tpe_log_kde(c, xs, bad_idx, nb_use, hb, dim)
+      let score = lg - lb
+      if score > cand_score {
+        cand_score = score
+        cand_best = c
+      }
+    }
+    if cand_best.length() == dim {
+      let v = evaluate(f, cand_best)
+      evaluations = evaluations + 1
+      if v < best_val {
+        best_val = v
+        best_pos = tpe_copy(cand_best)
+      }
+      tpe_add_sample(xs, fs, cand_best, v, cap, current_rng)
+    }
+
+    if round % 4 == 3 && evaluations < max_evals {
+      let c : Array[Double] = []
+      for d in 0..<dim {
+        c.push(
+          tpe_clip(
+            best_pos[d] + span * 0.02 * shrink * tpe_gauss(current_rng),
+            bounds,
+          ),
+        )
+      }
+      let v = evaluate(f, c)
+      evaluations = evaluations + 1
+      if v < best_val {
+        best_val = v
+        best_pos = tpe_copy(c)
+      }
+      tpe_add_sample(xs, fs, c, v, cap, current_rng)
+    }
+    if best_val < round_start_best {
+      stall = 0
+    } else {
+      stall = stall + 1
+    }
+    if stall >= 48 && evaluations + 2 <= max_evals {
+      let d_raw = (RNG::next(current_rng) * dim.to_double()).to_int()
+      let dsel = if d_raw >= dim { dim - 1 } else { d_raw }
+      let amp = span * (0.05 + 0.25 * RNG::next(current_rng))
+      let base = tpe_copy(best_pos)
+      for sgn in 0..<2 {
+        let c = tpe_copy(base)
+        let delta = if sgn == 0 { amp } else { 0.0 - amp }
+        c[dsel] = tpe_clip(base[dsel] + delta, bounds)
+        let v = evaluate(f, c)
+        evaluations = evaluations + 1
+        if v < best_val {
+          best_val = v
+          best_pos = c
+        }
+        tpe_add_sample(xs, fs, c, v, cap, current_rng)
+      }
+      stall = 0
+    }
+    round = round + 1
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
