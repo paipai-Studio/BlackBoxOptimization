@@ -40166,3 +40166,219 @@ pub fn gutmann_ramm_optimization(
     evaluations,
   }
 }
+
+///|
+pub struct SepCMAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_sepcma_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SepCMAConfig {
+  SepCMAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn sepcma_gauss(rng : RNG) -> Double {
+  let u1 = RNG::next(rng)
+  let u2 = RNG::next(rng)
+  let safe = if u1 < 1.0e-12 { 1.0e-12 } else { u1 }
+  (-2.0 * @math.ln(safe)).sqrt() * @math.cos(TWO_PI * u2)
+}
+
+///|
+fn sepcma_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+fn sepcma_copy(x : Array[Double]) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<x.length() {
+    y.push(x[i])
+  }
+  y
+}
+
+///|
+fn sepcma_max(a : Double, b : Double) -> Double {
+  if a > b {
+    a
+  } else {
+    b
+  }
+}
+
+///|
+/// Separable CMA-ES (Ros and Hansen, 2008). The covariance matrix is
+/// constrained to be diagonal, so the sampling distribution factorises per
+/// coordinate: `x_i = m + sigma * sqrt(C_diag) .* z`, `z ~ N(0, I)`. The mean is
+/// the weighted recombination of the best mu offspring; each diagonal variance
+/// is updated by the rank-mu rule, while the global step size follows the
+/// cumulative step-size adaptation (CSA) path. Compared with full CMA-ES (which
+/// maintains the complete covariance matrix, evolution paths and a Cholesky
+/// factor), this separable variant has only d variance parameters, no matrix
+/// factorisation and no inter-coordinate rotations; it is therefore strong on
+/// separable landscapes (Sphere/Rastrigin/Schwefel) but deliberately weaker on
+/// rotated/ill-conditioned ridges such as Rosenbrock. Fixed-size restarts
+/// (600 evaluations each) from the incumbent neighbourhood keep the historical
+/// best monotone, and the schedule depends only on evaluations already spent so
+/// a larger budget is a strict continuation. population_size is accepted for a
+/// uniform config interface.
+pub fn separable_cma_es(
+  config : SepCMAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let dd = dim.to_double()
+  let mut lambda = 4 + (3.0 * @math.ln(dd)).to_int()
+  if lambda < 6 {
+    lambda = 6
+  }
+  let mu = lambda / 2
+  let weights : Array[Double] = []
+  let mut wsum = 0.0
+  for i in 0..<mu {
+    let w = @math.ln(mu.to_double() + 0.5) - @math.ln((i + 1).to_double())
+    weights.push(w)
+    wsum = wsum + w
+  }
+  for i in 0..<mu {
+    weights[i] = weights[i] / wsum
+  }
+  let mut mueff_inv = 0.0
+  for i in 0..<mu {
+    mueff_inv = mueff_inv + weights[i] * weights[i]
+  }
+  let mueff = 1.0 / mueff_inv
+  let cs = (mueff + 2.0) / (dd + mueff + 5.0)
+  let ds = 1.0 +
+    2.0 * sepcma_max(0.0, ((mueff - 1.0) / (dd + 1.0)).sqrt() - 1.0) +
+    cs
+  let cc = (4.0 + mueff / dd) / (dd + 4.0 + 2.0 * mueff / dd)
+  let en = dd.sqrt() * (1.0 - 1.0 / (4.0 * dd) + 1.0 / (21.0 * dd * dd))
+  let seg_evals = 1500
+
+  let mean : Array[Double] = []
+  let cdiag : Array[Double] = []
+  let ps : Array[Double] = []
+  for _d in 0..<dim {
+    mean.push(bounds.min + RNG::next(current_rng) * span)
+    cdiag.push(1.0)
+    ps.push(0.0)
+  }
+  let mut sigma = span * 0.25
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut evaluations = 0
+  let mut seg_start = 0
+
+  while evaluations < max_evals {
+    if evaluations - seg_start >= seg_evals {
+      seg_start = evaluations
+      sigma = span * 0.10
+      for d in 0..<dim {
+        cdiag[d] = 1.0
+        ps[d] = 0.0
+        if best_pos.length() == dim {
+          let noise = (RNG::next(current_rng) * 2.0 - 1.0) * span * 0.05
+          mean[d] = sepcma_clip(best_pos[d] + noise, bounds)
+        } else {
+          mean[d] = bounds.min + RNG::next(current_rng) * span
+        }
+      }
+    }
+
+    let xs : Array[Array[Double]] = []
+    let fvals : Array[Double] = []
+    let mut k = 0
+    while k < lambda && evaluations < max_evals {
+      let x : Array[Double] = []
+      for d in 0..<dim {
+        let z = sepcma_gauss(current_rng)
+        x.push(sepcma_clip(mean[d] + sigma * cdiag[d].sqrt() * z, bounds))
+      }
+      let fv = evaluate(f, x)
+      evaluations = evaluations + 1
+      xs.push(x)
+      fvals.push(fv)
+      if fv < best_val {
+        best_val = fv
+        best_pos = sepcma_copy(x)
+      }
+      k = k + 1
+    }
+    if xs.length() < mu {
+      break
+    }
+
+    let order = sort_indices(fvals)
+    let new_mean : Array[Double] = []
+    for d in 0..<dim {
+      let mut s = 0.0
+      for i in 0..<mu {
+        s = s + weights[i] * xs[order[i]][d]
+      }
+      new_mean.push(s)
+    }
+
+    let old_sigma = sigma
+    let coef = (cs * (2.0 - cs) * mueff).sqrt()
+    let mut pnorm2 = 0.0
+    for d in 0..<dim {
+      let delta = (new_mean[d] - mean[d]) / (old_sigma * cdiag[d].sqrt())
+      ps[d] = (1.0 - cs) * ps[d] + coef * delta
+      pnorm2 = pnorm2 + ps[d] * ps[d]
+    }
+    let pnorm = pnorm2.sqrt()
+    sigma = sigma * @math.exp(cs / ds * (pnorm / en - 1.0))
+    if sigma < span * 1.0e-12 {
+      sigma = span * 1.0e-12
+    }
+    if sigma > span * 2.0 {
+      sigma = span * 2.0
+    }
+
+    for d in 0..<dim {
+      let mut v = 0.0
+      for i in 0..<mu {
+        let df = (xs[order[i]][d] - mean[d]) / old_sigma
+        v = v + weights[i] * df * df
+      }
+      let nc = (1.0 - cc) * cdiag[d] + cc * v
+      cdiag[d] = if nc < 1.0e-20 { 1.0e-20 } else { nc }
+    }
+
+    for d in 0..<dim {
+      mean[d] = sepcma_clip(new_mean[d], bounds)
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

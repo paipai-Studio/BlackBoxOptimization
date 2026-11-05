@@ -2278,6 +2278,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       gutmann_ramm_optimization(make_gr_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "sepCMA",
+    run: (e, d, b, r, f) => {
+      separable_cma_es(make_sepcma_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
