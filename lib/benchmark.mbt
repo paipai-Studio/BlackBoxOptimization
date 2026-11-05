@@ -2046,6 +2046,274 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       dolphin_optimization(make_dolphin_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "BAS",
+    run: (e, d, b, r, f) => {
+      beetle_antennae_search(make_bas_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "ManSA",
+    run: (e, d, b, r, f) => {
+      mantis_search_algorithm(make_mantis_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "EWA",
+    run: (e, d, b, r, f) => {
+      earthworm_optimization(make_ewa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "GrSA",
+    run: (e, d, b, r, f) => {
+      group_search_optimization(make_grsa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "FrOA",
+    run: (e, d, b, r, f) => {
+      forest_optimization(make_froa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "ChRO",
+    run: (e, d, b, r, f) => {
+      chemical_reaction_optimization(make_chro_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SPBO",
+    run: (e, d, b, r, f) => {
+      student_psychological_optimization(make_spbo_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "PTO",
+    run: (e, d, b, r, f) => {
+      parallel_tempering_optimization(make_pto_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "CLPSO",
+    run: (e, d, b, r, f) => {
+      comprehensive_learning_pso(make_clpso_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "ExtO",
+    run: (e, d, b, r, f) => {
+      extremal_optimization(make_exto_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "BFGS",
+    run: (e, d, b, r, f) => bfgs_optimizer(make_bfgs_config(e, d, b, 25), f, r),
+  })
+  entries.push(AlgoEntry::{
+    name: "SOMA",
+    run: (e, d, b, r, f) => {
+      self_organizing_migration(make_soma_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SDS",
+    run: (e, d, b, r, f) => {
+      stochastic_diffusion_search(make_sds_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "DAnl",
+    run: (e, d, b, r, f) => {
+      dual_annealing(make_dual_annealing_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SQA",
+    run: (e, d, b, r, f) => {
+      simulated_quantum_annealing(make_sqa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "COBYLA",
+    run: (e, d, b, r, f) => {
+      cobyla_optimizer(make_cobyla_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "NS",
+    run: (e, d, b, r, f) => {
+      nested_sampling(make_nested_sampling_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "MADS",
+    run: (e, d, b, r, f) => {
+      mesh_adaptive_direct_search(make_mads_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "NEWUOA",
+    run: (e, d, b, r, f) => {
+      newuoa_optimizer(make_newuoa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "PA",
+    run: (e, d, b, r, f) => {
+      population_annealing(make_population_annealing_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "OAIN",
+    run: (e, d, b, r, f) => opt_ainet(make_oain_config(e, d, b, 25), f, r),
+  })
+  entries.push(AlgoEntry::{
+    name: "xNES",
+    run: (e, d, b, r, f) => {
+      exponential_natural_evolution_strategy(
+        make_xnes_config(e, d, b, 25),
+        f,
+        r,
+      )
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "Demon",
+    run: (e, d, b, r, f) => {
+      demon_algorithm(make_demon_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "MCS",
+    run: (e, d, b, r, f) => {
+      multilevel_coordinate_search(make_mcs_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "WL",
+    run: (e, d, b, r, f) => {
+      wang_landau_sampling(make_wl_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "LSHADE",
+    run: (e, d, b, r, f) => {
+      lshade_algorithm(make_lshade_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "1+1ES",
+    run: (e, d, b, r, f) => {
+      one_plus_one_evolution_strategy(
+        make_one_plus_one_es_config(e, d, b, 25),
+        f,
+        r,
+      )
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "PRAXIS",
+    run: (e, d, b, r, f) => {
+      praxis_optimizer(make_praxis_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "BOBYQA",
+    run: (e, d, b, r, f) => {
+      bobyqa_optimizer(make_bobyqa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "ASA",
+    run: (e, d, b, r, f) => {
+      adaptive_simulated_annealing(make_asa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "GSS",
+    run: (e, d, b, r, f) => {
+      golden_section_search(make_gss_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "Subplex",
+    run: (e, d, b, r, f) => {
+      subplex_optimizer(make_subplex_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "MLSL",
+    run: (e, d, b, r, f) => {
+      multi_level_single_linkage(make_mlsl_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "LBB",
+    run: (e, d, b, r, f) => {
+      lipschitz_branch_and_bound(make_lipschitz_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "MTS",
+    run: (e, d, b, r, f) => {
+      multiple_trajectory_search(make_mts_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "TPE",
+    run: (e, d, b, r, f) => {
+      tree_parzen_estimator(make_tpe_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "EGO",
+    run: (e, d, b, r, f) => {
+      efficient_global_optimization(make_ego_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "GR",
+    run: (e, d, b, r, f) => {
+      gutmann_ramm_optimization(make_gr_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "sepCMA",
+    run: (e, d, b, r, f) => {
+      separable_cma_es(make_sepcma_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "IFilt",
+    run: (e, d, b, r, f) => {
+      implicit_filtering(make_ifilt_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "CG",
+    run: (e, d, b, r, f) => {
+      conjugate_gradient_method(make_cg_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "DHO",
+    run: (e, d, b, r, f) => {
+      deer_hunting_optimization(make_dho_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "CHC",
+    run: (e, d, b, r, f) => {
+      cross_generation_elitist_algorithm(make_chc_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "MDS",
+    run: (e, d, b, r, f) => {
+      multi_directional_search(make_mds_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

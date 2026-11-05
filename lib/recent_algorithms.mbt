@@ -32542,3 +32542,8789 @@ pub fn dolphin_optimization(
     evaluations,
   }
 }
+
+// ===== BAS: Beetle Antennae Search (2017) =====
+
+///|
+pub struct BeetleAntennaeConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bas_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BeetleAntennaeConfig {
+  BeetleAntennaeConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Beetle Antennae Search (Jiang & Wang 2017): a single beetle senses the
+/// landscape with two antennae placed symmetrically around the incumbent
+/// along one random unit heading.  Only the sign of the antenna comparison
+/// decides which way the beetle crawls next - no per-dimension gradient
+/// weights are formed (unlike SPSA's trust-region gradient estimate) -
+/// while the antennae spacing and the crawl step share a single
+/// exponentially decaying schedule.  A fading jitter guards against late
+/// stagnation on multimodal landscapes and the historical best is tracked
+/// separately.
+pub fn beetle_antennae_search(
+  config : BeetleAntennaeConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+
+  let mut x = random_solution(dim, bounds, current_rng)
+  let mut fx = evaluate(f, x)
+  let mut evaluations = 1
+  let mut best_pos : Array[Double] = x
+  let mut best_val = fx
+
+  while evaluations < max_evals {
+    let heat = @math.exp(-evaluations.to_double() / 2500.0)
+    // one random unit heading shared by both antennae
+    let mut nrm2 = 0.0
+    let d : Array[Double] = []
+    for _i in 0..<dim {
+      let v = 2.0 * RNG::next(current_rng) - 1.0
+      d.push(v)
+      nrm2 = nrm2 + v * v
+    }
+    let nrm = nrm2.sqrt() + 1.0e-300
+    // antennae spacing and crawl step share the decaying schedule
+    let antenna = span * 0.15 * heat
+    let step = span * 0.20 * heat
+    let x_left : Array[Double] = []
+    for di in 0..<dim {
+      x_left.push(
+        max(bounds.min, min(bounds.max, x[di] + antenna * d[di] / nrm)),
+      )
+    }
+    let fl = evaluate(f, x_left)
+    evaluations = evaluations + 1
+    let x_right : Array[Double] = []
+    for di in 0..<dim {
+      x_right.push(
+        max(bounds.min, min(bounds.max, x[di] - antenna * d[di] / nrm)),
+      )
+    }
+    let fr = evaluate(f, x_right)
+    evaluations = evaluations + 1
+    // crawl toward the better antenna: the sign of the comparison is the
+    // only information carried into the move
+    let sgn = if fl < fr { 1.0 } else { -1.0 }
+    if evaluations < max_evals {
+      let cand : Array[Double] = []
+      for di in 0..<dim {
+        cand.push(
+          max(bounds.min, min(bounds.max, x[di] + sgn * step * d[di] / nrm)),
+        )
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      x = cand
+      fx = fv
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+    // fading jitter against late stagnation on multimodal landscapes
+    if evaluations < max_evals && RNG::next(current_rng) < 0.25 {
+      let cand : Array[Double] = []
+      for di in 0..<dim {
+        cand.push(
+          max(
+            bounds.min,
+            min(
+              bounds.max,
+              x[di] + (2.0 * RNG::next(current_rng) - 1.0) * span * 0.03 * heat,
+            ),
+          ),
+        )
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      x = cand
+      fx = fv
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== ManSA: Mantis Search Algorithm (2023) =====
+
+///|
+pub struct MantisConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_mantis_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> MantisConfig {
+  MantisConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Mantis Search Algorithm (2023): every generation each mantis is paired
+/// with a random rival and the predation factor mnf = e^{-t/2500} decays
+/// with the evaluation budget:
+///   * ambush - the fitter mantis feeds on the loser, refining toward the
+///     global best while absorbing a weak pull along the rival's direction;
+///     the loser is assimilated, i.e. relocated straight into the winner's
+///     neighbourhood (with a differential kick) instead of crawling there;
+///   * camouflage - fine jitter keeps the swarm diverse;
+///   * egg case - contract around the global best where the female lays.
+pub fn mantis_search_algorithm(
+  config : MantisConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let mnf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.30 {
+        // ambush: pair with a random rival; the winner feeds on the loser
+        let j = (
+            (RNG::next(current_rng) * pop_size.to_double()).to_int() + i + 1
+          ) %
+          pop_size
+        let xj = pop[j]
+        if fits[i] <= fits[j] {
+          // winner feeds on the loser: refine toward the global best while
+          // absorbing a weak pull along the rival's direction
+          for d in 0..<dim {
+            let nv = xi[d] +
+              0.9 * mnf * (best_pos[d] - xi[d]) +
+              0.22 * mnf * (xj[d] - xi[d]) +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.11 * mnf
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        } else {
+          // loser is assimilated: relocate straight into the winner's
+          // neighbourhood with a differential kick from random partners
+          let p_i = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+            pop_size
+          let q_i = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+            pop_size
+          let xp = pop[p_i]
+          let xq = pop[q_i]
+          for d in 0..<dim {
+            let nv = xj[d] +
+              0.40 * mnf * (xj[d] - xi[d]) +
+              0.3 * (xp[d] - xq[d]) +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.11 * mnf
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        }
+      } else if r1 < 0.71 {
+        // camouflage: fine jitter keeps the swarm diverse
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * mnf * mnf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // egg case: contract around the global best
+        let r2 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * mnf * 0.05
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== EWA: Earthworm Optimization Algorithm (2015) =====
+
+///|
+pub struct EarthwormConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ewa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> EarthwormConfig {
+  EarthwormConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Earthworm Optimization Algorithm (Yang 2015): earthworms regenerate from
+/// a cut - at a random splice point the head segment of a random parent is
+/// spliced onto the tail segment of the incumbent (discrete-dimension
+/// splicing, unlike the arithmetic crossover of SBX or interpolation
+/// schemes), and the offspring is pulled weakly toward the global best.
+/// A fixed jumping probability relocates an individual wholesale to a fresh
+/// point (population diffusion), while the residual phase contracts around
+/// the global best.  The decay factor ewf = e^{-t/2500} shrinks all steps.
+pub fn earthworm_optimization(
+  config : EarthwormConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let ewf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.55 {
+        // regeneration: splice the head of a random parent onto the tail
+        // of the incumbent at a random cut, then pull toward the best
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let cut = (RNG::next(current_rng) * dim.to_double()).to_int() % dim
+        for d in 0..<dim {
+          let base = if d < cut { xj[d] } else { xi[d] }
+          let nv = base +
+            0.4 * ewf * (best_pos[d] - base) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.08 * ewf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < 0.67 {
+        // jumping diffusion: relocate wholesale to a fresh point
+        let p = random_solution(dim, bounds, current_rng)
+        for d in 0..<dim {
+          cand.push(p[d])
+        }
+      } else {
+        // residual: contract around the global best with fine jitter
+        let r2 = RNG::next(current_rng)
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            r2 * (xi[d] - best_pos[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * ewf * 0.06
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== GrSA: Group Search Optimizer (2010) =====
+
+///|
+pub struct GroupSearchConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_grsa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> GroupSearchConfig {
+  GroupSearchConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Group Search Optimizer (He, Wu & Saunders 2010): the fittest individual
+/// is the producer - it visually probes three points (straight ahead and
+/// two random angles around the current heading) and moves to the best one,
+/// keeping the heading on success and re-drawing it on failure.  The rest
+/// are scroungers that area-copy toward the producer, while every 7th
+/// member is a ranger performing large random walks to keep the swarm
+/// diverse.  The group factor gsf = e^{-t/2500} shrinks the step sizes.
+pub fn group_search_optimization(
+  config : GroupSearchConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  // producer's persistent visual heading (unit vector, re-drawn on failure)
+  let heading : Array[Double] = []
+  let mut hnrm2 = 0.0
+  for _d in 0..<dim {
+    let v = 2.0 * RNG::next(current_rng) - 1.0
+    heading.push(v)
+    hnrm2 = hnrm2 + v * v
+  }
+  let mut hnrm = hnrm2.sqrt() + 1.0e-300
+  for d in 0..<dim {
+    heading[d] = heading[d] / hnrm
+  }
+
+  while evaluations < max_evals {
+    // rank the swarm: order[0] is the producer of this generation
+    let order = sort_indices(fits)
+    let pidx = order[0]
+    let gsf = @math.exp(-evaluations.to_double() / 2500.0)
+    let step = span * 0.25 * gsf
+
+    // producer: probe straight ahead and two random angles, move to the best
+    let u : Array[Double] = []
+    let mut unrm2 = 0.0
+    for _d in 0..<dim {
+      let v = 2.0 * RNG::next(current_rng) - 1.0
+      u.push(v)
+      unrm2 = unrm2 + v * v
+    }
+    let unrm = unrm2.sqrt() + 1.0e-300
+    for d in 0..<dim {
+      u[d] = u[d] / unrm
+    }
+    let phi = 0.7854 * RNG::next(current_rng)
+    let cphi = @math.cos(phi)
+    let sphi = @math.sin(phi)
+    let probes : Array[(Array[Double], Double)] = []
+    for k in 0..<3 {
+      let sgn = if k == 0 { 0.0 } else if k == 1 { sphi } else { -sphi }
+      let pt : Array[Double] = []
+      for d in 0..<dim {
+        let nv = pop[pidx][d] + step * (cphi * heading[d] + sgn * u[d])
+        pt.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, pt)
+      evaluations = evaluations + 1
+      probes.push((pt, fv))
+    }
+    let mut bi = 0
+    for k in 1..<3 {
+      if probes[k].1 < probes[bi].1 {
+        bi = k
+      }
+    }
+    let mut prod_pos : Array[Double] = pop[pidx]
+    let mut prod_fit = fits[pidx]
+    if probes[bi].1 < prod_fit {
+      prod_pos = probes[bi].0
+      prod_fit = probes[bi].1
+      pop[pidx] = prod_pos
+      fits[pidx] = prod_fit
+      if prod_fit < best_val {
+        best_val = prod_fit
+        best_pos = prod_pos
+      }
+    } else {
+      // all probes failed: re-draw the heading at random
+      let mut hn2 = 0.0
+      for d in 0..<dim {
+        let v = 2.0 * RNG::next(current_rng) - 1.0
+        heading[d] = v
+        hn2 = hn2 + v * v
+      }
+      hnrm = hn2.sqrt() + 1.0e-300
+      for d in 0..<dim {
+        heading[d] = heading[d] / hnrm
+      }
+    }
+
+    // followers: scroungers copy the producer's patch, rangers roam
+    for k in 1..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let i = order[k]
+      let xi = pop[i]
+      let cand : Array[Double] = []
+      if k % 7 == 0 {
+        // ranger: large random walk keeps the swarm diverse
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.25 * gsf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // scrounger: area-copy the producer's position with jitter
+        for d in 0..<dim {
+          let nv = xi[d] +
+            RNG::next(current_rng) * (prod_pos[d] - xi[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.06 * gsf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== FrOA: Forest Optimization Algorithm (2015) =====
+
+///|
+pub struct ForestConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_froa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ForestConfig {
+  ForestConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Forest Optimization Algorithm (Ghaemi & Feizi-Derakhshi 2015): trees
+/// spread seeds in two modes - local seeding mutates a single randomly
+/// chosen dimension of the incumbent (a coordinate-level move unlike the
+/// all-dimension updates of every other algorithm here), and
+/// distance-limited seeding leaps far toward the champion.  Every tree
+/// carries an age counter that grows each generation regardless of success;
+/// a sapling that beats its parent is adopted and its age resets, while a
+/// dead tree (age >= 8) is replaced by a random sapling or one near the
+/// champion.  The forest factor forf = e^{-t/2500} shrinks all steps.
+pub fn forest_optimization(
+  config : ForestConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  // tree age grows every generation; a successful sapling resets it
+  let age : Array[Int32] = []
+  for _i in 0..<pop_size {
+    age.push(0)
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let old_fit = fits[i]
+      let forf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      let mut new_age = age[i] + 1
+      let mut adopt = true
+      if r1 < 0.58 {
+        // local seeding: mutate one randomly chosen dimension only
+        let d = (RNG::next(current_rng) * dim.to_double()).to_int() % dim
+        for k in 0..<dim {
+          let nv = if k == d {
+            xi[k] + (2.0 * RNG::next(current_rng) - 1.0) * span * 0.15 * forf
+          } else {
+            xi[k]
+          }
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fv0 = evaluate(f, cand)
+        evaluations = evaluations + 1
+        // survival of the fittest: an inferior sapling does not replace
+        // its parent, the tree simply keeps ageing
+        if fv0 < old_fit {
+          new_age = 0
+          let fv = fv0
+          pop[i] = cand
+          fits[i] = fv
+          if fv < best_val {
+            best_val = fv
+            best_pos = cand
+          }
+        } else {
+          adopt = false
+        }
+      } else if r1 < 0.75 {
+        // distance-limited seeding: leap far toward the champion
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            1.2 * forf * (best_pos[d] - xi[d]) +
+            0.3 * (xj[d] - xi[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10 * forf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if age[i] >= 8 {
+        // dead tree: replace by a random sapling or one near the champion
+        new_age = 0
+        if RNG::next(current_rng) < 0.5 {
+          let p = random_solution(dim, bounds, current_rng)
+          for d in 0..<dim {
+            cand.push(p[d])
+          }
+        } else {
+          for d in 0..<dim {
+            let nv = best_pos[d] +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05 * forf
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        }
+      } else {
+        // standing tree: fine jitter keeps the forest diverse
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * forf * forf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      if adopt {
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        pop[i] = cand
+        fits[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+      age[i] = new_age
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== ChRO: Chemical Reaction Optimization (2010) =====
+
+///|
+pub struct ChemicalReactionConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_chro_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ChemicalReactionConfig {
+  ChemicalReactionConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Chemical Reaction Optimization (Lam & Li 2010): every molecule carries a
+/// kinetic-energy buffer on top of its potential energy (the fitness).
+/// Collisions - a wall hit or a two-molecule encounter - can pay for an
+/// inferior candidate out of the buffer (a fraction of the exchanged energy
+/// is lost as heat), so the molecule may temporarily wander uphill instead
+/// of being greedy; when the buffer cannot cover the move the molecule
+/// bounces back unchanged.  Once the buffer runs dry the molecule either
+/// decomposes with a fresh burst of kinetic energy or synthesizes with a
+/// random partner, merging their buffers.  The reaction factor
+/// chf = e^{-t/2500} shrinks the collision amplitudes.
+pub fn chemical_reaction_optimization(
+  config : ChemicalReactionConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  // kinetic-energy buffer of every molecule; any surplus above ke_max
+  // overflows into the shared buffer pool and is discarded, so no molecule
+  // can accumulate unlimited paying power
+  let ke : Array[Double] = []
+  for _i in 0..<pop_size {
+    ke.push(span * 0.1)
+  }
+  let ke_max = span * 0.1
+  let ke_floor = span * 0.02
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let pe = fits[i]
+      let chf = @math.exp(-evaluations.to_double() / 2500.0)
+      let mut final_pos : Array[Double] = xi
+      let mut final_fit = pe
+      let mut new_ke = ke[i]
+      if ke[i] > ke_floor {
+        // energetic molecule: collide with the wall or with a partner
+        let r1 = RNG::next(current_rng)
+        if r1 < 0.5 {
+          // on-wall collision: local perturbation paid out of the buffer
+          let cand : Array[Double] = []
+          for d in 0..<dim {
+            let nv = xi[d] +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.12 * chf
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+          let fp = evaluate(f, cand)
+          evaluations = evaluations + 1
+          if fp < pe + ke[i] * 0.25 {
+            // accepted: the buffer pays for the change (at most a quarter
+            // of it per hit), half of the exchanged energy is lost as heat
+            // and any surplus beyond ke_max overflows away
+            final_pos = cand
+            final_fit = fp
+            new_ke = min((pe + ke[i] - fp) * 0.5, ke_max)
+          }
+          // otherwise the molecule bounces back unchanged
+        } else {
+          // inter-molecular collision: drift toward a random partner
+          let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+            pop_size
+          let xj = pop[j]
+          let w = RNG::next(current_rng)
+          let cand : Array[Double] = []
+          for d in 0..<dim {
+            let nv = xi[d] + w * (xj[d] - xi[d])
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+          let fp = evaluate(f, cand)
+          evaluations = evaluations + 1
+          if fp < pe + ke[i] * 0.25 {
+            final_pos = cand
+            final_fit = fp
+            new_ke = min((pe + ke[i] - fp) * 0.5, ke_max)
+          }
+        }
+      } else {
+        // energy exhausted: decompose or synthesize
+        let r1 = RNG::next(current_rng)
+        if r1 < 0.5 {
+          // decomposition: burst apart with freshly injected energy
+          let cand : Array[Double] = []
+          for d in 0..<dim {
+            let nv = xi[d] +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.30 * chf
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+          final_pos = cand
+          final_fit = evaluate(f, cand)
+          evaluations = evaluations + 1
+          new_ke = min((pe + ke[i]) * 0.5 + span * 0.05, ke_max)
+        } else {
+          // synthesis: merge with a random partner, buffers combine
+          let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+            pop_size
+          let xj = pop[j]
+          let cand : Array[Double] = []
+          for d in 0..<dim {
+            let nv = (xi[d] + xj[d]) * 0.5
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+          final_pos = cand
+          final_fit = evaluate(f, cand)
+          evaluations = evaluations + 1
+          new_ke = min((ke[i] + ke[j]) * 0.5 + span * 0.05, ke_max)
+        }
+      }
+      pop[i] = final_pos
+      fits[i] = final_fit
+      ke[i] = new_ke
+      if final_fit < best_val {
+        best_val = final_fit
+        best_pos = final_pos
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== SPBO: Student Psychological-Based Optimization (2021) =====
+
+///|
+pub struct StudentPsychConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_spbo_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> StudentPsychConfig {
+  StudentPsychConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Student Psychological-Based Optimization (Das & Sultana 2021): every
+/// generation each student draws a psychological type at random - a draw
+/// independent of fitness, unlike rank-based role assignment.  Hard
+/// workers study at full speed toward the top student, ordinary students
+/// absorb only a random fraction of the top student's knowledge (each
+/// learns a different amount), and playful students just fool around with
+/// wide random walks.  The school factor spf = e^{-t/2500} shrinks the
+/// study steps.
+pub fn student_psychological_optimization(
+  config : StudentPsychConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let spf = @math.exp(-evaluations.to_double() / 2500.0)
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.42 {
+        // hard working student: full-speed study toward the top student
+        let p_i = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let q_i = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xp = pop[p_i]
+        let xq = pop[q_i]
+        for d in 0..<dim {
+          let nv = xi[d] +
+            0.9 * spf * (best_pos[d] - xi[d]) +
+            0.3 * (xp[d] - xq[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.09 * spf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else if r1 < 0.81 {
+        // ordinary student: absorb only a random fraction of the top
+        // student's knowledge, plus partial peer learning
+        let w = RNG::next(current_rng) * 0.5
+        let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let xj = pop[j]
+        let wj = RNG::next(current_rng) * 0.3
+        for d in 0..<dim {
+          let nv = xi[d] +
+            w * (best_pos[d] - xi[d]) +
+            wj * (xj[d] - xi[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.09 * spf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // playful student: just fooling around with wide random walks
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.30 * spf
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      pop[i] = cand
+      let fv = evaluate(f, cand)
+      fits[i] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== PTO: Parallel Tempering Optimization (1986) =====
+
+///|
+pub struct ParallelTemperingConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_pto_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ParallelTemperingConfig {
+  ParallelTemperingConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Parallel Tempering Optimization (Swendsen & Wang 1986): pop_size
+/// replicas of the incumbent run Metropolis moves in parallel, each at its
+/// own fixed temperature - cold replicas make fine greedy descents while
+/// hot replicas wander over wide basins, paying for uphill moves out of
+/// their thermal budget.  Every generation one adjacent temperature pair
+/// is swapped with Metropolis probability, so solutions discovered by hot
+/// replicas are handed to cold ones for refinement (the defining mechanism
+/// that separates tempering from single-temperature annealing).  The
+/// quench factor ptf = e^{-t/2500} shrinks the move amplitudes.
+pub fn parallel_tempering_optimization(
+  config : ParallelTemperingConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  // temperatures: linear ramp from a cold floor to a hot ceiling
+  let temps : Array[Double] = []
+  for i in 0..<pop_size {
+    let frac = i.to_double() / (pop_size - 1).to_double()
+    temps.push(span * 0.02 + (span * 0.6 - span * 0.02) * frac)
+  }
+
+  while evaluations < max_evals {
+    let heat = @math.exp(-evaluations.to_double() / 2500.0)
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let fx = fits[i]
+      // amplitude grows with the replica's temperature, while the pull
+      // toward the global best shrinks with it - cold replicas climb
+      // greedily, hot replicas keep wandering for diversity
+      let frac = i.to_double() / (pop_size - 1).to_double()
+      let step = span * 0.08 * heat * (1.0 + 6.0 * frac)
+      let pull = 0.45 * (1.0 - frac)
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = xi[d] +
+          pull * (best_pos[d] - xi[d]) +
+          (2.0 * RNG::next(current_rng) - 1.0) * step
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fp = evaluate(f, cand)
+      evaluations = evaluations + 1
+      let dE = fp - fx
+      if dE <= 0.0 {
+        pop[i] = cand
+        fits[i] = fp
+        if fp < best_val {
+          best_val = fp
+          best_pos = cand
+        }
+      } else {
+        // thermal acceptance: hot replicas tolerate large uphill moves,
+        // cold replicas stay near-greedy (the scale factor keeps the
+        // effective temperature moderate even when |fx| is large)
+        let ax = if fx < 0.0 { -fx } else { fx }
+        let p_acc = @math.exp(-dE / (temps[i] * (0.3 + ax * 0.05) + 1.0e-300))
+        if RNG::next(current_rng) < p_acc {
+          pop[i] = cand
+          fits[i] = fp
+        }
+      }
+    }
+    // Metropolis exchange over every adjacent temperature pair: when a hot
+    // replica has found something better, the swap passes it to the cold
+    // one for fine refinement
+    if evaluations < max_evals {
+      for k in 0..<(pop_size - 1) {
+        let dE = fits[k + 1] - fits[k]
+        let dInv = 1.0 / temps[k] - 1.0 / temps[k + 1]
+        let a1 = if fits[k] < 0.0 { -fits[k] } else { fits[k] }
+        let a2 = if fits[k + 1] < 0.0 { -fits[k + 1] } else { fits[k + 1] }
+        let p_swap = @math.exp(-dE * dInv * 0.4 / (1.0 + a1 + a2 + 1.0e-300))
+        if RNG::next(current_rng) < p_swap {
+          let tmp = pop[k]
+          pop[k] = pop[k + 1]
+          pop[k + 1] = tmp
+          let tv = fits[k]
+          fits[k] = fits[k + 1]
+          fits[k + 1] = tv
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== CLPSO: Comprehensive Learning Particle Swarm Optimizer (2006) =====
+
+///|
+pub struct ComprehensiveLearningConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_clpso_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ComprehensiveLearningConfig {
+  ComprehensiveLearningConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Comprehensive Learning Particle Swarm Optimizer (Liang, Qin, Suganthan &
+/// Baskar 2006): every particle keeps a personal best, but instead of
+/// learning from its own pbest alone it builds a heterogeneous exemplar -
+/// each dimension is drawn from a different random particle's pbest - and
+/// only re-draws that exemplar after a stagnation stretch (tg=7 barren
+/// generations), so each particle learns a different mixture of the
+/// swarm's knowledge.  The learning factor clf = e^{-t/2500} shrinks the
+/// steps.
+pub fn comprehensive_learning_pso(
+  config : ComprehensiveLearningConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+  let tg : Int32 = 7
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  // personal bests, stagnation counters and per-dimension exemplars
+  let pbest : Array[Array[Double]] = []
+  let pfit : Array[Double] = []
+  let stall : Array[Int32] = []
+  let ex_idx : Array[Array[Int32]] = []
+  for i in 0..<pop_size {
+    pbest.push(pop[i])
+    pfit.push(fits[i])
+    stall.push(0)
+    let ex : Array[Int32] = []
+    for _d in 0..<dim {
+      let j = ((RNG::next(current_rng) * pop_size.to_double()).to_int() + i + 1) %
+        pop_size
+      ex.push(j)
+    }
+    ex_idx.push(ex)
+  }
+
+  while evaluations < max_evals {
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let clf = @math.exp(-evaluations.to_double() / 2500.0)
+      // comprehensive learning: every dimension takes its value from a
+      // different particle's personal best
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let ex = pbest[ex_idx[i][d]]
+        let nv = xi[d] +
+          0.65 * clf * (ex[d] - xi[d]) +
+          (2.0 * RNG::next(current_rng) - 1.0) * span * 0.08 * clf
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      // personal-best update and stagnation accounting
+      if fv < pfit[i] {
+        pbest[i] = cand
+        pfit[i] = fv
+        stall[i] = 0
+      } else {
+        stall[i] = stall[i] + 1
+      }
+      pop[i] = cand
+      fits[i] = fv
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+      // re-draw the heterogeneous exemplar after a barren stretch
+      if stall[i] >= tg {
+        stall[i] = 0
+        for d in 0..<dim {
+          let j = (
+              (RNG::next(current_rng) * pop_size.to_double()).to_int() + i + 1
+            ) %
+            pop_size
+          ex_idx[i][d] = j
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== BFGS: Broyden-Fletcher-Goldfarb-Shanno quasi-Newton (1970) =====
+
+///|
+pub struct BfgsConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bfgs_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BfgsConfig {
+  BfgsConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// BFGS quasi-Newton method (Broyden, Fletcher, Goldfarb & Shanno 1970):
+/// a second-order method made black-box via forward-difference gradients.
+/// Unlike all zero-order algorithms here it accumulates curvature - the
+/// inverse Hessian approximation is rebuilt from (s, y) pairs with BFGS
+/// updates, candidates move along the quasi-Newton direction with an
+/// Armijo backtracking line search, and the budget is split into random
+/// restarts so the method can escape from single-basin traps on multimodal
+/// landscapes.  The historical best is tracked separately.
+pub fn bfgs_optimizer(
+  config : BfgsConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let grad_h = span * 1.0e-4
+  let restarts = 10
+  let seg_budget = max_evals / restarts
+
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _r in 0..<restarts {
+    if evaluations >= max_evals {
+      break
+    }
+    let mut x = random_solution(dim, bounds, current_rng)
+    let mut fx = evaluate(f, x)
+    evaluations = evaluations + 1
+    let mut seg_used = 1
+    if !have_best || fx < best_val {
+      best_val = fx
+      best_pos = x
+      have_best = true
+    }
+    // gradient at the starting point
+    let g : Array[Double] = []
+    for _d in 0..<dim {
+      g.push(0.0)
+    }
+    for d in 0..<dim {
+      let xt : Array[Double] = []
+      for k in 0..<dim {
+        let v = if k == d {
+          max(bounds.min, min(bounds.max, x[k] + grad_h))
+        } else {
+          x[k]
+        }
+        xt.push(v)
+      }
+      g[d] = (evaluate(f, xt) - fx) / grad_h
+      evaluations = evaluations + 1
+      seg_used = seg_used + 1
+    }
+    // inverse Hessian approximation starts as the identity
+    let h_mat : Array[Array[Double]] = []
+    for i in 0..<dim {
+      let row : Array[Double] = []
+      for j in 0..<dim {
+        row.push(if i == j { 1.0 } else { 0.0 })
+      }
+      h_mat.push(row)
+    }
+    // stagnation-triggered dynamic restart: once the quasi-Newton steps
+    // stop making real progress (oscillation-noisy or numerically flat
+    // regions), the remaining budget is handed to a fresh random restart
+    // instead of being burned in place
+    let mut stall = 0
+    let mut fx_prev = fx
+    while seg_used < seg_budget && evaluations < max_evals {
+      // quasi-Newton direction p = -H g
+      let p : Array[Double] = []
+      for i in 0..<dim {
+        let mut v = 0.0
+        for k in 0..<dim {
+          v = v - h_mat[i][k] * g[k]
+        }
+        p.push(v)
+      }
+      // Armijo backtracking line search along p
+      let mut gd = 0.0
+      for d in 0..<dim {
+        gd = gd + g[d] * p[d]
+      }
+      let mut alpha = 1.0
+      let mut accepted = false
+      let mut trial : Array[Double] = []
+      let mut f_trial = 0.0
+      let mut tries = 0
+      while tries < 20 && seg_used < seg_budget {
+        trial = []
+        for d in 0..<dim {
+          let nv = x[d] + alpha * p[d]
+          trial.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        f_trial = evaluate(f, trial)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        if f_trial <= fx + 0.1 * alpha * gd {
+          accepted = true
+          break
+        }
+        alpha = alpha * 0.5
+        tries = tries + 1
+      }
+      if !accepted {
+        // informed stochastic escape: a failed line search means the local
+        // model is uninformative (oscillatory or flat terrain) - jump
+        // toward the global best mixed with a wide perturbation, so the
+        // next quasi-Newton run starts in a more promising basin instead
+        // of giving up the whole segment
+        let esc : Array[Double] = []
+        for d in 0..<dim {
+          let nv = x[d] +
+            0.5 * (best_pos[d] - x[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10
+          esc.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fe = evaluate(f, esc)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        let ax_esc = if fx_prev < 0.0 { -fx_prev } else { fx_prev }
+        if fe < fx_prev - 1.0e-12 * (1.0 + ax_esc) {
+          stall = 0
+        } else {
+          stall = stall + 1
+          if stall >= 15 {
+            break
+          }
+        }
+        fx_prev = fe
+        if fe < best_val {
+          best_val = fe
+          best_pos = esc
+        }
+        // the incumbent moves unconditionally and curvature info goes stale
+        x = esc
+        fx = fe
+        for i in 0..<dim {
+          for j in 0..<dim {
+            h_mat[i][j] = if i == j { 1.0 } else { 0.0 }
+          }
+        }
+        for d in 0..<dim {
+          let xt : Array[Double] = []
+          for k in 0..<dim {
+            let v = if k == d {
+              max(bounds.min, min(bounds.max, x[k] + grad_h))
+            } else {
+              x[k]
+            }
+            xt.push(v)
+          }
+          g[d] = (evaluate(f, xt) - fx) / grad_h
+          evaluations = evaluations + 1
+          seg_used = seg_used + 1
+        }
+      } else {
+        let ax_prev = if fx_prev < 0.0 { -fx_prev } else { fx_prev }
+        if f_trial < fx_prev - 1.0e-12 * (1.0 + ax_prev) {
+          stall = 0
+        } else {
+          stall = stall + 1
+          if stall >= 15 {
+            break
+          }
+        }
+        fx_prev = f_trial
+        // gradient at the accepted point
+        let g_new : Array[Double] = []
+        for _d in 0..<dim {
+          g_new.push(0.0)
+        }
+        for d in 0..<dim {
+          let xt : Array[Double] = []
+          for k in 0..<dim {
+            let v = if k == d {
+              max(bounds.min, min(bounds.max, trial[k] + grad_h))
+            } else {
+              trial[k]
+            }
+            xt.push(v)
+          }
+          g_new[d] = (evaluate(f, xt) - f_trial) / grad_h
+          evaluations = evaluations + 1
+          seg_used = seg_used + 1
+        }
+        // BFGS update of the inverse Hessian approximation from (s, y)
+        let s : Array[Double] = []
+        let y : Array[Double] = []
+        for d in 0..<dim {
+          s.push(alpha * p[d])
+          y.push(g_new[d] - g[d])
+        }
+        let mut sy = 0.0
+        for d in 0..<dim {
+          sy = sy + s[d] * y[d]
+        }
+        if sy > 1.0e-10 {
+          let rho = 1.0 / sy
+          let hy : Array[Double] = []
+          for i in 0..<dim {
+            let mut v = 0.0
+            for k in 0..<dim {
+              v = v + h_mat[i][k] * y[k]
+            }
+            hy.push(v)
+          }
+          let mut yhy = 0.0
+          for i in 0..<dim {
+            yhy = yhy + y[i] * hy[i]
+          }
+          for i in 0..<dim {
+            for j in 0..<dim {
+              let upd = h_mat[i][j] -
+                rho * (s[i] * hy[j] + hy[i] * s[j]) +
+                rho * rho * yhy * s[i] * s[j] +
+                rho * s[i] * s[j]
+              h_mat[i][j] = upd
+            }
+          }
+        }
+        // move the incumbent to the accepted point
+        x = trial
+        fx = f_trial
+        for d in 0..<dim {
+          g[d] = g_new[d]
+        }
+        if fx < best_val {
+          best_val = fx
+          best_pos = x
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== ExtO: Extremal Optimization (1999) =====
+
+///|
+pub struct ExtremalConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_exto_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> ExtremalConfig {
+  ExtremalConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Extremal Optimization (Boettcher & Percus 1999): inspired by the
+/// Bak-Sneppen self-organised criticality model.  Every generation the
+/// worst-ranked individual is replaced by a wide resample seeded from the
+/// second-worst one, and its two rank neighbours take collateral
+/// perturbations (an avalanche), while all survivors follow a single
+/// shared update rule - forage / fine step / contract - instead of being
+/// split into role groups.  The criticality factor eof = e^{-t/2500}
+/// shrinks the amplitudes.
+pub fn extremal_optimization(
+  config : ExtremalConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let pop_size = if config.population_size < 10 {
+    10
+  } else {
+    config.population_size
+  }
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = random_solution(dim, bounds, current_rng)
+  let mut best_val = evaluate(f, best_pos)
+  let mut evaluations = 1
+  pop.push(best_pos)
+  fits.push(best_val)
+  for _i in 1..<pop_size {
+    let p = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, p)
+    evaluations = evaluations + 1
+    pop.push(p)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = p
+    }
+  }
+
+  while evaluations < max_evals {
+    let order = sort_indices(fits)
+    let eof = @math.exp(-evaluations.to_double() / 2500.0)
+    let w1 = order[pop_size - 1]
+    let w2 = order[pop_size - 2]
+    let w3 = order[pop_size - 3]
+    // Bak-Sneppen critical update: the worst individual is replaced by a
+    // wide resample seeded from the second-worst, and its two rank
+    // neighbours take collateral perturbations (an avalanche)
+    let seed_w : Array[Double] = []
+    for d in 0..<dim {
+      let nv = pop[w2][d] +
+        (2.0 * RNG::next(current_rng) - 1.0) * span * 0.36 * eof
+      seed_w.push(max(bounds.min, min(bounds.max, nv)))
+    }
+    pop[w1] = seed_w
+    let f_w = evaluate(f, seed_w)
+    fits[w1] = f_w
+    evaluations = evaluations + 1
+    if f_w < best_val {
+      best_val = f_w
+      best_pos = seed_w
+    }
+    for nb_idx in [w2, w3] {
+      if evaluations >= max_evals {
+        break
+      }
+      let xn = pop[nb_idx]
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = xn[d] +
+          (2.0 * RNG::next(current_rng) - 1.0) * span * 0.12 * eof
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      pop[nb_idx] = cand
+      let fv = evaluate(f, cand)
+      fits[nb_idx] = fv
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    }
+    // survivors: one shared rule for everyone (no role groups)
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      if i != w1 && i != w2 && i != w3 {
+        let xi = pop[i]
+        let r1 = RNG::next(current_rng)
+        let cand : Array[Double] = []
+        if r1 < 0.40 {
+          // forage: toward the global best with a differential kick
+          let j = (
+              (RNG::next(current_rng) * pop_size.to_double()).to_int() + i + 1
+            ) %
+            pop_size
+          let k = (
+              (RNG::next(current_rng) * pop_size.to_double()).to_int() + i + 2
+            ) %
+            pop_size
+          let xj = pop[j]
+          let xk = pop[k]
+          for d in 0..<dim {
+            let nv = xi[d] +
+              0.9 * eof * (best_pos[d] - xi[d]) +
+              0.45 * (xj[d] - xk[d]) +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10 * eof
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        } else if r1 < 0.75 {
+          // fine local step
+          for d in 0..<dim {
+            let nv = xi[d] +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * eof * eof
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        } else {
+          // contract toward the global best
+          let r2 = RNG::next(current_rng)
+          for d in 0..<dim {
+            let nv = best_pos[d] +
+              r2 * (xi[d] - best_pos[d]) +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * eof * 0.04
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        }
+        pop[i] = cand
+        let fv = evaluate(f, cand)
+        fits[i] = fv
+        evaluations = evaluations + 1
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== SOMA: Self-Organizing Migrating Algorithm (1999) =====
+
+///|
+pub struct SomaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_soma_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SomaConfig {
+  SomaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Self-Organizing Migrating Algorithm (Zelinka 1999). Each individual
+/// migrates along the vector toward a leader and is evaluated at several
+/// points on that path (multi-point path sampling) instead of a single
+/// candidate, and the best sample becomes its new position. A perturbation
+/// (PRT) vector keeps most coordinates exactly on the path while letting a
+/// few dimensions deviate, and migration alternates between all-to-one
+/// (leader = global best) and all-to-random (leader = a random peer). A
+/// fine local jitter keeps diversity alive so the population does not
+/// collapse onto the leader. The historical best is tracked separately.
+pub fn self_organizing_migration(
+  config : SomaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let pop_size = if config.population_size <= 0 {
+    1
+  } else {
+    config.population_size
+  }
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _i in 0..<pop_size {
+    let sol = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, sol)
+    evaluations = evaluations + 1
+    pop.push(sol)
+    fits.push(v)
+    if !have_best || v < best_val {
+      best_val = v
+      best_pos = sol
+      have_best = true
+    }
+  }
+
+  while evaluations < max_evals {
+    let sof = @math.exp(-evaluations.to_double() / 2500.0)
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let r1 = RNG::next(current_rng)
+      if r1 < 0.80 {
+        // leader: all-to-one (global best) or all-to-random (a peer)
+        let leader = if r1 < 0.45 {
+          best_pos
+        } else {
+          let j = (
+              (RNG::next(current_rng) * pop_size.to_double()).to_int() + i + 1
+            ) %
+            pop_size
+          pop[j]
+        }
+        // PRT vector: most dimensions follow the path exactly, a few deviate
+        let prt : Array[Double] = []
+        for _d in 0..<dim {
+          prt.push(
+            if RNG::next(current_rng) < 0.90 {
+              1.0
+            } else {
+              0.05 + 0.25 * RNG::next(current_rng)
+            },
+          )
+        }
+        // multi-point path sampling along xi -> leader
+        let ts : Array[Double] = [0.33, 0.66, 1.0]
+        let mut best_cand = xi
+        let mut best_fv = fits[i]
+        for s in 0..<ts.length() {
+          if evaluations >= max_evals {
+            break
+          }
+          let t = ts[s]
+          let cand : Array[Double] = []
+          for d in 0..<dim {
+            let nv = xi[d] +
+              t * prt[d] * (leader[d] - xi[d]) +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.06 * sof * t
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+          let fv = evaluate(f, cand)
+          evaluations = evaluations + 1
+          if fv < best_fv {
+            best_fv = fv
+            best_cand = cand
+          }
+        }
+        pop[i] = best_cand
+        fits[i] = best_fv
+        if best_fv < best_val {
+          best_val = best_fv
+          best_pos = best_cand
+        }
+      } else {
+        // fine local jitter: keeps the swarm from collapsing onto one leader
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * sof * sof
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        pop[i] = cand
+        fits[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== SDS: Stochastic Diffusion Search (1989) =====
+
+///|
+pub struct SdsConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_sds_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SdsConfig {
+  SdsConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Stochastic Diffusion Search (Bishop 1989). Agents are split
+/// asynchronously each generation: a hypothesis-testing agent samples a
+/// candidate around its own hypothesis and only keeps it when it improves
+/// (a failed test leaves the agent exactly where it is), while the remaining
+/// agents communicate - they copy a better agent's whole hypothesis into
+/// their position with a small perturbation, diffusing successful hypotheses
+/// through the population. A low-probability hypothesis reset re-samples the
+/// whole space so that the population cannot lock onto one basin. The
+/// historical best is tracked separately.
+pub fn stochastic_diffusion_search(
+  config : SdsConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let pop_size = if config.population_size <= 0 {
+    1
+  } else {
+    config.population_size
+  }
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _i in 0..<pop_size {
+    let sol = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, sol)
+    evaluations = evaluations + 1
+    pop.push(sol)
+    fits.push(v)
+    if !have_best || v < best_val {
+      best_val = v
+      best_pos = sol
+      have_best = true
+    }
+  }
+
+  while evaluations < max_evals {
+    let sof = @math.exp(-evaluations.to_double() / 2500.0)
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let r1 = RNG::next(current_rng)
+      if r1 < 0.62 {
+        // hypothesis testing: a failed test leaves the agent in place
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let nv = xi[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.16 * sof
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        if fv < fits[i] {
+          pop[i] = cand
+          fits[i] = fv
+        }
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      } else if r1 < 0.90 {
+        // communication: copy a better agent's whole hypothesis, then perturb
+        let j = (
+            (RNG::next(current_rng) * pop_size.to_double()).to_int() + i + 1
+          ) %
+          pop_size
+        let xj = pop[j]
+        let cand : Array[Double] = []
+        if fits[j] < fits[i] {
+          for d in 0..<dim {
+            let nv = xj[d] +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.025 * sof
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        } else {
+          // no better hypothesis to spread: fine jitter keeps diversity alive
+          for d in 0..<dim {
+            let nv = xi[d] +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.09 * sof * sof
+            cand.push(max(bounds.min, min(bounds.max, nv)))
+          }
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        if fv < fits[i] {
+          pop[i] = cand
+          fits[i] = fv
+        }
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      } else {
+        // hypothesis reset: re-sample the entire search space
+        let cand = random_solution(dim, bounds, current_rng)
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        pop[i] = cand
+        fits[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== Dual Annealing (1997, SciPy's global optimizer) =====
+
+///|
+pub struct DualAnnealingConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_dual_annealing_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> DualAnnealingConfig {
+  DualAnnealingConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Dual Annealing (Xiang, Sun, Fan & Gong 1997; the global optimizer exposed
+/// as `scipy.optimize.dual_annealing`). Unlike the single-rule annealers in
+/// this library, the search alternates two optimizers: an outer simulated
+/// annealing walk with a quadratic cooling schedule and Metropolis acceptance,
+/// and an inner greedy pattern-search refinement applied periodically to the
+/// current state (successful steps expand, failed steps shrink). The budget is
+/// split among several random restarts and the historical best is tracked
+/// separately, so a trapped anneal can be abandoned for a fresh basin.
+pub fn dual_annealing(
+  config : DualAnnealingConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let restarts = 8
+  let raw_seg = max_evals / restarts
+  let seg_budget = if raw_seg < 16 { 16 } else { raw_seg }
+
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _r in 0..<restarts {
+    if evaluations >= max_evals {
+      break
+    }
+    let mut x = random_solution(dim, bounds, current_rng)
+    let mut fx = evaluate(f, x)
+    evaluations = evaluations + 1
+    if !have_best || fx < best_val {
+      best_val = fx
+      best_pos = x
+      have_best = true
+    }
+    let mut seg_used = 1
+    let f0 = fx
+    let f0_abs = if f0 < 0.0 { -f0 } else { f0 }
+    let t0 = 0.20 * (1.0 + f0_abs)
+    let mut attempts = 0
+    while seg_used < seg_budget && evaluations < max_evals {
+      let raw_frac = seg_used.to_double() / seg_budget.to_double()
+      let frac = if raw_frac > 1.0 { 1.0 } else { raw_frac }
+      let decay = 1.0 - frac
+      let temp = t0 * decay * decay + 1.0e-9
+      let step = span * (0.20 * decay + 0.01)
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = x[d] + (2.0 * RNG::next(current_rng) - 1.0) * step
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      seg_used = seg_used + 1
+      let de = fv - fx
+      let accept = if de <= 0.0 {
+        true
+      } else {
+        RNG::next(current_rng) < @math.exp(-de / temp)
+      }
+      if accept {
+        x = cand
+        fx = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+      attempts = attempts + 1
+      // inner greedy pattern-search refinement, alternating with the anneal
+      if attempts % 12 == 0 && evaluations < max_evals {
+        let mut lstep = span * (0.045 * decay + 0.0004)
+        let mut gains = 0
+        for d in 0..<dim {
+          if evaluations >= max_evals {
+            break
+          }
+          let rc : Array[Double] = []
+          for k in 0..<dim {
+            let v = if k == d {
+              max(
+                bounds.min,
+                min(
+                  bounds.max,
+                  x[k] + (2.0 * RNG::next(current_rng) - 1.0) * lstep,
+                ),
+              )
+            } else {
+              x[k]
+            }
+            rc.push(v)
+          }
+          let rf = evaluate(f, rc)
+          evaluations = evaluations + 1
+          seg_used = seg_used + 1
+          if rf < fx {
+            x = rc
+            fx = rf
+            gains = gains + 1
+            if rf < best_val {
+              best_val = rf
+              best_pos = rc
+            }
+          }
+        }
+        let gain_scale = if gains > 0 { 1.2 } else { 0.5 }
+        lstep = lstep * gain_scale
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== SQA: Simulated Quantum Annealing (1998) =====
+
+///|
+pub struct SqaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_sqa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SqaConfig {
+  SqaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Simulated Quantum Annealing (Kadowaki & Nishimori 1998). Besides the
+/// classical thermal fluctuation of simulated annealing, a move may be a
+/// quantum tunnelling event: the transverse field Gamma drives a whole-vector
+/// displacement along one shared direction (every coordinate moves together,
+/// as a tunnelling spin flip would), with amplitude decaying as Gamma -> 0.
+/// The other moves are ordinary per-coordinate heat fluctuations plus a
+/// decaying bias toward the incumbent best. Candidates follow the Metropolis
+/// rule, and the budget is split among random restarts so a trapped anneal can
+/// be abandoned for a fresh basin.
+pub fn simulated_quantum_annealing(
+  config : SqaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let restarts = 8
+  let raw_seg = max_evals / restarts
+  let seg_budget = if raw_seg < 16 { 16 } else { raw_seg }
+
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _r in 0..<restarts {
+    if evaluations >= max_evals {
+      break
+    }
+    let mut x = random_solution(dim, bounds, current_rng)
+    let mut fx = evaluate(f, x)
+    evaluations = evaluations + 1
+    if !have_best || fx < best_val {
+      best_val = fx
+      best_pos = x
+      have_best = true
+    }
+    let mut seg_used = 1
+    let f0 = fx
+    let f0_abs = if f0 < 0.0 { -f0 } else { f0 }
+    let t0 = 0.20 * (1.0 + f0_abs)
+    while seg_used < seg_budget && evaluations < max_evals {
+      let frac = seg_used.to_double() / seg_budget.to_double()
+      let decay = 1.0 - frac
+      let gamma = decay * decay
+      let temp = t0 * gamma + 1.0e-9
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.25 {
+        // quantum tunnelling: one shared displacement for every coordinate
+        let tunnel = (2.0 * RNG::next(current_rng) - 1.0) * span * 0.30 * gamma
+        for d in 0..<dim {
+          let nv = x[d] +
+            tunnel +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.03 * decay
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      } else {
+        // classical thermal fluctuation with a decaying bias to the best
+        let pull = 0.30 * decay
+        for d in 0..<dim {
+          let nv = x[d] +
+            pull * (best_pos[d] - x[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * (0.20 * decay + 0.01)
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      seg_used = seg_used + 1
+      let de = fv - fx
+      let accept = if de <= 0.0 {
+        true
+      } else {
+        RNG::next(current_rng) < @math.exp(-de / temp)
+      }
+      if accept {
+        x = cand
+        fx = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== COBYLA: linear-approximation trust region (1994) =====
+
+///|
+pub struct CobylaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_cobyla_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CobylaConfig {
+  CobylaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// COBYLA-style linear-approximation trust region (Powell 1994). Each step
+/// builds a local linear model with forward differences, then takes the
+/// steepest-descent step clipped to a trust radius rho; the radius expands
+/// when the actual/predicted decrease ratio is good and contracts on a failed
+/// step. No curvature is accumulated (unlike BFGS) and no simplex is
+/// maintained (unlike Nelder-Mead): the model is purely linear and accuracy is
+/// governed by the trust radius. Flat regions trigger an informed escape
+/// toward the incumbent best, and the budget is split among random restarts so
+/// a trapped trust region can be abandoned for a fresh basin.
+pub fn cobyla_optimizer(
+  config : CobylaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let restarts = 8
+  let raw_seg = max_evals / restarts
+  let seg_budget = if raw_seg < 24 { 24 } else { raw_seg }
+
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _r in 0..<restarts {
+    if evaluations >= max_evals {
+      break
+    }
+    let mut x = random_solution(dim, bounds, current_rng)
+    let mut fx = evaluate(f, x)
+    evaluations = evaluations + 1
+    if !have_best || fx < best_val {
+      best_val = fx
+      best_pos = x
+      have_best = true
+    }
+    let mut rho = span * 0.08
+    let mut seg_used = 1
+    let mut stall = 0
+    while seg_used < seg_budget && evaluations < max_evals {
+      let h = max(rho * 0.5, span * 1.0e-4)
+      let g : Array[Double] = []
+      for _d in 0..<dim {
+        g.push(0.0)
+      }
+      let mut g_ok = true
+      for d in 0..<dim {
+        if evaluations >= max_evals {
+          g_ok = false
+          break
+        }
+        let probe : Array[Double] = []
+        for k in 0..<dim {
+          let v = if k == d {
+            max(bounds.min, min(bounds.max, x[k] + h))
+          } else {
+            x[k]
+          }
+          probe.push(v)
+        }
+        let fv = evaluate(f, probe)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        g[d] = (fv - fx) / h
+      }
+      if !g_ok {
+        break
+      }
+      let mut gsq = 0.0
+      for d in 0..<dim {
+        gsq = gsq + g[d] * g[d]
+      }
+      let gnorm = gsq.sqrt()
+      if gnorm < 1.0e-10 {
+        // flat region: informed escape toward the incumbent best
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.20
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        x = cand
+        fx = fv
+        rho = span * 0.08
+        stall = 0
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      } else {
+        let scale = rho / gnorm
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let nv = x[d] - scale * g[d]
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        let ared = fx - fv
+        if ared > 0.0 {
+          let ratio = ared / (gnorm * rho + 1.0e-12)
+          x = cand
+          fx = fv
+          stall = 0
+          if fv < best_val {
+            best_val = fv
+            best_pos = cand
+          }
+          if ratio > 0.75 {
+            rho = min(rho * 1.5, span * 0.50)
+          }
+        } else {
+          stall = stall + 1
+          rho = max(rho * 0.5, span * 1.0e-4)
+        }
+      }
+      if stall >= 8 && evaluations < max_evals {
+        // trust region collapsed repeatedly: re-centre near the best
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.12
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        x = cand
+        fx = fv
+        rho = span * 0.08
+        stall = 0
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== NS: Nested Sampling (2004) =====
+
+///|
+pub struct NestedSamplingConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_nested_sampling_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> NestedSamplingConfig {
+  NestedSamplingConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Nested Sampling (Skilling 2004). A fixed set of live points is maintained
+/// and, each round, the worst live point is discarded and replaced by a new
+/// sample drawn under the constraint that it must beat the discarded point.
+/// This gradually compresses the live set onto the high-likelihood region while
+/// the discarded points provide the shrinkage sequence. The constrained draw is
+/// implemented as a short random-walk MCMC from a randomly chosen surviving
+/// point (efficient even when the constrained region is tiny), with a
+/// best-centred fallback and a uniform re-seed when the walk fails repeatedly.
+/// The historical best is tracked separately.
+pub fn nested_sampling(
+  config : NestedSamplingConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let pop_size = if config.population_size <= 1 {
+    1
+  } else {
+    config.population_size
+  }
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _i in 0..<pop_size {
+    let sol = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, sol)
+    evaluations = evaluations + 1
+    pop.push(sol)
+    fits.push(v)
+    if !have_best || v < best_val {
+      best_val = v
+      best_pos = sol
+      have_best = true
+    }
+  }
+
+  while evaluations < max_evals {
+    // discard the worst live point; the replacement must beat its value
+    let mut worst = 0
+    for i in 1..<pop_size {
+      if fits[i] > fits[worst] {
+        worst = i
+      }
+    }
+    let threshold = fits[worst]
+    let mut accepted = false
+    let mut tries = 0
+    let max_tries = 8
+    while tries < max_tries && evaluations < max_evals && !accepted {
+      let raw_j = ((RNG::next(current_rng) * pop_size.to_double()).to_int() + 1) %
+        pop_size
+      let mut j = raw_j
+      if j == worst {
+        j = (j + 1) % pop_size
+      }
+      let xj = pop[j]
+      let decay = 1.0 - evaluations.to_double() / max_evals.to_double()
+      let step = span * (0.12 * decay + 0.001)
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = xj[d] + (2.0 * RNG::next(current_rng) - 1.0) * step
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      tries = tries + 1
+      if fv < threshold {
+        pop[worst] = cand
+        fits[worst] = fv
+        accepted = true
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+    if !accepted && evaluations < max_evals {
+      // fallback: shrink toward the incumbent best, then re-seed if needed
+      let decay = 1.0 - evaluations.to_double() / max_evals.to_double()
+      let step = span * (0.08 * decay + 0.001)
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = best_pos[d] + (2.0 * RNG::next(current_rng) - 1.0) * step
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < threshold {
+        pop[worst] = cand
+        fits[worst] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      } else if evaluations < max_evals {
+        // keep the live set diverse: replace with a fresh uniform sample
+        let fresh = random_solution(dim, bounds, current_rng)
+        let ff = evaluate(f, fresh)
+        evaluations = evaluations + 1
+        pop[worst] = fresh
+        fits[worst] = ff
+        if ff < best_val {
+          best_val = ff
+          best_pos = fresh
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== MADS: Mesh Adaptive Direct Search (2006) =====
+
+///|
+pub struct MadsConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_mads_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> MadsConfig {
+  MadsConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Mesh Adaptive Direct Search (Audet & Dennis 2006). A single incumbent is
+/// polled on a dynamically sized mesh: the two coordinate directions per
+/// dimension plus two random unit directions are evaluated each iteration and
+/// the best poll point is adopted, expanding the mesh on success and halving it
+/// on failure. Unlike Hooke-Jeeves pattern search, the polling directions are a
+/// mix of fixed coordinate axes and random directions, and the mesh size is the
+/// adaptive convergence control. When the mesh collapses to the resolution
+/// limit the search restarts near the incumbent best with a random kick, and
+/// the outer loop splits the budget among several starting points. Note that
+/// this is a single-point method (population_size is accepted for a uniform
+/// config interface but not used), matching the SPSA/BAS/BFGS convention.
+pub fn mesh_adaptive_direct_search(
+  config : MadsConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let restarts = 8
+  let raw_seg = max_evals / restarts
+  let seg_budget = if raw_seg < 24 { 24 } else { raw_seg }
+
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _r in 0..<restarts {
+    if evaluations >= max_evals {
+      break
+    }
+    let mut x = random_solution(dim, bounds, current_rng)
+    let mut fx = evaluate(f, x)
+    evaluations = evaluations + 1
+    if !have_best || fx < best_val {
+      best_val = fx
+      best_pos = x
+      have_best = true
+    }
+    let mut mesh = span * 0.10
+    let mut seg_used = 1
+    while seg_used < seg_budget && evaluations < max_evals {
+      let mut best_cand : Array[Double] = []
+      let mut best_fv = fx
+      let mut found = false
+      // fixed coordinate directions on the mesh
+      for d in 0..<dim {
+        for sg in 0..<2 {
+          if evaluations >= max_evals || seg_used >= seg_budget {
+            break
+          }
+          let step = if sg == 0 { mesh } else { -mesh }
+          let cand : Array[Double] = []
+          for k in 0..<dim {
+            let v = if k == d {
+              max(bounds.min, min(bounds.max, x[k] + step))
+            } else {
+              x[k]
+            }
+            cand.push(v)
+          }
+          let fv = evaluate(f, cand)
+          evaluations = evaluations + 1
+          seg_used = seg_used + 1
+          if fv < best_fv {
+            best_fv = fv
+            best_cand = cand
+            found = true
+          }
+        }
+      }
+      // random unit directions (the opportunistic part of MADS)
+      for _s in 0..<2 {
+        if evaluations >= max_evals || seg_used >= seg_budget {
+          break
+        }
+        let dir : Array[Double] = []
+        let mut norm = 0.0
+        for _d in 0..<dim {
+          let rv = 2.0 * RNG::next(current_rng) - 1.0
+          dir.push(rv)
+          norm = norm + rv * rv
+        }
+        let nrm = norm.sqrt()
+        let safe = if nrm < 1.0e-12 { 1.0 } else { nrm }
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let v = x[d] + mesh * dir[d] / safe
+          cand.push(max(bounds.min, min(bounds.max, v)))
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        if fv < best_fv {
+          best_fv = fv
+          best_cand = cand
+          found = true
+        }
+      }
+      if found {
+        x = best_cand
+        fx = best_fv
+        mesh = min(mesh * 1.5, span * 0.40)
+        if fx < best_val {
+          best_val = fx
+          best_pos = x
+        }
+      } else {
+        mesh = mesh * 0.5
+      }
+      if mesh < span * 1.0e-4 && evaluations < max_evals {
+        // mesh exhausted: restart near the incumbent best with a random kick
+        let cand : Array[Double] = []
+        let kick = span * 0.20
+        for d in 0..<dim {
+          let nv = best_pos[d] + (2.0 * RNG::next(current_rng) - 1.0) * kick
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        x = cand
+        fx = fv
+        mesh = span * 0.10
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== NEWUOA: derivative-free quadratic trust region (2004) =====
+
+///|
+pub struct NewuoaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_newuoa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> NewuoaConfig {
+  NewuoaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// NEWUOA-style derivative-free quadratic trust region (Powell 2004). Each
+/// iteration estimates, coordinate by coordinate, a central-difference
+/// gradient and a diagonal second derivative with two evaluations per
+/// dimension, then takes a Newton step clipped to the trust radius rho. The
+/// radius expands on success and contracts on failure, and a repeatedly
+/// collapsed model triggers an informed jump near the incumbent best. Unlike
+/// COBYLA (a purely linear model) this captures curvature without gradient
+/// information, and unlike BFGS it accumulates no Hessian and uses a trust
+/// region rather than a line search. The budget is split among random
+/// restarts and the historical best is tracked separately. Note that this is a
+/// single-point method (population_size is accepted for a uniform config
+/// interface but not used), matching the SPSA/BAS/BFGS convention.
+pub fn newuoa_optimizer(
+  config : NewuoaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let restarts = 8
+  let raw_seg = max_evals / restarts
+  let seg_budget = if raw_seg < 24 { 24 } else { raw_seg }
+
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _r in 0..<restarts {
+    if evaluations >= max_evals {
+      break
+    }
+    let mut x = random_solution(dim, bounds, current_rng)
+    let mut fx = evaluate(f, x)
+    evaluations = evaluations + 1
+    if !have_best || fx < best_val {
+      best_val = fx
+      best_pos = x
+      have_best = true
+    }
+    let mut rho = span * 0.10
+    let mut seg_used = 1
+    let mut stall = 0
+    while seg_used < seg_budget && evaluations < max_evals {
+      let h = max(rho * 0.5, span * 1.0e-4)
+      let g : Array[Double] = []
+      let curv : Array[Double] = []
+      for _d in 0..<dim {
+        g.push(0.0)
+        curv.push(0.0)
+      }
+      let mut g_ok = true
+      for d in 0..<dim {
+        if evaluations + 2 > max_evals {
+          g_ok = false
+          break
+        }
+        let plus : Array[Double] = []
+        for k in 0..<dim {
+          let v = if k == d {
+            max(bounds.min, min(bounds.max, x[k] + h))
+          } else {
+            x[k]
+          }
+          plus.push(v)
+        }
+        let fp = evaluate(f, plus)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        let minus : Array[Double] = []
+        for k in 0..<dim {
+          let v = if k == d {
+            max(bounds.min, min(bounds.max, x[k] - h))
+          } else {
+            x[k]
+          }
+          minus.push(v)
+        }
+        let fm = evaluate(f, minus)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        g[d] = (fp - fm) / (2.0 * h)
+        curv[d] = (fp - 2.0 * fx + fm) / (h * h)
+      }
+      if !g_ok {
+        break
+      }
+      let step : Array[Double] = []
+      let mut snorm = 0.0
+      for d in 0..<dim {
+        let hess = max(curv[d], 1.0e-8)
+        let s = -g[d] / hess
+        step.push(s)
+        snorm = snorm + s * s
+      }
+      let sn = snorm.sqrt()
+      let scale = if sn > rho { rho / sn } else { 1.0 }
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = x[d] + scale * step[d]
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      seg_used = seg_used + 1
+      if fv < fx {
+        x = cand
+        fx = fv
+        stall = 0
+        rho = min(rho * 1.3, span * 0.50)
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      } else {
+        stall = stall + 1
+        rho = max(rho * 0.5, span * 1.0e-5)
+      }
+      if stall >= 6 && evaluations < max_evals {
+        // model exhausted: jump near the best and reset the trust region
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.15
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        x = cand
+        fx = fv
+        rho = span * 0.10
+        stall = 0
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== PA: Population Annealing (2003) =====
+
+///|
+pub struct PopulationAnnealingConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_population_annealing_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> PopulationAnnealingConfig {
+  PopulationAnnealingConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Population Annealing (Hukushima & Iba 2003). A population of replicas is
+/// evolved at one common annealing temperature with Metropolis moves, and
+/// every few generations the population is systematically resampled in
+/// proportion to its Boltzmann weights: fitter replicas are copied and less
+/// fit ones disappear. Each resampled replica receives a small perturbation so
+/// that duplicated copies do not become identical. Unlike parallel tempering
+/// (which swaps replicas across different temperatures) the defining move here
+/// is the Boltzmann-weighted replication/discard of the whole population at a
+/// single scheduled temperature. The historical best is tracked separately.
+pub fn population_annealing(
+  config : PopulationAnnealingConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let pop_size = if config.population_size <= 0 {
+    1
+  } else {
+    config.population_size
+  }
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _i in 0..<pop_size {
+    let sol = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, sol)
+    evaluations = evaluations + 1
+    pop.push(sol)
+    fits.push(v)
+    if !have_best || v < best_val {
+      best_val = v
+      best_pos = sol
+      have_best = true
+    }
+  }
+
+  let f0_abs = if best_val < 0.0 { -best_val } else { best_val }
+  let t0 = 0.20 * (1.0 + f0_abs)
+  let mut generation = 0
+
+  while evaluations < max_evals {
+    let raw_frac = evaluations.to_double() / max_evals.to_double()
+    let frac = if raw_frac > 1.0 { 1.0 } else { raw_frac }
+    let decay = 1.0 - frac
+    let temp = t0 * (decay * decay + 0.02) + 1.0e-9
+    let step = span * (0.12 * decay + 0.005)
+    let pull = 0.35 * decay
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = xi[d] +
+          pull * (best_pos[d] - xi[d]) +
+          (2.0 * RNG::next(current_rng) - 1.0) * step
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      let de = fv - fits[i]
+      let accept = if de <= 0.0 {
+        true
+      } else {
+        RNG::next(current_rng) < @math.exp(-de / temp)
+      }
+      if accept {
+        pop[i] = cand
+        fits[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+    generation = generation + 1
+    if generation % 4 == 0 && frac < 0.75 && evaluations < max_evals {
+      // Boltzmann-weighted resampling of the whole population
+      let mut fmin = fits[0]
+      for i in 1..<pop_size {
+        if fits[i] < fmin {
+          fmin = fits[i]
+        }
+      }
+      let w : Array[Double] = []
+      let mut total = 0.0
+      for i in 0..<pop_size {
+        let dw = @math.exp(-(fits[i] - fmin) / temp)
+        let wi = if dw > 1.0e-12 { dw } else { 1.0e-12 }
+        w.push(wi)
+        total = total + wi
+      }
+      let newpop : Array[Array[Double]] = []
+      for _i in 0..<pop_size {
+        let u = RNG::next(current_rng) * total
+        let mut acc = 0.0
+        let mut pick = 0
+        let mut found = false
+        for k in 0..<pop_size {
+          acc = acc + w[k]
+          if acc >= u && !found {
+            pick = k
+            found = true
+          }
+        }
+        let parent = pop[pick]
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let nv = parent[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.04 * decay
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        newpop.push(cand)
+      }
+      for i in 0..<pop_size {
+        if evaluations >= max_evals {
+          break
+        }
+        let cand = newpop[i]
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        pop[i] = cand
+        fits[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== OAIN: opt-aiNet artificial immune network (2002) =====
+
+///|
+pub struct OainConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_oain_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> OainConfig {
+  OainConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// opt-aiNet (de Castro & Von Zuben 2002): an artificial immune network that
+/// extends clonal selection with network suppression. Each round antibodies
+/// are cloned proportionally to their rank and the clones are mutated with a
+/// rank-scaled step (better antibodies mutate less); a clone replaces its
+/// parent only when it improves. Then a similarity-based suppression step
+/// removes redundant antibodies: whenever two antibodies are closer than the
+/// normalized suppression threshold, the worse one is re-seeded as a fresh
+/// random antibody. Unlike plain CLONALG this keeps the repertoire diverse
+/// instead of letting all antibodies collapse onto one peak. The historical
+/// best is tracked separately.
+pub fn opt_ainet(
+  config : OainConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let pop_size = if config.population_size < 2 {
+    2
+  } else {
+    config.population_size
+  }
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let clone_count = 3
+  let suppress = 0.18
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _i in 0..<pop_size {
+    let sol = random_solution(dim, bounds, current_rng)
+    let v = evaluate(f, sol)
+    evaluations = evaluations + 1
+    pop.push(sol)
+    fits.push(v)
+    if !have_best || v < best_val {
+      best_val = v
+      best_pos = sol
+      have_best = true
+    }
+  }
+
+  while evaluations < max_evals {
+    let raw_frac = evaluations.to_double() / max_evals.to_double()
+    let frac = if raw_frac > 1.0 { 1.0 } else { raw_frac }
+    let decay = 1.0 - frac
+    let order = sort_indices(fits)
+    let rank : Array[Int32] = []
+    for _i in 0..<pop_size {
+      rank.push(0)
+    }
+    for k in 0..<pop_size {
+      rank[order[k]] = k
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let rk = rank[i]
+      let nc = if rk < pop_size / 2 { clone_count + 1 } else { 1 }
+      let mut_scale = span *
+        (0.10 * decay + 0.01) *
+        (1.0 + rk.to_double() / pop_size.to_double())
+      let mut best_cand = xi
+      let mut best_fv = fits[i]
+      let mut improved = false
+      for _c in 0..<nc {
+        if evaluations >= max_evals {
+          break
+        }
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let nv = xi[d] + (2.0 * RNG::next(current_rng) - 1.0) * mut_scale
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        if fv < best_fv {
+          best_fv = fv
+          best_cand = cand
+          improved = true
+        }
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      }
+      if improved {
+        pop[i] = best_cand
+        fits[i] = best_fv
+      }
+    }
+    let marked : Array[Bool] = []
+    for _i in 0..<pop_size {
+      marked.push(false)
+    }
+    for i in 0..<pop_size {
+      for j in 0..<pop_size {
+        if j > i {
+          let mut dsq = 0.0
+          for d in 0..<dim {
+            let delta = pop[i][d] - pop[j][d]
+            dsq = dsq + delta * delta
+          }
+          let dist = dsq.sqrt() / span
+          if dist < suppress {
+            if fits[i] <= fits[j] {
+              marked[j] = true
+            } else {
+              marked[i] = true
+            }
+          }
+        }
+      }
+    }
+    let mut resampled = 0
+    for i in 0..<pop_size {
+      if resampled >= 3 || evaluations >= max_evals {
+        break
+      }
+      if marked[i] && fits[i] > best_val {
+        let fresh = random_solution(dim, bounds, current_rng)
+        let fv = evaluate(f, fresh)
+        evaluations = evaluations + 1
+        pop[i] = fresh
+        fits[i] = fv
+        resampled = resampled + 1
+        if fv < best_val {
+          best_val = fv
+          best_pos = fresh
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== xNES: exponential natural evolution strategy (2010) =====
+
+///|
+fn xnes_randn(rng : RNG) -> Double {
+  let u1 = max(RNG::next(rng), 1.0e-12)
+  let u2 = RNG::next(rng)
+  (-2.0 * @math.ln(u1)).sqrt() * @math.cos(2.0 * PI * u2)
+}
+
+///|
+pub struct XnesConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_xnes_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> XnesConfig {
+  XnesConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Exponential Natural Evolution Strategy (Glasmachers, Schaul, Sun, Wierstra
+/// & Schmidhuber 2010). A Gaussian search distribution N(mean, sigma^2 A A^T)
+/// is adapted by the rank-based natural gradient in exponential coordinates:
+/// samples are sorted and shaped with log-rank utilities, then the mean, the
+/// transformation matrix A and the step size sigma are moved along the
+/// estimated natural gradient. Unlike CMA-ES there is no evolution path, no
+/// covariance accumulation and no Cholesky decomposition; A is updated
+/// multiplicatively by the rank-weighted second-moment matrix (hence the
+/// exponential parameterisation), and sigma follows the average squared length
+/// of the sampled z vectors. The historical best is tracked separately.
+pub fn exponential_natural_evolution_strategy(
+  config : XnesConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let lambda = if config.population_size < 4 {
+    4
+  } else {
+    config.population_size
+  }
+
+  let mu = random_solution(dim, bounds, current_rng)
+  let mut sigma = span * 0.20
+  let a : Array[Array[Double]] = []
+  for i in 0..<dim {
+    let row : Array[Double] = []
+    for j in 0..<dim {
+      row.push(if i == j { 1.0 } else { 0.0 })
+    }
+    a.push(row)
+  }
+
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  while evaluations < max_evals {
+    let cur_lambda = if evaluations + lambda > max_evals {
+      max_evals - evaluations
+    } else {
+      lambda
+    }
+    if cur_lambda <= 0 {
+      break
+    }
+    let zs : Array[Array[Double]] = []
+    let fs : Array[Double] = []
+    for _i in 0..<cur_lambda {
+      let z : Array[Double] = []
+      for _d in 0..<dim {
+        z.push(xnes_randn(current_rng))
+      }
+      let az : Array[Double] = []
+      for i in 0..<dim {
+        let mut s = 0.0
+        for j in 0..<dim {
+          s = s + a[i][j] * z[j]
+        }
+        az.push(s)
+      }
+      let x : Array[Double] = []
+      for d in 0..<dim {
+        x.push(max(bounds.min, min(bounds.max, mu[d] + sigma * az[d])))
+      }
+      let fx = evaluate(f, x)
+      evaluations = evaluations + 1
+      zs.push(z)
+      fs.push(fx)
+      if !have_best || fx < best_val {
+        best_val = fx
+        best_pos = x
+        have_best = true
+      }
+    }
+    let order = sort_indices(fs)
+    let lam_d = cur_lambda.to_double()
+    let util : Array[Double] = []
+    let mut util_sum = 0.0
+    for k in 0..<cur_lambda {
+      let raw = @math.ln(lam_d / 2.0 + 1.0) - @math.ln(k.to_double() + 1.0)
+      let value = if raw > 0.0 { raw } else { 0.0 }
+      util.push(value)
+      util_sum = util_sum + value
+    }
+    let safe_sum = if util_sum > 1.0e-12 { util_sum } else { 1.0 }
+    let gmu : Array[Double] = []
+    for _d in 0..<dim {
+      gmu.push(0.0)
+    }
+    let second : Array[Double] = []
+    for _i in 0..<(dim * dim) {
+      second.push(0.0)
+    }
+    let mut gsig = 0.0
+    for k in 0..<cur_lambda {
+      let wk = util[k] / safe_sum
+      if wk > 0.0 {
+        let z = zs[order[k]]
+        for d in 0..<dim {
+          gmu[d] = gmu[d] + wk * z[d]
+        }
+        let mut zsq = 0.0
+        for d in 0..<dim {
+          zsq = zsq + z[d] * z[d]
+          for e in 0..<dim {
+            second[d * dim + e] = second[d * dim + e] + wk * z[d] * z[e]
+          }
+        }
+        gsig = gsig + wk * (zsq / dim.to_double() - 1.0)
+      }
+    }
+    for d in 0..<dim {
+      for e in 0..<dim {
+        let target = if d == e { 1.0 } else { 0.0 }
+        second[d * dim + e] = second[d * dim + e] - target
+      }
+    }
+    let raw_frac = evaluations.to_double() / max_evals.to_double()
+    let frac = if raw_frac > 1.0 { 1.0 } else { raw_frac }
+    let decay = 1.0 - frac
+    let eta_mu = 0.12 * (0.3 + 0.7 * decay)
+    let eta_a = 0.10 * (0.3 + 0.7 * decay)
+    let eta_s = 0.10 * (0.3 + 0.7 * decay)
+    let agmu : Array[Double] = []
+    for i in 0..<dim {
+      let mut s = 0.0
+      for j in 0..<dim {
+        s = s + a[i][j] * gmu[j]
+      }
+      agmu.push(s)
+    }
+    for d in 0..<dim {
+      mu[d] = max(bounds.min, min(bounds.max, mu[d] + eta_mu * sigma * agmu[d]))
+    }
+    let am : Array[Double] = []
+    for _i in 0..<(dim * dim) {
+      am.push(0.0)
+    }
+    for i in 0..<dim {
+      for j in 0..<dim {
+        let mut s = 0.0
+        for k in 0..<dim {
+          s = s + a[i][k] * second[k * dim + j]
+        }
+        am[i * dim + j] = s
+      }
+    }
+    for i in 0..<dim {
+      for j in 0..<dim {
+        a[i][j] = a[i][j] + eta_a * am[i * dim + j]
+      }
+    }
+    sigma = sigma * @math.exp(eta_s * 0.5 * gsig)
+    sigma = max(span * 1.0e-5, min(span * 0.5, sigma))
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== Demon Algorithm (1983) =====
+
+///|
+pub struct DemonConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_demon_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> DemonConfig {
+  DemonConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Demon Algorithm (Creutz 1983, microcanonical Monte Carlo). The single
+/// incumbent carries a global "demon" energy ledger with a hard cap: a worse
+/// move is accepted only when it can be paid from the ledger, while an
+/// improving move is always accepted and refunds its gain to the ledger
+/// (discarding any overflow beyond demon_max). There is no temperature and no
+/// random rejection of improving moves, only a conserved borrowing budget,
+/// which is the defining difference from simulated annealing and from the
+/// per-molecule kinetic-energy buffer of chemical reaction optimization. A
+/// depleted ledger triggers a fresh uniform re-seed so the chain cannot stall;
+/// the budget is split among random restarts and the historical best is
+/// tracked separately. Note that this is a single-point method
+/// (population_size is accepted for a uniform config interface but not used),
+/// matching the SPSA/BAS/BFGS convention.
+pub fn demon_algorithm(
+  config : DemonConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let restarts = 8
+  let raw_seg = max_evals / restarts
+  let seg_budget = if raw_seg < 24 { 24 } else { raw_seg }
+
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _r in 0..<restarts {
+    if evaluations >= max_evals {
+      break
+    }
+    let mut x = random_solution(dim, bounds, current_rng)
+    let mut fx = evaluate(f, x)
+    evaluations = evaluations + 1
+    if !have_best || fx < best_val {
+      best_val = fx
+      best_pos = x
+      have_best = true
+    }
+    let f0_abs = if fx < 0.0 { -fx } else { fx }
+    let fscale = 1.0 + f0_abs
+    let base_cap = min(span * 0.10, fscale * 0.30)
+    let base_ledger = min(span * 0.05, fscale * 0.10)
+    let mut ledger = base_ledger
+    let mut stall = 0
+    let mut step = span * 0.30
+    let mut seg_used = 1
+    while seg_used < seg_budget && evaluations < max_evals {
+      let raw_frac = seg_used.to_double() / seg_budget.to_double()
+      let frac = if raw_frac > 1.0 { 1.0 } else { raw_frac }
+      let decay = 1.0 - frac
+      let trust = 0.05 + 0.95 * decay
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = x[d] + (2.0 * RNG::next(current_rng) - 1.0) * step
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      seg_used = seg_used + 1
+      step = max(step * 0.99, span * 1.0e-5)
+      let de = fv - fx
+      if de <= 0.0 {
+        // improving move: always accepted, gain is frozen into the ledger
+        ledger = min(ledger - de, base_cap * trust)
+        x = cand
+        fx = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+          stall = 0
+        } else {
+          stall = stall + 1
+        }
+      } else if de <= ledger {
+        // worse move: accepted only if the demon can pay for it
+        ledger = ledger - de
+        x = cand
+        fx = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+          stall = 0
+        } else {
+          stall = stall + 1
+        }
+      } else {
+        stall = stall + 1
+      }
+      if ledger < fscale * 1.0e-4 && evaluations < max_evals {
+        // ledger depleted: reheat the chain near its current state
+        ledger = base_ledger * trust
+        let reheat : Array[Double] = []
+        for d in 0..<dim {
+          let nv = x[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.03 * decay
+          reheat.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let ff = evaluate(f, reheat)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        x = reheat
+        fx = ff
+        if ff < best_val {
+          best_val = ff
+          best_pos = reheat
+        }
+      }
+      if stall >= 120 && evaluations < max_evals {
+        // plateau: borrow a fresh start from the incumbent best
+        let jump : Array[Double] = []
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10
+          jump.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fj = evaluate(f, jump)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        x = jump
+        fx = fj
+        ledger = base_ledger * trust
+        stall = 0
+        if fj < best_val {
+          best_val = fj
+          best_pos = jump
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== MCS: Multilevel Coordinate Search (1999) =====
+
+///|
+pub struct McsConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_mcs_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> McsConfig {
+  McsConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Multilevel Coordinate Search (Huyer & Neumaier 1999). A list of boxes is
+/// maintained; each box stores a base point, a per-coordinate step vector and
+/// a level. Each round the box with the lowest level (least refined) is split
+/// along one coordinate: the two points base ± step on that coordinate are
+/// evaluated, the better one becomes the new base, that coordinate's step is
+/// halved and the level grows, while the other side is kept as a sibling box
+/// so the unexplored half remains covered. Boxes that reach the level limit are
+/// no longer split; when no splittable box remains the search restarts with a
+/// fresh random box. This deterministic coordinate-oriented cover is distinct
+/// from DIRECT's best/widest rectangle trisection and from COBYLA/NEWUOA's
+/// trust regions. Note that this is a box-list method (population_size is
+/// accepted for a uniform config interface but not used).
+pub fn multilevel_coordinate_search(
+  config : McsConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let max_level = 20
+  let max_boxes = 64
+
+  let bases : Array[Array[Double]] = []
+  let steps : Array[Array[Double]] = []
+  let levels : Array[Int32] = []
+  let fits : Array[Double] = []
+
+  let first = random_solution(dim, bounds, current_rng)
+  let fv = evaluate(f, first)
+  let mut evaluations = 1
+  bases.push(first)
+  let s0 : Array[Double] = []
+  for _d in 0..<dim {
+    s0.push(span * 0.25)
+  }
+  steps.push(s0)
+  levels.push(0)
+  fits.push(fv)
+  let mut best_pos = first
+  let mut best_val = fv
+
+  while evaluations < max_evals {
+    // pick the least-refined splittable box (ties: better fitness)
+    let mut pick = -1
+    for i in 0..<bases.length() {
+      if levels[i] < max_level {
+        if pick < 0 ||
+          levels[i] < levels[pick] ||
+          (levels[i] == levels[pick] && fits[i] < fits[pick]) {
+          pick = i
+        }
+      }
+    }
+    if pick < 0 {
+      // no box can be split: restart a fresh box
+      let fresh = random_solution(dim, bounds, current_rng)
+      let ff = evaluate(f, fresh)
+      evaluations = evaluations + 1
+      if ff < best_val {
+        best_val = ff
+        best_pos = fresh
+      }
+      let mut worst = 0
+      for i in 1..<bases.length() {
+        if fits[i] > fits[worst] {
+          worst = i
+        }
+      }
+      bases[worst] = fresh
+      let sr : Array[Double] = []
+      for _k in 0..<dim {
+        sr.push(span * 0.25)
+      }
+      steps[worst] = sr
+      levels[worst] = 0
+      fits[worst] = ff
+    } else {
+      let d = levels[pick] % dim
+      let base = bases[pick]
+      let half = steps[pick][d]
+      let left : Array[Double] = []
+      let right : Array[Double] = []
+      for k in 0..<dim {
+        let lv = if k == d {
+          max(bounds.min, min(bounds.max, base[k] - half))
+        } else {
+          base[k]
+        }
+        let rv = if k == d {
+          max(bounds.min, min(bounds.max, base[k] + half))
+        } else {
+          base[k]
+        }
+        left.push(lv)
+        right.push(rv)
+      }
+      let fl = evaluate(f, left)
+      evaluations = evaluations + 1
+      let mut has_right = false
+      let mut fr = 0.0
+      if evaluations < max_evals {
+        fr = evaluate(f, right)
+        evaluations = evaluations + 1
+        has_right = true
+      }
+      let use_right = has_right && fr < fl
+      let child = if use_right { right } else { left }
+      let fchild = if use_right { fr } else { fl }
+      let sibling = if use_right { left } else { right }
+      let fsib = if use_right { fl } else { fr }
+      bases[pick] = child
+      fits[pick] = fchild
+      steps[pick][d] = half * 0.5
+      levels[pick] = levels[pick] + 1
+      if fchild < best_val {
+        best_val = fchild
+        best_pos = child
+      }
+      if has_right && evaluations < max_evals {
+        let ss : Array[Double] = []
+        for k in 0..<dim {
+          ss.push(steps[pick][k])
+        }
+        if bases.length() < max_boxes {
+          bases.push(sibling)
+          steps.push(ss)
+          levels.push(levels[pick])
+          fits.push(fsib)
+        } else {
+          let mut worst = if pick == 0 { 1 } else { 0 }
+          for i in 0..<bases.length() {
+            if i != pick && fits[i] > fits[worst] {
+              worst = i
+            }
+          }
+          if fsib < fits[worst] {
+            bases[worst] = sibling
+            steps[worst] = ss
+            levels[worst] = levels[pick]
+            fits[worst] = fsib
+          }
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== WL: Wang-Landau sampling (2001) =====
+
+///|
+fn wl_bin(
+  bounds : Bounds,
+  span : Double,
+  bins : Int32,
+  value : Double,
+) -> Int32 {
+  let norm = (value - bounds.min) / span
+  let raw = (norm * bins.to_double()).to_int()
+  if raw < 0 {
+    0
+  } else if raw >= bins {
+    bins - 1
+  } else {
+    raw
+  }
+}
+
+///|
+fn wl_penalty(
+  counts : Array[Int32],
+  dim : Int32,
+  bins : Int32,
+  bounds : Bounds,
+  span : Double,
+  point : Array[Double],
+  total : Int32,
+) -> Double {
+  let mut sum = 0.0
+  for d in 0..<dim {
+    let idx = wl_bin(bounds, span, bins, point[d])
+    sum = sum + counts[d * bins + idx].to_double()
+  }
+  sum / (total.to_double() + 1.0)
+}
+
+///|
+pub struct WlConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_wl_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> WlConfig {
+  WlConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Wang-Landau sampling (Wang & Landau 2001), adapted to continuous black-box
+/// minimization. A per-coordinate visit histogram is maintained (each dimension
+/// is split into a fixed number of bins) and a growing penalty factor biases
+/// the walk away from already visited bins: the candidate score is
+/// `f + lambda * visit_density`, with lambda increasing with the evaluation
+/// budget. Early in the run lambda is negligible so the chain descends, while
+/// later it favours unexplored bins, which helps escape local basins. The
+/// historical best is tracked on the raw objective, not on the penalised score.
+/// Note that this is a single-point method (population_size is accepted for a
+/// uniform config interface but not used).
+pub fn wang_landau_sampling(
+  config : WlConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let bins = 6
+  let restarts = 8
+  let raw_seg = max_evals / restarts
+  let seg_budget = if raw_seg < 24 { 24 } else { raw_seg }
+
+  let counts : Array[Int32] = []
+  for _i in 0..<(dim * bins) {
+    counts.push(0)
+  }
+  let mut total = 0
+
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _r in 0..<restarts {
+    if evaluations >= max_evals {
+      break
+    }
+    let mut x = random_solution(dim, bounds, current_rng)
+    let mut fx = evaluate(f, x)
+    evaluations = evaluations + 1
+    if !have_best || fx < best_val {
+      best_val = fx
+      best_pos = x
+      have_best = true
+    }
+    let f0_abs = if fx < 0.0 { -fx } else { fx }
+    let fscale = 1.0 + f0_abs
+    let mut step = span * 0.30
+    let mut seg_used = 1
+    let mut stall = 0
+    while seg_used < seg_budget && evaluations < max_evals {
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let nv = x[d] + (2.0 * RNG::next(current_rng) - 1.0) * step
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      seg_used = seg_used + 1
+      step = max(step * 0.99, span * 1.0e-5)
+      let global_frac = evaluations.to_double() / max_evals.to_double()
+      let lam = fscale * 0.10 * global_frac
+      let penalty_x = wl_penalty(counts, dim, bins, bounds, span, x, total)
+      let penalty_c = wl_penalty(counts, dim, bins, bounds, span, cand, total)
+      if fv + lam * penalty_c <= fx + lam * penalty_x {
+        x = cand
+        fx = fv
+        for d in 0..<dim {
+          let idx = wl_bin(bounds, span, bins, x[d])
+          counts[d * bins + idx] = counts[d * bins + idx] + 1
+        }
+        total = total + 1
+        stall = 0
+      } else {
+        stall = stall + 1
+      }
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+      if stall >= 80 && evaluations < max_evals {
+        // histogram walk stalled: sample a fresh region
+        let fresh = random_solution(dim, bounds, current_rng)
+        let ff = evaluate(f, fresh)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        x = fresh
+        fx = ff
+        step = span * 0.30
+        stall = 0
+        if ff < best_val {
+          best_val = ff
+          best_pos = fresh
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== LSHADE: Linear Population Size Reduction SHADE (2014) =====
+
+///|
+pub struct LSHADEConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_lshade_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> LSHADEConfig {
+  LSHADEConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// LSHADE (Tanabe & Fukunaga 2014): SHADE's current-to-pbest/1 mutation with
+/// success-history memories M_F / M_CR and an external archive of replaced
+/// parents, extended with **linear population size reduction (LPSR)**.  After
+/// every generation the population size is recomputed as
+/// `NP = round(NP_min + (NP_init - NP_min) * remaining / budget)` and the worst
+/// individuals are discarded, so the population shrinks linearly from NP_init
+/// to NP_min as the budget is consumed.  This dynamic population-size schedule
+/// is the defining difference from fixed-size SHADE; shrinking lets the late
+/// search spend its evaluations on the most promising individuals instead of
+/// maintaining a large swarm.  The historical best is tracked separately.
+pub fn lshade_algorithm(
+  config : LSHADEConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let h_mem = 5
+  let np_min = 4
+
+  let mut np_init = config.population_size
+  if np_init < np_min {
+    np_init = np_min
+  }
+
+  let m_f : Array[Double] = []
+  let m_cr : Array[Double] = []
+  for _i in 0..<h_mem {
+    m_f.push(0.5)
+    m_cr.push(0.5)
+  }
+  let archive : Array[Array[Double]] = []
+  let mut mem_idx = 0
+
+  let mut population : Array[Array[Double]] = []
+  let mut fitness : Array[Double] = []
+  for _i in 0..<np_init {
+    let sol = random_solution(dim, bounds, current_rng)
+    population.push(sol)
+    fitness.push(evaluate(f, sol))
+  }
+  let mut evaluations = np_init
+  let sorted0 = sort_indices(fitness)
+  let mut best_pos = population[sorted0[0]]
+  let mut best_val = fitness[sorted0[0]]
+
+  while evaluations < max_evals {
+    let cur_np = population.length()
+    let order = sort_indices(fitness)
+
+    let p_min = 2.0 / cur_np.to_double()
+    let p = p_min + RNG::next(current_rng) * (0.2 - p_min)
+    let mut pnum = (p * cur_np.to_double()).to_int()
+    if pnum < 2 {
+      pnum = 2
+    }
+    if pnum > cur_np {
+      pnum = cur_np
+    }
+
+    let s_f : Array[Double] = []
+    let s_cr : Array[Double] = []
+    let s_df : Array[Double] = []
+
+    for i in 0..<cur_np {
+      if evaluations >= max_evals {
+        break
+      }
+
+      let mem_k = (RNG::next(current_rng) * h_mem.to_double()).to_int() % h_mem
+      let mut cr_i = m_cr[mem_k] +
+        0.1 * box_muller(RNG::next(current_rng), RNG::next(current_rng))
+      if cr_i < 0.0 {
+        cr_i = 0.0
+      } else if cr_i > 1.0 {
+        cr_i = 1.0
+      }
+      let mut f_i = 0.0
+      let mut tries = 0
+      while f_i <= 0.0 && tries < 10 {
+        f_i = m_f[mem_k] + 0.1 * shade_cauchy(current_rng)
+        tries = tries + 1
+      }
+      if f_i <= 0.0 {
+        f_i = 0.5
+      }
+      if f_i > 1.0 {
+        f_i = 1.0
+      }
+
+      let pbest_rank = (RNG::next(current_rng) * pnum.to_double()).to_int() %
+        pnum
+      let pbest = population[order[pbest_rank]]
+
+      let mut r1 = (RNG::next(current_rng) * cur_np.to_double()).to_int() %
+        cur_np
+      while r1 == i {
+        r1 = (RNG::next(current_rng) * cur_np.to_double()).to_int() % cur_np
+      }
+
+      let union_size = cur_np + archive.length()
+      let mut r2 = (RNG::next(current_rng) * union_size.to_double()).to_int() %
+        union_size
+      while r2 == i || r2 == r1 {
+        r2 = (RNG::next(current_rng) * union_size.to_double()).to_int() %
+          union_size
+      }
+      let r2_pos : Array[Double] = if r2 < cur_np {
+        population[r2]
+      } else {
+        archive[r2 - cur_np]
+      }
+
+      let jrand = (RNG::next(current_rng) * dim.to_double()).to_int() % dim
+      let trial : Array[Double] = []
+      for j in 0..<dim {
+        let mutant = population[i][j] +
+          f_i * (pbest[j] - population[i][j]) +
+          f_i * (population[r1][j] - r2_pos[j])
+        let clamped = max(bounds.min, min(bounds.max, mutant))
+        if RNG::next(current_rng) < cr_i || j == jrand {
+          trial.push(clamped)
+        } else {
+          trial.push(population[i][j])
+        }
+      }
+
+      let trial_fit = evaluate(f, trial)
+      evaluations = evaluations + 1
+      if trial_fit < fitness[i] {
+        s_f.push(f_i)
+        s_cr.push(cr_i)
+        s_df.push(abs_val(fitness[i] - trial_fit))
+        if archive.length() < np_init {
+          archive.push(population[i])
+        } else {
+          let ridx = (RNG::next(current_rng) * archive.length().to_double()).to_int() %
+            archive.length()
+          archive[ridx] = population[i]
+        }
+        population[i] = trial
+        fitness[i] = trial_fit
+        if trial_fit < best_val {
+          best_val = trial_fit
+          best_pos = trial
+        }
+      }
+    }
+
+    let m = s_df.length()
+    if m > 0 {
+      let mut sum_w = 0.0
+      let mut sum_wf = 0.0
+      let mut sum_wf2 = 0.0
+      let mut sum_wcr = 0.0
+      for t in 0..<m {
+        let w = s_df[t]
+        sum_w = sum_w + w
+        sum_wf = sum_wf + w * s_f[t]
+        sum_wf2 = sum_wf2 + w * s_f[t] * s_f[t]
+        sum_wcr = sum_wcr + w * s_cr[t]
+      }
+      if sum_wf > 1.0e-12 {
+        m_f[mem_idx] = sum_wf2 / sum_wf
+        m_cr[mem_idx] = sum_wcr / sum_w
+      } else {
+        m_f[mem_idx] = 0.5
+        m_cr[mem_idx] = 0.5
+      }
+      mem_idx = (mem_idx + 1) % h_mem
+    }
+
+    // Linear population size reduction: shrink toward NP_min as budget is used
+    let remain = if evaluations < max_evals {
+      max_evals - evaluations
+    } else {
+      0
+    }
+    let ratio = remain.to_double() / max_evals.to_double()
+    let shrink = ((np_init - np_min).to_double() * ratio).to_int()
+    let mut new_np = np_min + shrink
+    if new_np < np_min {
+      new_np = np_min
+    }
+    if new_np > cur_np {
+      new_np = cur_np
+    }
+    if new_np < cur_np {
+      let ord2 = sort_indices(fitness)
+      let npop : Array[Array[Double]] = []
+      let nfit : Array[Double] = []
+      for k in 0..<new_np {
+        npop.push(population[ord2[k]])
+        nfit.push(fitness[ord2[k]])
+      }
+      population = npop
+      fitness = nfit
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== (1+1)-ES with the 1/5 success rule (1973) =====
+
+///|
+pub struct OnePlusOneEsConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_one_plus_one_es_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> OnePlusOneEsConfig {
+  OnePlusOneEsConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// (1+1) Evolution Strategy with Rechenberg's 1/5 success rule (Rechenberg
+/// 1973). A single parent mutates every coordinate with Gaussian noise scaled
+/// by a global step size sigma, and an offspring replaces the parent only when
+/// it improves. Every window of ten trials the success rate is compared with
+/// 1/5: sigma is divided by 0.82 when more than one fifth succeeded (the step
+/// is too small) and multiplied by 0.82 otherwise (the step is too large). The
+/// 1/5 rule is the defining adaptation mechanism, unlike the globally shrinking
+/// sigma of the (mu+lambda) ES or the rank-based natural gradient of
+/// xNES/CMA-ES. Random restarts, a long-stall jump toward the incumbent best
+/// and historical-best tracking make the single point robust. population_size
+/// is accepted for a uniform config interface but not used.
+pub fn one_plus_one_evolution_strategy(
+  config : OnePlusOneEsConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let restarts = 8
+  let raw_seg = max_evals / restarts
+  let seg_budget = if raw_seg < 24 { 24 } else { raw_seg }
+
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _r in 0..<restarts {
+    if evaluations >= max_evals {
+      break
+    }
+    let mut x = random_solution(dim, bounds, current_rng)
+    let mut fx = evaluate(f, x)
+    evaluations = evaluations + 1
+    if !have_best || fx < best_val {
+      best_val = fx
+      best_pos = x
+      have_best = true
+    }
+    let mut sigma = span * 0.25
+    let mut succ = 0
+    let mut tries = 0
+    let mut seg_used = 1
+    let mut stall = 0
+    while seg_used < seg_budget && evaluations < max_evals {
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let z = box_muller(RNG::next(current_rng), RNG::next(current_rng))
+        let nv = x[d] + sigma * z
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      seg_used = seg_used + 1
+      tries = tries + 1
+      if fv < fx {
+        x = cand
+        fx = fv
+        succ = succ + 1
+        stall = 0
+        if fv < best_val {
+          best_val = fv
+          best_pos = cand
+        }
+      } else {
+        stall = stall + 1
+      }
+      if tries >= 10 {
+        let rate = succ.to_double() / 10.0
+        if rate > 0.2 {
+          sigma = min(sigma / 0.82, span * 0.5)
+        } else {
+          sigma = max(sigma * 0.82, span * 1.0e-7)
+        }
+        succ = 0
+        tries = 0
+      }
+      if stall >= 40 && evaluations < max_evals {
+        // long stall: jump toward the incumbent best
+        let jump : Array[Double] = []
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10
+          jump.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fj = evaluate(f, jump)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        x = jump
+        fx = fj
+        sigma = span * 0.10
+        succ = 0
+        tries = 0
+        stall = 0
+        if fj < best_val {
+          best_val = fj
+          best_pos = jump
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== PRAXIS: principal axis search (1973) =====
+
+///|
+pub struct PraxisConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_praxis_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> PraxisConfig {
+  PraxisConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Principal axis of the weighted direction set, by power iteration on
+/// sum_i step_i^2 v_i v_i^T.  This is the distinguishing ingredient of
+/// PRAXIS: the direction set is periodically re-oriented toward its own
+/// principal axis, unlike Powell's method which only adds the total
+/// displacement direction.
+fn praxis_principal_axis(
+  dirs : Array[Array[Double]],
+  steps : Array[Double],
+  dim : Int32,
+  rng : RNG,
+) -> Array[Double] {
+  let u : Array[Double] = []
+  for _d in 0..<dim {
+    u.push(2.0 * RNG::next(rng) - 1.0)
+  }
+  let mut nrm0 = 0.0
+  for d in 0..<dim {
+    nrm0 = nrm0 + u[d] * u[d]
+  }
+  let n0 = nrm0.sqrt()
+  if n0 > 1.0e-12 {
+    for d in 0..<dim {
+      u[d] = u[d] / n0
+    }
+  }
+  for _it in 0..<8 {
+    let acc : Array[Double] = []
+    for _d in 0..<dim {
+      acc.push(0.0)
+    }
+    for i in 0..<dim {
+      let vi = dirs[i]
+      let mut dot = 0.0
+      for d in 0..<dim {
+        dot = dot + vi[d] * u[d]
+      }
+      let w = steps[i] * steps[i] * dot
+      for d in 0..<dim {
+        acc[d] = acc[d] + w * vi[d]
+      }
+    }
+    let mut nrm = 0.0
+    for d in 0..<dim {
+      nrm = nrm + acc[d] * acc[d]
+    }
+    let nn = nrm.sqrt()
+    if nn < 1.0e-12 {
+      break
+    }
+    for d in 0..<dim {
+      u[d] = acc[d] / nn
+    }
+  }
+  u
+}
+
+///|
+/// PRAXIS (Brent 1973): a derivative-free direction-set method. Each sweep
+/// probes both sides of every stored direction with an adaptive step and a
+/// parabolic line minimization along the direction. After a sweep the direction
+/// set is re-oriented: its principal axis is computed by power iteration on the
+/// step-weighted direction covariance and replaces the least productive
+/// direction, while the total displacement of the sweep becomes a new direction.
+/// This periodic principal-axis re-orientation is the defining mechanism,
+/// distinct from Powell's conjugate directions (no eigen-analysis) and from
+/// Nelder-Mead's simplex geometry. A single prefix-stable trajectory is used
+/// (no restarts), so a larger budget strictly continues the same run; a
+/// long-stall jump toward the incumbent best and historical-best tracking
+/// complete the method. population_size is accepted for a uniform config
+/// interface but not used.
+pub fn praxis_optimizer(
+  config : PraxisConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let restarts = 1
+  let seg_budget = max_evals
+
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _r in 0..<restarts {
+    if evaluations >= max_evals {
+      break
+    }
+    let mut x = random_solution(dim, bounds, current_rng)
+    let mut fx = evaluate(f, x)
+    evaluations = evaluations + 1
+    if !have_best || fx < best_val {
+      best_val = fx
+      best_pos = x
+      have_best = true
+    }
+    let dirs : Array[Array[Double]] = []
+    for i in 0..<dim {
+      let v : Array[Double] = []
+      for d in 0..<dim {
+        v.push(if d == i { 1.0 } else { 0.0 })
+      }
+      dirs.push(v)
+    }
+    let steps : Array[Double] = []
+    for _d in 0..<dim {
+      steps.push(span * 0.12)
+    }
+    let mut seg_used = 1
+    let mut stall = 0
+    let mut sweep = 0
+    while seg_used < seg_budget && evaluations < max_evals {
+      let x_start : Array[Double] = []
+      for d in 0..<dim {
+        x_start.push(x[d])
+      }
+      let f_start = fx
+      for i in 0..<dim {
+        if evaluations >= max_evals {
+          break
+        }
+        let si = steps[i]
+        let v = dirs[i]
+        let plus : Array[Double] = []
+        let minus : Array[Double] = []
+        for d in 0..<dim {
+          plus.push(max(bounds.min, min(bounds.max, x[d] + si * v[d])))
+          minus.push(max(bounds.min, min(bounds.max, x[d] - si * v[d])))
+        }
+        let fp = evaluate(f, plus)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        let mut fm = fp
+        if evaluations < max_evals {
+          fm = evaluate(f, minus)
+          evaluations = evaluations + 1
+          seg_used = seg_used + 1
+        }
+        let use_plus = fp <= fm
+        let fbest = if use_plus { fp } else { fm }
+        if fbest < fx {
+          // parabolic line minimization along this direction
+          let denom = 2.0 * (fm - 2.0 * fx + fp)
+          let mut t = if use_plus { si } else { -si }
+          if denom > 1.0e-12 {
+            let tv = si * (fm - fp) / denom
+            t = max(-2.0 * si, min(2.0 * si, tv))
+          }
+          let mut best_x = if use_plus { plus } else { minus }
+          let mut best_f = fbest
+          if evaluations < max_evals && t < 1.8 * si && t > -1.8 * si {
+            let cand : Array[Double] = []
+            for d in 0..<dim {
+              cand.push(max(bounds.min, min(bounds.max, x[d] + t * v[d])))
+            }
+            let fv = evaluate(f, cand)
+            evaluations = evaluations + 1
+            seg_used = seg_used + 1
+            if fv < best_f {
+              best_f = fv
+              best_x = cand
+            }
+          }
+          x = best_x
+          fx = best_f
+          steps[i] = min(si * 1.5, span * 0.5)
+          stall = 0
+          if best_f < best_val {
+            best_val = best_f
+            best_pos = best_x
+          }
+        } else {
+          steps[i] = max(si * 0.6, span * 1.0e-5)
+          stall = stall + 1
+        }
+      }
+      if evaluations >= max_evals {
+        break
+      }
+      let p = praxis_principal_axis(dirs, steps, dim, current_rng)
+      let mut imin = 0
+      for i in 1..<dim {
+        if steps[i] < steps[imin] {
+          imin = i
+        }
+      }
+      dirs[imin] = p
+      steps[imin] = span * 0.04
+      let disp : Array[Double] = []
+      let mut dsq = 0.0
+      for d in 0..<dim {
+        let delta = x[d] - x_start[d]
+        disp.push(delta)
+        dsq = dsq + delta * delta
+      }
+      let dn = dsq.sqrt()
+      if dn > span * 1.0e-6 && dim > 1 && fx < f_start {
+        let dn_safe = if dn > 1.0e-12 { dn } else { 1.0 }
+        for d in 0..<dim {
+          disp[d] = disp[d] / dn_safe
+        }
+        let mut imin2 = if imin == 0 { 1 } else { 0 }
+        for i in 0..<dim {
+          if i != imin && steps[i] < steps[imin2] {
+            imin2 = i
+          }
+        }
+        dirs[imin2] = disp
+        steps[imin2] = max(span * 1.0e-3, min(dn, span * 0.3))
+      }
+      if stall >= 30 && evaluations < max_evals {
+        // whole sweep failed: jump near the incumbent best
+        let jump : Array[Double] = []
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05
+          jump.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fj = evaluate(f, jump)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        x = jump
+        fx = fj
+        for i in 0..<dim {
+          steps[i] = span * 0.03
+        }
+        stall = 0
+        if fj < best_val {
+          best_val = fj
+          best_pos = jump
+        }
+      }
+      sweep = sweep + 1
+      if sweep >= 18 && evaluations < max_evals {
+        // periodic coordinate re-basing keeps refinement directions available
+        for i in 0..<dim {
+          for d in 0..<dim {
+            dirs[i][d] = if d == i { 1.0 } else { 0.0 }
+          }
+          steps[i] = span * 0.012
+        }
+        sweep = 0
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== BOBYQA: bounded quadratic approximation (2009) =====
+
+///|
+pub struct BobyqaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bobyqa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BobyqaConfig {
+  BobyqaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Solve (hess + ridge*I) d = -grad with Gaussian elimination and partial
+/// pivoting. Returns a zero vector when the matrix is numerically singular.
+fn bobyqa_solve(
+  hess : Array[Double],
+  grad : Array[Double],
+  n : Int32,
+  ridge : Double,
+) -> Array[Double] {
+  let w = n + 1
+  let m : Array[Double] = []
+  for _i in 0..<(n * w) {
+    m.push(0.0)
+  }
+  for i in 0..<n {
+    for j in 0..<n {
+      let add = if i == j { ridge } else { 0.0 }
+      m[i * w + j] = hess[i * n + j] + add
+    }
+    m[i * w + n] = -grad[i]
+  }
+  let mut ok = true
+  for col in 0..<n {
+    let mut piv = col
+    let mut best = 0.0
+    for r in col..<n {
+      let a = m[r * w + col]
+      let aabs = if a < 0.0 { -a } else { a }
+      if aabs > best {
+        best = aabs
+        piv = r
+      }
+    }
+    if best < 1.0e-12 {
+      ok = false
+      break
+    }
+    if piv != col {
+      for j in 0..<w {
+        let tmp = m[col * w + j]
+        m[col * w + j] = m[piv * w + j]
+        m[piv * w + j] = tmp
+      }
+    }
+    let diag = m[col * w + col]
+    for r in 0..<n {
+      if r != col {
+        let factor = m[r * w + col] / diag
+        if factor != 0.0 {
+          for j in col..<w {
+            m[r * w + j] = m[r * w + j] - factor * m[col * w + j]
+          }
+        }
+      }
+    }
+  }
+  let sol : Array[Double] = []
+  for _i in 0..<n {
+    sol.push(0.0)
+  }
+  if ok {
+    for i in 0..<n {
+      sol[i] = m[i * w + n] / m[i * w + i]
+    }
+  }
+  sol
+}
+
+///|
+/// Build the quadratic model around x: central-difference gradient and
+/// diagonal second derivatives (2 evaluations per dimension) plus the
+/// off-diagonal second derivatives from four corner evaluations per pair.
+/// Returns the number of evaluations used, respecting the global budget.
+fn bobyqa_build_model(
+  f : (Array[Double]) -> Double,
+  bounds : Bounds,
+  dim : Int32,
+  x : Array[Double],
+  fx : Double,
+  h : Double,
+  max_evals : Int32,
+  evaluations : Int32,
+  grad : Array[Double],
+  hess : Array[Double],
+) -> Int32 {
+  let mut used = 0
+  for d in 0..<dim {
+    grad[d] = 0.0
+  }
+  for i in 0..<(dim * dim) {
+    hess[i] = 0.0
+  }
+  let mut diag_done = 0
+  for d in 0..<dim {
+    if evaluations + used + 2 > max_evals {
+      break
+    }
+    let xp : Array[Double] = []
+    let xm : Array[Double] = []
+    for k in 0..<dim {
+      let v = x[k]
+      if k == d {
+        xp.push(max(bounds.min, min(bounds.max, v + h)))
+        xm.push(max(bounds.min, min(bounds.max, v - h)))
+      } else {
+        xp.push(v)
+        xm.push(v)
+      }
+    }
+    let fp = f(xp)
+    let fm = f(xm)
+    used = used + 2
+    let dd = xp[d] - xm[d]
+    if dd > 1.0e-12 {
+      grad[d] = (fp - fm) / dd
+      hess[d * dim + d] = 2.0 * (fp - 2.0 * fx + fm) / (dd * dd)
+    }
+    diag_done = diag_done + 1
+  }
+  if diag_done < dim {
+    return used
+  }
+  for i in 0..<dim {
+    for j in 0..<dim {
+      if j > i {
+        if evaluations + used + 4 > max_evals {
+          return used
+        }
+        let xpp : Array[Double] = []
+        let xpm : Array[Double] = []
+        let xmp : Array[Double] = []
+        let xmm : Array[Double] = []
+        for k in 0..<dim {
+          let v = x[k]
+          let pi = if k == i {
+            max(bounds.min, min(bounds.max, v + h))
+          } else {
+            v
+          }
+          let mi = if k == i {
+            max(bounds.min, min(bounds.max, v - h))
+          } else {
+            v
+          }
+          let pj = if k == j {
+            max(bounds.min, min(bounds.max, v + h))
+          } else {
+            v
+          }
+          let mj = if k == j {
+            max(bounds.min, min(bounds.max, v - h))
+          } else {
+            v
+          }
+          if k == i {
+            xpp.push(pi)
+            xpm.push(pi)
+            xmp.push(mi)
+            xmm.push(mi)
+          } else if k == j {
+            xpp.push(pj)
+            xpm.push(mj)
+            xmp.push(pj)
+            xmm.push(mj)
+          } else {
+            xpp.push(v)
+            xpm.push(v)
+            xmp.push(v)
+            xmm.push(v)
+          }
+        }
+        let fpp = f(xpp)
+        let fpm = f(xpm)
+        let fmp = f(xmp)
+        let fmm = f(xmm)
+        used = used + 4
+        let di = xpp[i] - xmp[i]
+        let dj = xpp[j] - xpm[j]
+        if di > 1.0e-12 && dj > 1.0e-12 {
+          let v = (fpp - fpm - fmp + fmm) / (di * dj)
+          hess[i * dim + j] = v
+          hess[j * dim + i] = v
+        }
+      }
+    }
+  }
+  used
+}
+
+///|
+/// BOBYQA-style bound-constrained quadratic approximation (Powell 2009). A
+/// full quadratic model is assembled from central differences: the gradient and
+/// the diagonal second derivatives use two evaluations per dimension, and each
+/// off-diagonal second derivative uses four corner evaluations. A Newton step
+/// from that model is clipped to a trust radius and projected onto the bounds;
+/// the radius expands on success and contracts on failure, the model is rebuilt
+/// periodically, and a repeatedly failed model triggers a jump near the
+/// incumbent best. Unlike NEWUOA (diagonal curvature only) this captures the
+/// cross-curvature of the objective, which is what BOBYQA adds; unlike BFGS it
+/// needs no gradient function and uses a trust region instead of a line search.
+/// The budget is split among random restarts and the historical best is tracked
+/// separately. population_size is accepted for a uniform config interface but
+/// not used.
+pub fn bobyqa_optimizer(
+  config : BobyqaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let restarts = 8
+  let raw_seg = max_evals / restarts
+  let seg_budget = if raw_seg < 30 { 30 } else { raw_seg }
+
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let mut evaluations = 0
+
+  for _r in 0..<restarts {
+    if evaluations >= max_evals {
+      break
+    }
+    let mut x = random_solution(dim, bounds, current_rng)
+    let mut fx = evaluate(f, x)
+    evaluations = evaluations + 1
+    if !have_best || fx < best_val {
+      best_val = fx
+      best_pos = x
+      have_best = true
+    }
+    let grad : Array[Double] = []
+    let hess : Array[Double] = []
+    for _i in 0..<dim {
+      grad.push(0.0)
+    }
+    for _i in 0..<(dim * dim) {
+      hess.push(0.0)
+    }
+    let mut rho = span * 0.15
+    let h0 = max(rho * 0.4, span * 1.0e-4)
+    let used0 = bobyqa_build_model(
+      f, bounds, dim, x, fx, h0, max_evals, evaluations, grad, hess,
+    )
+    evaluations = evaluations + used0
+    let mut seg_used = 1 + used0
+    let mut stall = 0
+    let mut steps_since_model = 0
+    while seg_used < seg_budget && evaluations < max_evals {
+      // refresh the gradient at the current point (the Hessian stays frozen
+      // between rebuilds)
+      let hgrad = max(rho * 0.4, span * 1.0e-4)
+      let mut g_ok = true
+      for d in 0..<dim {
+        if evaluations + 2 > max_evals {
+          g_ok = false
+          break
+        }
+        let xp : Array[Double] = []
+        let xm : Array[Double] = []
+        for k in 0..<dim {
+          let v = x[k]
+          if k == d {
+            xp.push(max(bounds.min, min(bounds.max, v + hgrad)))
+            xm.push(max(bounds.min, min(bounds.max, v - hgrad)))
+          } else {
+            xp.push(v)
+            xm.push(v)
+          }
+        }
+        let fp = evaluate(f, xp)
+        let fm = evaluate(f, xm)
+        evaluations = evaluations + 2
+        seg_used = seg_used + 2
+        let dd = xp[d] - xm[d]
+        if dd > 1.0e-12 {
+          grad[d] = (fp - fm) / dd
+        }
+      }
+      if !g_ok {
+        break
+      }
+      let mut step = bobyqa_solve(hess, grad, dim, 1.0e-8)
+      let mut snorm = 0.0
+      for d in 0..<dim {
+        snorm = snorm + step[d] * step[d]
+      }
+      let mut sn = snorm.sqrt()
+      let mut ridge_try = 1.0e-5
+      while sn < 1.0e-12 && ridge_try < 1.0e3 {
+        step = bobyqa_solve(hess, grad, dim, ridge_try)
+        snorm = 0.0
+        for d in 0..<dim {
+          snorm = snorm + step[d] * step[d]
+        }
+        sn = snorm.sqrt()
+        ridge_try = ridge_try * 10.0
+      }
+      if sn < 1.0e-14 {
+        // no model direction: random kick near the best
+        let jump : Array[Double] = []
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10
+          jump.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fj = evaluate(f, jump)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        x = jump
+        fx = fj
+        rho = span * 0.15
+        stall = 0
+        steps_since_model = 0
+        if fj < best_val {
+          best_val = fj
+          best_pos = jump
+        }
+      } else {
+        let scale = if sn > rho { rho / sn } else { 1.0 }
+        let cand : Array[Double] = []
+        for d in 0..<dim {
+          let nv = x[d] + scale * step[d]
+          cand.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        if fv < fx {
+          x = cand
+          fx = fv
+          stall = 0
+          rho = min(rho * 1.2, span * 0.5)
+          if fv < best_val {
+            best_val = fv
+            best_pos = cand
+          }
+        } else {
+          // Newton direction failed: retry with a steepest-descent step
+          let mut gsq = 0.0
+          for d in 0..<dim {
+            gsq = gsq + grad[d] * grad[d]
+          }
+          let gn = gsq.sqrt()
+          if gn > 1.0e-12 && evaluations < max_evals {
+            let sdesc = rho / gn
+            let cand2 : Array[Double] = []
+            for d in 0..<dim {
+              let nv = x[d] - sdesc * grad[d]
+              cand2.push(max(bounds.min, min(bounds.max, nv)))
+            }
+            let fv2 = evaluate(f, cand2)
+            evaluations = evaluations + 1
+            seg_used = seg_used + 1
+            if fv2 < fx {
+              x = cand2
+              fx = fv2
+              stall = 0
+              rho = min(rho * 1.2, span * 0.5)
+              if fv2 < best_val {
+                best_val = fv2
+                best_pos = cand2
+              }
+            } else {
+              stall = stall + 1
+              rho = max(rho * 0.5, span * 1.0e-5)
+            }
+          } else {
+            stall = stall + 1
+            rho = max(rho * 0.5, span * 1.0e-5)
+          }
+        }
+      }
+      steps_since_model = steps_since_model + 1
+      if steps_since_model >= 20 && evaluations < max_evals {
+        let hrebuild = max(rho * 0.4, span * 1.0e-4)
+        let u = bobyqa_build_model(
+          f, bounds, dim, x, fx, hrebuild, max_evals, evaluations, grad, hess,
+        )
+        evaluations = evaluations + u
+        seg_used = seg_used + u
+        if u > 0 {
+          steps_since_model = 0
+        }
+      }
+      if stall >= 6 && evaluations < max_evals {
+        let jump : Array[Double] = []
+        for d in 0..<dim {
+          let nv = best_pos[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.15
+          jump.push(max(bounds.min, min(bounds.max, nv)))
+        }
+        let fj = evaluate(f, jump)
+        evaluations = evaluations + 1
+        seg_used = seg_used + 1
+        x = jump
+        fx = fj
+        rho = span * 0.15
+        stall = 0
+        steps_since_model = 0
+        if fj < best_val {
+          best_val = fj
+          best_pos = jump
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== ASA: Adaptive Simulated Annealing (1989) =====
+
+///|
+pub struct AsaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_asa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> AsaConfig {
+  AsaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Adaptive Simulated Annealing (Ingber 1989). A single prefix-stable walk is
+/// used: the temperature follows Ingber's exponential schedule
+/// `T(k) = T0 * exp(-2 * k^(1/dim))`, and each coordinate keeps its own step
+/// size that is adapted every 20 trials toward the 44% acceptance target
+/// (increase when the acceptance rate exceeds 0.44, decrease otherwise).
+/// Candidates perturb one coordinate at a time and follow the Metropolis rule.
+/// Unlike plain simulated annealing with one global step and a geometric
+/// cooling factor, ASA adapts per-dimension scales and uses the reannealing
+/// schedule. A long stall triggers a jump near the incumbent best. Because no
+/// schedule depends on the total budget, a larger budget strictly continues the
+/// same trajectory, so the historical best is monotone. population_size is
+/// accepted for a uniform config interface but not used.
+pub fn adaptive_simulated_annealing(
+  config : AsaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+
+  let mut x = random_solution(dim, bounds, current_rng)
+  let mut fx = evaluate(f, x)
+  let mut evaluations = 1
+  let mut best_pos = x
+  let mut best_val = fx
+
+  let f0_abs = if fx < 0.0 { -fx } else { fx }
+  let t0 = 0.20 * (1.0 + f0_abs)
+  let steps : Array[Double] = []
+  let succ : Array[Int32] = []
+  let tries : Array[Int32] = []
+  for _d in 0..<dim {
+    steps.push(span * 0.10)
+    succ.push(0)
+    tries.push(0)
+  }
+  let mut stall = 0
+
+  while evaluations < max_evals {
+    let k = evaluations.to_double()
+    let phase = @math.pow(k, 1.0 / dim.to_double())
+    let temp = t0 * @math.exp(-2.0 * phase) + 1.0e-12
+    let d = (RNG::next(current_rng) * dim.to_double()).to_int() % dim
+    let s = steps[d]
+    let cand : Array[Double] = []
+    for kk in 0..<dim {
+      if kk == d {
+        let nv = x[kk] + (2.0 * RNG::next(current_rng) - 1.0) * s
+        cand.push(max(bounds.min, min(bounds.max, nv)))
+      } else {
+        cand.push(x[kk])
+      }
+    }
+    let fv = evaluate(f, cand)
+    evaluations = evaluations + 1
+    tries[d] = tries[d] + 1
+    let de = fv - fx
+    let mut accepted = false
+    if de <= 0.0 {
+      accepted = true
+    } else if RNG::next(current_rng) < @math.exp(-de / temp) {
+      accepted = true
+    }
+    if accepted {
+      x = cand
+      fx = fv
+      succ[d] = succ[d] + 1
+      stall = 0
+      if fv < best_val {
+        best_val = fv
+        best_pos = cand
+      }
+    } else {
+      stall = stall + 1
+    }
+    if tries[d] >= 20 {
+      let rate = succ[d].to_double() / 20.0
+      if rate > 0.44 {
+        steps[d] = min(steps[d] * 1.2, span * 0.5)
+      } else {
+        steps[d] = max(steps[d] * 0.8, span * 1.0e-6)
+      }
+      succ[d] = 0
+      tries[d] = 0
+    }
+    if stall >= 200 && evaluations < max_evals {
+      let jump : Array[Double] = []
+      for kk in 0..<dim {
+        let nv = best_pos[kk] +
+          (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10
+        jump.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fj = evaluate(f, jump)
+      evaluations = evaluations + 1
+      x = jump
+      fx = fj
+      for kk in 0..<dim {
+        steps[kk] = span * 0.05
+      }
+      stall = 0
+      if fj < best_val {
+        best_val = fj
+        best_pos = jump
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== GSS: golden section search (1953) =====
+
+///|
+pub struct GssConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_gss_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> GssConfig {
+  GssConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn gss_point(
+  x : Array[Double],
+  d : Int32,
+  dim : Int32,
+  value : Double,
+) -> Array[Double] {
+  let p : Array[Double] = []
+  for k in 0..<dim {
+    if k == d {
+      p.push(value)
+    } else {
+      p.push(x[k])
+    }
+  }
+  p
+}
+
+///|
+/// Golden Section Search (Kiefer 1953) applied coordinate by coordinate. Each
+/// coordinate is minimized over a bracket around its current value: two
+/// interior probes at the golden ratio are evaluated and the bracket is
+/// repeatedly reduced to the sub-interval containing the better probe, until a
+/// fixed number of reductions or the budget is exhausted. The bracket expands
+/// on success and shrinks on failure, and a whole sweep without improvement
+/// triggers a jump near the incumbent best. Unlike PRAXIS (parabolic line
+/// search along rotating principal axes) this uses the bracketing golden-section
+/// rule on fixed coordinate axes; the schedule does not depend on the total
+/// budget, so a larger budget strictly continues the same run and the
+/// historical best is monotone. population_size is accepted for a uniform
+/// config interface but not used.
+pub fn golden_section_search(
+  config : GssConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let phi = 0.6180339887498949
+
+  let mut x = random_solution(dim, bounds, current_rng)
+  let mut fx = evaluate(f, x)
+  let mut evaluations = 1
+  let mut best_pos = x
+  let mut best_val = fx
+
+  let brackets : Array[Double] = []
+  for _d in 0..<dim {
+    brackets.push(span * 0.08)
+  }
+  let mut stall = 0
+
+  while evaluations < max_evals {
+    let fx_before = fx
+    for d in 0..<dim {
+      if evaluations >= max_evals {
+        break
+      }
+      let w = brackets[d]
+      let lo = max(bounds.min, x[d] - w)
+      let hi = min(bounds.max, x[d] + w)
+      let width = hi - lo
+      if width >= span * 1.0e-9 {
+        let a0 = hi - phi * width
+        let b0 = lo + phi * width
+        let xa = gss_point(x, d, dim, a0)
+        let xb = gss_point(x, d, dim, b0)
+        let fa0 = evaluate(f, xa)
+        evaluations = evaluations + 1
+        let mut best_t = a0
+        let mut best_f = fa0
+        let mut l = lo
+        let mut h = hi
+        let mut aa = a0
+        let mut bb = b0
+        let mut faa = fa0
+        let mut fbb = fa0
+        if evaluations < max_evals {
+          fbb = evaluate(f, xb)
+          evaluations = evaluations + 1
+          if fbb < best_f {
+            best_t = b0
+            best_f = fbb
+          }
+          let mut it = 0
+          while it < 7 && evaluations < max_evals {
+            if faa < fbb {
+              h = bb
+              bb = aa
+              fbb = faa
+              aa = h - phi * (h - l)
+              let xaa = gss_point(x, d, dim, aa)
+              faa = evaluate(f, xaa)
+              evaluations = evaluations + 1
+              if faa < best_f {
+                best_t = aa
+                best_f = faa
+              }
+            } else {
+              l = aa
+              aa = bb
+              faa = fbb
+              bb = l + phi * (h - l)
+              let xbb = gss_point(x, d, dim, bb)
+              fbb = evaluate(f, xbb)
+              evaluations = evaluations + 1
+              if fbb < best_f {
+                best_t = bb
+                best_f = fbb
+              }
+            }
+            it = it + 1
+          }
+        }
+        if best_f < fx {
+          x = gss_point(x, d, dim, best_t)
+          fx = best_f
+          brackets[d] = min(brackets[d] * 1.25, span * 0.5)
+          if best_f < best_val {
+            best_val = best_f
+            best_pos = x
+          }
+        } else {
+          brackets[d] = max(brackets[d] * 0.7, span * 1.0e-5)
+        }
+      }
+    }
+    if fx < fx_before {
+      stall = 0
+    } else {
+      stall = stall + 1
+    }
+    if stall >= 20 && evaluations < max_evals {
+      let jump : Array[Double] = []
+      for d in 0..<dim {
+        let nv = best_pos[d] +
+          (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10
+        jump.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fj = evaluate(f, jump)
+      evaluations = evaluations + 1
+      x = jump
+      fx = fj
+      for d in 0..<dim {
+        brackets[d] = span * 0.05
+      }
+      stall = 0
+      if fj < best_val {
+        best_val = fj
+        best_pos = jump
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== Subplex (1990) =====
+
+///|
+pub struct SubplexConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_subplex_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SubplexConfig {
+  SubplexConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Subplex (Rowan 1990): split the coordinates into small groups (here pairs)
+/// and run a Nelder-Mead simplex inside each subspace while the other
+/// coordinates are held fixed, cycling through the groups and rotating the
+/// partition every cycle. Each dimension keeps its own simplex edge length,
+/// expanded on group success and shrunk on failure. A cycle without any
+/// improvement triggers a jump near the incumbent best. The schedule depends
+/// only on the cycle count, not on the total budget, so a larger budget
+/// strictly continues the same run and the historical best is monotone.
+/// Unlike full-space Nelder-Mead this performs simplex moves in coordinate
+/// subspaces; unlike Powell/PRAXIS it has no direction set. population_size is
+/// accepted for a uniform config interface but not used.
+pub fn subplex_optimizer(
+  config : SubplexConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+
+  let mut x = random_solution(dim, bounds, current_rng)
+  let mut fx = evaluate(f, x)
+  let mut evaluations = 1
+  let mut best_pos = x
+  let mut best_val = fx
+
+  let dstep : Array[Double] = []
+  for _d in 0..<dim {
+    dstep.push(span * 0.05)
+  }
+  let mut stall = 0
+  let mut cycle = 0
+
+  while evaluations < max_evals {
+    let order : Array[Int32] = []
+    for j in 0..<dim {
+      order.push((cycle + j) % dim)
+    }
+    let fx_cycle = fx
+    let mut gi = 0
+    while gi < dim && evaluations < max_evals {
+      let remaining = dim - gi
+      let k = if remaining < 2 { remaining } else { 2 }
+      if evaluations + k > max_evals {
+        gi = dim
+      } else {
+        let idx : Array[Int32] = []
+        for j in 0..<k {
+          idx.push(order[gi + j])
+        }
+        gi = gi + k
+        let simplex : Array[Array[Double]] = []
+        let sf : Array[Double] = []
+        let base : Array[Double] = []
+        for d in 0..<dim {
+          base.push(x[d])
+        }
+        simplex.push(base)
+        sf.push(fx)
+        for j in 0..<k {
+          let v : Array[Double] = []
+          for d in 0..<dim {
+            if d == idx[j] {
+              v.push(max(bounds.min, min(bounds.max, x[d] + dstep[d])))
+            } else {
+              v.push(x[d])
+            }
+          }
+          let fv = evaluate(f, v)
+          evaluations = evaluations + 1
+          simplex.push(v)
+          sf.push(fv)
+        }
+        let mut it = 0
+        while it < 10 && evaluations < max_evals {
+          let ord = sort_indices(sf)
+          let len = simplex.length()
+          if len < 2 {
+            break
+          }
+          let best_i = ord[0]
+          let worst_i = ord[len - 1]
+          let second_i = ord[len - 2]
+          let cent : Array[Double] = []
+          for d in 0..<dim {
+            let mut s = 0.0
+            for m in 0..<len {
+              if m != worst_i {
+                s = s + simplex[m][d]
+              }
+            }
+            cent.push(s / (len - 1).to_double())
+          }
+          let worst_v = simplex[worst_i]
+          let refl : Array[Double] = []
+          for d in 0..<dim {
+            let nv = 2.0 * cent[d] - worst_v[d]
+            refl.push(max(bounds.min, min(bounds.max, nv)))
+          }
+          let fr = evaluate(f, refl)
+          evaluations = evaluations + 1
+          let fbest = sf[best_i]
+          let fworst = sf[worst_i]
+          let fsecond = sf[second_i]
+          if fr < fbest {
+            let exp : Array[Double] = []
+            for d in 0..<dim {
+              let nv = 3.0 * cent[d] - 2.0 * worst_v[d]
+              exp.push(max(bounds.min, min(bounds.max, nv)))
+            }
+            let fe = evaluate(f, exp)
+            evaluations = evaluations + 1
+            if fe < fr {
+              simplex[worst_i] = exp
+              sf[worst_i] = fe
+            } else {
+              simplex[worst_i] = refl
+              sf[worst_i] = fr
+            }
+          } else if fr < fsecond {
+            simplex[worst_i] = refl
+            sf[worst_i] = fr
+          } else {
+            let mut do_shrink = false
+            if fr < fworst {
+              let con : Array[Double] = []
+              for d in 0..<dim {
+                let nv = cent[d] + 0.5 * (refl[d] - cent[d])
+                con.push(max(bounds.min, min(bounds.max, nv)))
+              }
+              let fc = evaluate(f, con)
+              evaluations = evaluations + 1
+              if fc <= fr {
+                simplex[worst_i] = con
+                sf[worst_i] = fc
+              } else {
+                do_shrink = true
+              }
+            } else {
+              let con : Array[Double] = []
+              for d in 0..<dim {
+                let nv = cent[d] + 0.5 * (worst_v[d] - cent[d])
+                con.push(max(bounds.min, min(bounds.max, nv)))
+              }
+              let fc = evaluate(f, con)
+              evaluations = evaluations + 1
+              if fc < fworst {
+                simplex[worst_i] = con
+                sf[worst_i] = fc
+              } else {
+                do_shrink = true
+              }
+            }
+            if do_shrink && evaluations < max_evals {
+              for m in 0..<len {
+                if m != best_i && evaluations < max_evals {
+                  let v : Array[Double] = []
+                  for d in 0..<dim {
+                    let nv = simplex[best_i][d] +
+                      0.5 * (simplex[m][d] - simplex[best_i][d])
+                    v.push(max(bounds.min, min(bounds.max, nv)))
+                  }
+                  let fv = evaluate(f, v)
+                  evaluations = evaluations + 1
+                  simplex[m] = v
+                  sf[m] = fv
+                }
+              }
+            }
+          }
+          it = it + 1
+        }
+        let ord2 = sort_indices(sf)
+        let bi = ord2[0]
+        let improved = sf[bi] < fx
+        if improved {
+          x = simplex[bi]
+          fx = sf[bi]
+          if fx < best_val {
+            best_val = fx
+            best_pos = x
+          }
+        }
+        for j in 0..<k {
+          if improved {
+            dstep[idx[j]] = min(dstep[idx[j]] * 1.2, span * 0.3)
+          } else {
+            dstep[idx[j]] = max(dstep[idx[j]] * 0.6, span * 1.0e-5)
+          }
+        }
+      }
+    }
+    cycle = cycle + 1
+    if fx < fx_cycle {
+      stall = 0
+    } else {
+      stall = stall + 1
+    }
+    if stall >= 3 && evaluations < max_evals {
+      let jump : Array[Double] = []
+      for d in 0..<dim {
+        let nv = best_pos[d] +
+          (2.0 * RNG::next(current_rng) - 1.0) * span * 0.15
+        jump.push(max(bounds.min, min(bounds.max, nv)))
+      }
+      let fj = evaluate(f, jump)
+      evaluations = evaluations + 1
+      x = jump
+      fx = fj
+      for d in 0..<dim {
+        dstep[d] = span * 0.05
+      }
+      stall = 0
+      if fj < best_val {
+        best_val = fj
+        best_pos = jump
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== MLSL: multi-level single linkage (1987) =====
+
+///|
+pub struct MlslConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_mlsl_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> MlslConfig {
+  MlslConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn mlsl_halton(index : Int32, base : Int32) -> Double {
+  let mut result = 0.0
+  let mut f = 1.0
+  let mut i = index
+  while i > 0 {
+    f = f / base.to_double()
+    result = result + f * (i % base).to_double()
+    i = i / base
+  }
+  result
+}
+
+///|
+fn mlsl_base(d : Int32) -> Int32 {
+  let primes : Array[Int32] = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29]
+  let mut b = 31
+  if d < 10 {
+    b = primes[d]
+  }
+  b
+}
+
+///|
+/// Multi-Level Single-Linkage (Rinnooy Kan & Timmer 1987). Points are drawn
+/// from a low-discrepancy Halton sequence over the box, and a local pattern
+/// search is launched from a sample only when it is not already covered by an
+/// earlier local minimum: a point is skipped when it lies within the current
+/// critical distance of a previously found minimum. The critical distance
+/// shrinks like `(log k / k)^(1/dim)`, so early samples start many local
+/// searches while later samples are clustered and mostly skipped - the
+/// single-linkage clustering that distinguishes MLSL from plain multistart.
+/// Each local search uses a fixed budget, so a larger global budget strictly
+/// continues the same sequence and the historical best is monotone.
+pub fn multi_level_single_linkage(
+  config : MlslConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+
+  let shift : Array[Double] = []
+  for _d in 0..<dim {
+    shift.push(RNG::next(current_rng))
+  }
+
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 0.0
+  let mut have_best = false
+  let minima : Array[Array[Double]] = []
+  let mut idx = 1
+  let batch = 16
+  let local_budget = 140
+
+  while evaluations < max_evals {
+    let pts : Array[Array[Double]] = []
+    let fs : Array[Double] = []
+    for _b in 0..<batch {
+      if evaluations >= max_evals {
+        break
+      }
+      let p : Array[Double] = []
+      for d in 0..<dim {
+        let h = mlsl_halton(idx, mlsl_base(d))
+        let raw = h + shift[d]
+        let wrapped = raw - raw.to_int().to_double()
+        let v = bounds.min + wrapped * span
+        p.push(max(bounds.min, min(bounds.max, v)))
+      }
+      idx = idx + 1
+      let fv = evaluate(f, p)
+      evaluations = evaluations + 1
+      pts.push(p)
+      fs.push(fv)
+      if !have_best || fv < best_val {
+        best_val = fv
+        best_pos = p
+        have_best = true
+      }
+    }
+    if pts.length() == 0 {
+      break
+    }
+    let order = sort_indices(fs)
+    for k in 0..<pts.length() {
+      if evaluations >= max_evals {
+        break
+      }
+      let p = pts[order[k]]
+      let pf = fs[order[k]]
+      let kk = idx.to_double()
+      let crit = span *
+        0.15 *
+        @math.pow(@math.ln(kk) / kk, 1.0 / dim.to_double())
+      let mut skip = false
+      for q in 0..<minima.length() {
+        let mp = minima[q]
+        let mut dsq = 0.0
+        for d in 0..<dim {
+          let delta = p[d] - mp[d]
+          dsq = dsq + delta * delta
+        }
+        if dsq < crit * crit {
+          skip = true
+        }
+      }
+      if !skip {
+        let mut x = p
+        let mut fx = pf
+        let mut step = span * 0.15
+        let mut used = 0
+        while used < local_budget && evaluations < max_evals {
+          let mut best_c = x
+          let mut best_f = fx
+          let mut improved = false
+          for d in 0..<dim {
+            if evaluations >= max_evals {
+              break
+            }
+            let plus : Array[Double] = []
+            let minus : Array[Double] = []
+            for q in 0..<dim {
+              if q == d {
+                plus.push(max(bounds.min, min(bounds.max, x[q] + step)))
+                minus.push(max(bounds.min, min(bounds.max, x[q] - step)))
+              } else {
+                plus.push(x[q])
+                minus.push(x[q])
+              }
+            }
+            let fp = evaluate(f, plus)
+            evaluations = evaluations + 1
+            used = used + 1
+            if evaluations < max_evals {
+              let fm = evaluate(f, minus)
+              evaluations = evaluations + 1
+              used = used + 1
+              if fp < best_f {
+                best_f = fp
+                best_c = plus
+                improved = true
+              }
+              if fm < best_f {
+                best_f = fm
+                best_c = minus
+                improved = true
+              }
+            } else if fp < best_f {
+              best_f = fp
+              best_c = plus
+              improved = true
+            }
+          }
+          if improved {
+            x = best_c
+            fx = best_f
+            step = min(step * 1.2, span * 0.5)
+            if fx < best_val {
+              best_val = fx
+              best_pos = x
+            }
+          } else {
+            step = step * 0.5
+            if step < span * 1.0e-5 {
+              break
+            }
+          }
+        }
+        minima.push(x)
+        if fx < best_val {
+          best_val = fx
+          best_pos = x
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== LBB: Lipschitz branch and bound (1972) =====
+
+///|
+pub struct LipschitzConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_lipschitz_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> LipschitzConfig {
+  LipschitzConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn lbb_abs(v : Double) -> Double {
+  if v < 0.0 {
+    -v
+  } else {
+    v
+  }
+}
+
+///|
+fn lbb_halfdiag(widths : Array[Double], dim : Int32) -> Double {
+  let mut s = 0.0
+  for d in 0..<dim {
+    let h = widths[d] * 0.5
+    s = s + h * h
+  }
+  s.sqrt()
+}
+
+///|
+/// Lipschitz branch and bound (Piyavskii-Shubert style, 1972). The search space
+/// is covered by boxes; each box stores its centre value and a **local
+/// Lipschitz estimate** derived from the observed slopes between the parent
+/// centre and the new split points. The lower bound of a box is
+/// `f(centre) - L_local * half_diagonal`, and boxes are split along their
+/// longest side into three parts (evaluating the two new centres) in order of
+/// their lower bounds, plus the widest box for coverage. Unlike DIRECT
+/// (best/widest rectangles with a convex-hull potentiality test), the Lipschitz
+/// bound directly ranks boxes and gives the region a certificate of
+/// optimality. A box cap keeps the scan cheap; the schedule is independent of
+/// the total budget, so a larger budget strictly continues the same run and the
+/// historical best is monotone. population_size is accepted for a uniform
+/// config interface but not used.
+pub fn lipschitz_branch_and_bound(
+  config : LipschitzConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let max_rects = 512
+
+  let center : Array[Double] = []
+  let widths0 : Array[Double] = []
+  for _d in 0..<dim {
+    center.push(bounds.min + RNG::next(current_rng) * span)
+    widths0.push(span)
+  }
+  let f0 = evaluate(f, center)
+  let mut evaluations = 1
+  let mut centers : Array[Array[Double]] = [center]
+  let mut widths : Array[Array[Double]] = [widths0]
+  let mut vals : Array[Double] = [f0]
+  let mut lips : Array[Double] = [0.0]
+  let mut best_pos = center
+  let mut best_val = f0
+
+  while evaluations < max_evals {
+    let len = centers.length()
+    if len == 0 {
+      break
+    }
+    let mut best_lb_i = 0
+    let mut best_lb = 1.0e300
+    let mut second_lb_i = 0
+    let mut second_lb = 1.0e300
+    let mut widest_i = 0
+    let mut widest = -1.0
+    for i in 0..<len {
+      let hd = lbb_halfdiag(widths[i], dim)
+      let lb = vals[i] - lips[i] * hd
+      if lb < best_lb {
+        second_lb = best_lb
+        second_lb_i = best_lb_i
+        best_lb = lb
+        best_lb_i = i
+      } else if lb < second_lb {
+        second_lb = lb
+        second_lb_i = i
+      }
+      if hd > widest {
+        widest = hd
+        widest_i = i
+      }
+    }
+    let before_split = evaluations
+    let targets : Array[Int32] = []
+    targets.push(best_lb_i)
+    if second_lb_i != best_lb_i {
+      targets.push(second_lb_i)
+    }
+    if widest_i != best_lb_i && widest_i != second_lb_i {
+      targets.push(widest_i)
+    }
+    for t in 0..<targets.length() {
+      if evaluations + 2 > max_evals {
+        break
+      }
+      let idx = targets[t]
+      let mut k = 0
+      for d in 1..<dim {
+        if widths[idx][d] > widths[idx][k] {
+          k = d
+        }
+      }
+      let w = widths[idx][k]
+      if w >= 1.0e-12 {
+        let c = centers[idx]
+        let left_x = max(bounds.min, min(bounds.max, c[k] - w / 3.0))
+        let right_x = max(bounds.min, min(bounds.max, c[k] + w / 3.0))
+        let left : Array[Double] = []
+        let right : Array[Double] = []
+        for d in 0..<dim {
+          if d == k {
+            left.push(left_x)
+            right.push(right_x)
+          } else {
+            left.push(c[d])
+            right.push(c[d])
+          }
+        }
+        let fl = evaluate(f, left)
+        let fr = evaluate(f, right)
+        evaluations = evaluations + 2
+        let d1 = lbb_abs(left[k] - c[k])
+        let d2 = lbb_abs(right[k] - c[k])
+        let d3 = lbb_abs(right[k] - left[k])
+        let mut lnew = lips[idx]
+        if d1 > 1.0e-12 {
+          let cand_l = lbb_abs(fl - vals[idx]) / d1
+          if cand_l > lnew {
+            lnew = cand_l
+          }
+        }
+        if d2 > 1.0e-12 {
+          let cand_l = lbb_abs(fr - vals[idx]) / d2
+          if cand_l > lnew {
+            lnew = cand_l
+          }
+        }
+        if d3 > 1.0e-12 {
+          let cand_l = lbb_abs(fr - fl) / d3
+          if cand_l > lnew {
+            lnew = cand_l
+          }
+        }
+        let wm : Array[Double] = []
+        let wl : Array[Double] = []
+        let wr : Array[Double] = []
+        for d in 0..<dim {
+          if d == k {
+            wm.push(w / 3.0)
+            wl.push(w / 3.0)
+            wr.push(w / 3.0)
+          } else {
+            wm.push(widths[idx][d])
+            wl.push(widths[idx][d])
+            wr.push(widths[idx][d])
+          }
+        }
+        widths[idx] = wm
+        lips[idx] = lnew
+        centers.push(left)
+        widths.push(wl)
+        vals.push(fl)
+        lips.push(lnew)
+        centers.push(right)
+        widths.push(wr)
+        vals.push(fr)
+        lips.push(lnew)
+        if fl < best_val {
+          best_val = fl
+          best_pos = left
+        }
+        if fr < best_val {
+          best_val = fr
+          best_pos = right
+        }
+        if centers.length() > max_rects {
+          let n = centers.length()
+          let mut worst = 0
+          let mut worst_lb = -1.0e300
+          for i in 0..<n {
+            let hd = lbb_halfdiag(widths[i], dim)
+            let lb = vals[i] - lips[i] * hd
+            if lb > worst_lb {
+              worst_lb = lb
+              worst = i
+            }
+          }
+          let nc : Array[Array[Double]] = []
+          let nw : Array[Array[Double]] = []
+          let nv : Array[Double] = []
+          let nl : Array[Double] = []
+          for i in 0..<n {
+            if i != worst {
+              nc.push(centers[i])
+              nw.push(widths[i])
+              nv.push(vals[i])
+              nl.push(lips[i])
+            }
+          }
+          centers = nc
+          widths = nw
+          vals = nv
+          lips = nl
+        }
+      }
+    }
+    if evaluations == before_split {
+      break
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+///|
+pub struct MTSConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_mts_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> MTSConfig {
+  MTSConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn mts_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+fn mts_copy(x : Array[Double]) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<x.length() {
+    y.push(x[i])
+  }
+  y
+}
+
+///|
+fn mts_move(
+  x : Array[Double],
+  d : Int32,
+  delta : Double,
+  b : Bounds,
+) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<x.length() {
+    if i == d {
+      y.push(mts_clip(x[i] + delta, b))
+    } else {
+      y.push(x[i])
+    }
+  }
+  y
+}
+
+///|
+fn mts_move_pair(
+  x : Array[Double],
+  d1 : Int32,
+  delta1 : Double,
+  d2 : Int32,
+  delta2 : Double,
+  b : Bounds,
+) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<x.length() {
+    if i == d1 {
+      y.push(mts_clip(x[i] + delta1, b))
+    } else if i == d2 {
+      y.push(mts_clip(x[i] + delta2, b))
+    } else {
+      y.push(x[i])
+    }
+  }
+  y
+}
+
+///|
+/// Multiple Trajectory Search (Tseng and Chen, 2008). Several independent
+/// trajectories run local searches with two complementary operators: LS1 tries
+/// a +/- step along each coordinate (expanding on success, halving on failure),
+/// while LS2 probes the four sign combinations of a *pair* of coordinates,
+/// which rotates the step frame and escapes coordinate-wise stagnation. After
+/// every full round the worst trajectory is re-seeded from the incumbent best
+/// with a small random perturbation, so the budget keeps being spent near
+/// promising basins while the trajectories stay diversified. The historical
+/// best is monotone and the schedule is a strict prefix of larger budgets.
+/// population_size selects the number of trajectories (clamped to 2..4).
+pub fn multiple_trajectory_search(
+  config : MTSConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let min_step = span * 1.0e-10
+  let mut n_traj = config.population_size / 6
+  if n_traj < 2 {
+    n_traj = 2
+  }
+  if n_traj > 4 {
+    n_traj = 4
+  }
+
+  let xs : Array[Array[Double]] = []
+  let fs : Array[Double] = []
+  let steps : Array[Array[Double]] = []
+  let mut evaluations = 0
+  for _t in 0..<n_traj {
+    let x : Array[Double] = []
+    let st : Array[Double] = []
+    for _d in 0..<dim {
+      x.push(bounds.min + RNG::next(current_rng) * span)
+      st.push(span * 0.25)
+    }
+    let v = evaluate(f, x)
+    evaluations = evaluations + 1
+    xs.push(x)
+    fs.push(v)
+    steps.push(st)
+  }
+
+  let mut best_pos = xs[0]
+  let mut best_val = fs[0]
+  for i in 1..<n_traj {
+    if fs[i] < best_val {
+      best_val = fs[i]
+      best_pos = xs[i]
+    }
+  }
+
+  let mut t = 0
+  while evaluations < max_evals {
+    let before = evaluations
+    let mut cx = xs[t]
+    let mut fcur = fs[t]
+    let st = steps[t]
+
+    for d in 0..<dim {
+      if evaluations >= max_evals {
+        break
+      }
+      let sd = st[d]
+      let mut moved = false
+      let yp = mts_move(cx, d, sd, bounds)
+      let fp = evaluate(f, yp)
+      evaluations = evaluations + 1
+      if fp < fcur {
+        cx = yp
+        fcur = fp
+        moved = true
+      } else if evaluations < max_evals {
+        let ym = mts_move(cx, d, 0.0 - sd, bounds)
+        let fm = evaluate(f, ym)
+        evaluations = evaluations + 1
+        if fm < fcur {
+          cx = ym
+          fcur = fm
+          moved = true
+        }
+      }
+      if moved {
+        let grow = sd * 1.2
+        st[d] = if grow > span * 0.5 { span * 0.5 } else { grow }
+      } else {
+        let shrink = sd * 0.5
+        st[d] = if shrink < min_step { min_step } else { shrink }
+      }
+      if fcur < best_val {
+        best_val = fcur
+        best_pos = mts_copy(cx)
+      }
+    }
+
+    for d in 0..<dim {
+      if evaluations + 4 > max_evals {
+        break
+      }
+      let j = (d + 1) % dim
+      let mut best_pair = fcur
+      let mut best_y : Array[Double] = []
+      let mut has_pair = false
+      for s1 in 0..<2 {
+        for s2 in 0..<2 {
+          let dd1 = if s1 == 0 { st[d] } else { 0.0 - st[d] }
+          let dd2 = if s2 == 0 { st[j] } else { 0.0 - st[j] }
+          let y = mts_move_pair(cx, d, dd1, j, dd2, bounds)
+          let v = evaluate(f, y)
+          evaluations = evaluations + 1
+          if v < best_pair {
+            best_pair = v
+            best_y = y
+            has_pair = true
+          }
+        }
+      }
+      if has_pair {
+        cx = best_y
+        fcur = best_pair
+      }
+      if fcur < best_val {
+        best_val = fcur
+        best_pos = mts_copy(cx)
+      }
+    }
+
+    xs[t] = cx
+    fs[t] = fcur
+
+    if evaluations == before {
+      break
+    }
+
+    t = (t + 1) % n_traj
+
+    if t == 0 && evaluations < max_evals && n_traj >= 2 {
+      let mut bt = 0
+      let mut wt = 0
+      for i in 1..<n_traj {
+        if fs[i] < fs[bt] {
+          bt = i
+        }
+        if fs[i] > fs[wt] {
+          wt = i
+        }
+      }
+      if wt != bt {
+        let wx : Array[Double] = []
+        let ws : Array[Double] = []
+        for d in 0..<dim {
+          let r = RNG::next(current_rng) * 2.0 - 1.0
+          wx.push(mts_clip(best_pos[d] + r * span * 0.1, bounds))
+          ws.push(span * 0.1)
+        }
+        xs[wt] = wx
+        steps[wt] = ws
+        let wv = evaluate(f, wx)
+        evaluations = evaluations + 1
+        fs[wt] = wv
+        if wv < best_val {
+          best_val = wv
+          best_pos = wx
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+///|
+pub struct TPEConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_tpe_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> TPEConfig {
+  TPEConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn tpe_gauss(rng : RNG) -> Double {
+  let u1 = RNG::next(rng)
+  let u2 = RNG::next(rng)
+  let safe = if u1 < 1.0e-12 { 1.0e-12 } else { u1 }
+  (-2.0 * @math.ln(safe)).sqrt() * @math.cos(TWO_PI * u2)
+}
+
+///|
+fn tpe_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+fn tpe_copy(x : Array[Double]) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<x.length() {
+    y.push(x[i])
+  }
+  y
+}
+
+///|
+fn tpe_add_sample(
+  xs : Array[Array[Double]],
+  fs : Array[Double],
+  x : Array[Double],
+  v : Double,
+  cap : Int32,
+  rng : RNG,
+) -> Unit {
+  let n = xs.length()
+  if n < cap {
+    xs.push(x)
+    fs.push(v)
+  } else {
+    let j = 1 + (RNG::next(rng) * (n - 1).to_double()).to_int()
+    let jj = if j >= n { n - 1 } else { j }
+    xs[jj] = x
+    fs[jj] = v
+  }
+}
+
+///|
+fn tpe_log_kde(
+  c : Array[Double],
+  xs : Array[Array[Double]],
+  idxs : Array[Int32],
+  cnt : Int32,
+  h : Array[Double],
+  dim : Int32,
+) -> Double {
+  let vals : Array[Double] = []
+  let mut mx = -1.0e300
+  for k in 0..<cnt {
+    let p = xs[idxs[k]]
+    let mut q = 0.0
+    for d in 0..<dim {
+      let z = (c[d] - p[d]) / h[d]
+      q = q + z * z
+    }
+    let v = -0.5 * q
+    vals.push(v)
+    if v > mx {
+      mx = v
+    }
+  }
+  let mut s = 0.0
+  for k in 0..<vals.length() {
+    s = s + @math.exp(vals[k] - mx)
+  }
+  mx + @math.ln(s)
+}
+
+///|
+/// Tree-structured Parzen Estimator (Bergstra et al., 2011). Observations are
+/// split by a quantile into a *good* set l(x) and a *bad* set g(x); each set is
+/// modelled by a product of per-dimension Gaussian kernels whose bandwidths are
+/// the observed standard deviations. New points are drawn from l(x) and the one
+/// maximising the density ratio l(x)/g(x) (the Expected-Improvement proxy used
+/// by TPE) is evaluated. A shrinking local refinement around the incumbent is
+/// interleaved every fourth round so that the model keeps exploiting once l(x)
+/// has collapsed. The schedule depends only on evaluations already spent, so a
+/// larger budget is a strict continuation of a smaller one and the historical
+/// best is monotone. population_size is accepted for a uniform interface.
+pub fn tree_parzen_estimator(
+  config : TPEConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let cap = 120
+  let n_cand = 12
+  let bad_sample = 16
+  let xs : Array[Array[Double]] = []
+  let fs : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut evaluations = 0
+  let max_start = max_evals
+  let mut n_start = dim * 2
+  if n_start < 8 {
+    n_start = 8
+  }
+  if n_start > max_start {
+    n_start = max_start
+  }
+  for _i in 0..<n_start {
+    let x : Array[Double] = []
+    for _d in 0..<dim {
+      x.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    let v = evaluate(f, x)
+    evaluations = evaluations + 1
+    xs.push(x)
+    fs.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = tpe_copy(x)
+    }
+  }
+
+  let mut round = 0
+  let mut stall = 0
+  while evaluations < max_evals {
+    let round_start_best = best_val
+    let n = xs.length()
+    let order = sort_indices(fs)
+    let mut n_good = (n.to_double() * 0.2).to_int()
+    if n_good < 2 {
+      n_good = 2
+    }
+    if n_good > n - 1 {
+      n_good = n - 1
+    }
+    let shrink = 1.0 / (1.0 + round.to_double() * 0.001)
+    let h_low = span * 1.0e-3 * shrink
+    let hg : Array[Double] = []
+    let hb : Array[Double] = []
+    for d in 0..<dim {
+      let mut mg = 0.0
+      for k in 0..<n_good {
+        mg = mg + xs[order[k]][d]
+      }
+      mg = mg / n_good.to_double()
+      let mut vg = 0.0
+      for k in 0..<n_good {
+        let df = xs[order[k]][d] - mg
+        vg = vg + df * df
+      }
+      vg = vg / n_good.to_double()
+      let sg = vg.sqrt()
+      hg.push(if sg < h_low { h_low } else { sg })
+      let nb = n - n_good
+      let mut mb = 0.0
+      for k in n_good..<n {
+        mb = mb + xs[order[k]][d]
+      }
+      mb = mb / nb.to_double()
+      let mut vb = 0.0
+      for k in n_good..<n {
+        let df = xs[order[k]][d] - mb
+        vb = vb + df * df
+      }
+      vb = vb / nb.to_double()
+      let sb = vb.sqrt()
+      hb.push(if sb < h_low { h_low } else { sb })
+    }
+
+    let pool : Array[Int32] = []
+    for k in n_good..<n {
+      pool.push(order[k])
+    }
+    let nb = n - n_good
+    let nb_use = if nb < bad_sample { nb } else { bad_sample }
+    let bad_idx : Array[Int32] = []
+    for k in 0..<nb_use {
+      let j = k + (RNG::next(current_rng) * (nb - k).to_double()).to_int()
+      let jj = if j >= nb { nb - 1 } else { j }
+      let tmp = pool[k]
+      pool[k] = pool[jj]
+      pool[jj] = tmp
+      bad_idx.push(pool[k])
+    }
+
+    let mut cand_best : Array[Double] = []
+    let mut cand_score = -1.0e300
+    for _c in 0..<n_cand {
+      let gi = (RNG::next(current_rng) * n_good.to_double()).to_int()
+      let gidx = if gi >= n_good { n_good - 1 } else { gi }
+      let g = xs[order[gidx]]
+      let c : Array[Double] = []
+      for d in 0..<dim {
+        c.push(tpe_clip(g[d] + hg[d] * tpe_gauss(current_rng), bounds))
+      }
+      let lg = tpe_log_kde(c, xs, order, n_good, hg, dim)
+      let lb = tpe_log_kde(c, xs, bad_idx, nb_use, hb, dim)
+      let score = lg - lb
+      if score > cand_score {
+        cand_score = score
+        cand_best = c
+      }
+    }
+    if cand_best.length() == dim {
+      let v = evaluate(f, cand_best)
+      evaluations = evaluations + 1
+      if v < best_val {
+        best_val = v
+        best_pos = tpe_copy(cand_best)
+      }
+      tpe_add_sample(xs, fs, cand_best, v, cap, current_rng)
+    }
+
+    if round % 4 == 3 && evaluations < max_evals {
+      let c : Array[Double] = []
+      for d in 0..<dim {
+        c.push(
+          tpe_clip(
+            best_pos[d] + span * 0.02 * shrink * tpe_gauss(current_rng),
+            bounds,
+          ),
+        )
+      }
+      let v = evaluate(f, c)
+      evaluations = evaluations + 1
+      if v < best_val {
+        best_val = v
+        best_pos = tpe_copy(c)
+      }
+      tpe_add_sample(xs, fs, c, v, cap, current_rng)
+    }
+    if best_val < round_start_best {
+      stall = 0
+    } else {
+      stall = stall + 1
+    }
+    if stall >= 48 && evaluations + 2 <= max_evals {
+      let d_raw = (RNG::next(current_rng) * dim.to_double()).to_int()
+      let dsel = if d_raw >= dim { dim - 1 } else { d_raw }
+      let amp = span * (0.05 + 0.25 * RNG::next(current_rng))
+      let base = tpe_copy(best_pos)
+      for sgn in 0..<2 {
+        let c = tpe_copy(base)
+        let delta = if sgn == 0 { amp } else { 0.0 - amp }
+        c[dsel] = tpe_clip(base[dsel] + delta, bounds)
+        let v = evaluate(f, c)
+        evaluations = evaluations + 1
+        if v < best_val {
+          best_val = v
+          best_pos = c
+        }
+        tpe_add_sample(xs, fs, c, v, cap, current_rng)
+      }
+      stall = 0
+    }
+    round = round + 1
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+///|
+pub struct EGOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ego_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> EGOConfig {
+  EGOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn ego_copy(x : Array[Double]) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<x.length() {
+    y.push(x[i])
+  }
+  y
+}
+
+///|
+fn ego_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+fn ego_gauss(rng : RNG) -> Double {
+  let u1 = RNG::next(rng)
+  let u2 = RNG::next(rng)
+  let safe = if u1 < 1.0e-12 { 1.0e-12 } else { u1 }
+  (-2.0 * @math.ln(safe)).sqrt() * @math.cos(TWO_PI * u2)
+}
+
+///|
+fn ego_normal_cdf(z : Double) -> Double {
+  let x = z / 1.4142135623730951
+  let ax = if x < 0.0 { 0.0 - x } else { x }
+  let t = 1.0 / (1.0 + 0.3275911 * ax)
+  let poly = t *
+    (
+      0.254829592 +
+      t *
+      (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429)))
+    )
+  let erf_abs = 1.0 - poly * @math.exp(0.0 - ax * ax)
+  let erf = if x < 0.0 { 0.0 - erf_abs } else { erf_abs }
+  0.5 * (1.0 + erf)
+}
+
+///|
+fn ego_normal_pdf(z : Double) -> Double {
+  0.3989422804014327 * @math.exp(0.0 - 0.5 * z * z)
+}
+
+///|
+fn ego_cholesky(a : Array[Array[Double]], n : Int32) -> Array[Array[Double]] {
+  let l : Array[Array[Double]] = []
+  for _i in 0..<n {
+    let row : Array[Double] = []
+    for _j in 0..<n {
+      row.push(0.0)
+    }
+    l.push(row)
+  }
+  for i in 0..<n {
+    let iend = i + 1
+    for j in 0..<iend {
+      let mut s = a[i][j]
+      for k in 0..<j {
+        s = s - l[i][k] * l[j][k]
+      }
+      if i == j {
+        let diag = if s < 1.0e-12 { 1.0e-12 } else { s }
+        l[i][j] = diag.sqrt()
+      } else {
+        l[i][j] = s / l[j][j]
+      }
+    }
+  }
+  l
+}
+
+///|
+fn ego_forward(
+  l : Array[Array[Double]],
+  b : Array[Double],
+  n : Int32,
+) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<n {
+    let mut s = b[i]
+    for k in 0..<i {
+      s = s - l[i][k] * y[k]
+    }
+    y.push(s / l[i][i])
+  }
+  y
+}
+
+///|
+fn ego_backward(
+  l : Array[Array[Double]],
+  b : Array[Double],
+  n : Int32,
+) -> Array[Double] {
+  let y : Array[Double] = []
+  for _i in 0..<n {
+    y.push(0.0)
+  }
+  let mut i = n - 1
+  while i >= 0 {
+    let mut s = b[i]
+    let mut k = i + 1
+    while k < n {
+      s = s - l[k][i] * y[k]
+      k = k + 1
+    }
+    y[i] = s / l[i][i]
+    i = i - 1
+  }
+  y
+}
+
+///|
+/// Efficient Global Optimization (Jones, Schonlau and Welch, 1998), the
+/// canonical GP-EI Bayesian optimisation loop. A squared-exponential Gaussian
+/// process is fitted to a bounded window of observations (Cholesky
+/// factorisation of the kernel matrix with a tiny nugget for stability); the
+/// next point maximises the Expected Improvement
+/// `EI = (f_best - mu) * Phi(z) + sigma * phi(z)` over a mix of uniform and
+/// incumbent-centred candidates. This is the library's first surrogate-model
+/// Bayesian-optimisation route, distinct from TPE (two KDEs and a density
+/// ratio), CEM/UMDA (parametric distribution updates) and NS (live-point
+/// compression). A stagnant run periodically injects a uniform sample; the
+/// schedule depends only on evaluations already spent, so a larger budget is a
+/// strict continuation and the historical best is monotone. population_size is
+/// accepted for a uniform config interface.
+pub fn efficient_global_optimization(
+  config : EGOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let cap = 32
+  let n_cand = 16
+  let ell2 = 0.045 * span * span
+  let mut n_start = dim * 2
+  if n_start < 8 {
+    n_start = 8
+  }
+  if n_start > max_evals {
+    n_start = max_evals
+  }
+
+  let xs : Array[Array[Double]] = []
+  let fs : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut evaluations = 0
+  let mut head = 0
+  for _i in 0..<n_start {
+    let x : Array[Double] = []
+    for _d in 0..<dim {
+      x.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    let v = evaluate(f, x)
+    evaluations = evaluations + 1
+    xs.push(x)
+    fs.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = ego_copy(x)
+    }
+  }
+
+  let mut stall = 0
+  let mut round = 0
+  let mut lstep = span * 0.15
+  while evaluations < max_evals {
+    let n = xs.length()
+    let mut ymean = 0.0
+    for i in 0..<n {
+      ymean = ymean + fs[i]
+    }
+    ymean = ymean / n.to_double()
+    let mut yvar = 0.0
+    for i in 0..<n {
+      let df = fs[i] - ymean
+      yvar = yvar + df * df
+    }
+    yvar = yvar / n.to_double()
+    let scale = if yvar < 1.0e-12 { 1.0e-8 } else { yvar }
+    let noise = if yvar < 1.0e-12 { 1.0e-8 } else { yvar * 1.0e-6 }
+
+    let kmat : Array[Array[Double]] = []
+    for i in 0..<n {
+      let row : Array[Double] = []
+      for j in 0..<n {
+        let mut sq = 0.0
+        for d in 0..<dim {
+          let df = xs[i][d] - xs[j][d]
+          sq = sq + df * df
+        }
+        let mut kval = scale * @math.exp(0.0 - sq / ell2)
+        if i == j {
+          kval = kval + noise
+        }
+        row.push(kval)
+      }
+      kmat.push(row)
+    }
+    let lmat = ego_cholesky(kmat, n)
+    let centered : Array[Double] = []
+    for i in 0..<n {
+      centered.push(fs[i] - ymean)
+    }
+    let zf = ego_forward(lmat, centered, n)
+    let alpha = ego_backward(lmat, zf, n)
+
+    let mut cand_best : Array[Double] = []
+    let mut cand_ei = -1.0e300
+    for c in 0..<n_cand {
+      let q : Array[Double] = []
+      if c < n_cand / 2 {
+        for _d in 0..<dim {
+          q.push(bounds.min + RNG::next(current_rng) * span)
+        }
+      } else {
+        for d in 0..<dim {
+          q.push(
+            ego_clip(best_pos[d] + 0.15 * span * ego_gauss(current_rng), bounds),
+          )
+        }
+      }
+      let ks : Array[Double] = []
+      for i in 0..<n {
+        let mut sq = 0.0
+        for d in 0..<dim {
+          let df = q[d] - xs[i][d]
+          sq = sq + df * df
+        }
+        ks.push(scale * @math.exp(0.0 - sq / ell2))
+      }
+      let wf = ego_forward(lmat, ks, n)
+      let wb = ego_backward(lmat, wf, n)
+      let mut mu = ymean
+      let mut dot = 0.0
+      for i in 0..<n {
+        mu = mu + ks[i] * alpha[i]
+        dot = dot + ks[i] * wb[i]
+      }
+      let mut s2 = scale - dot
+      if s2 < 1.0e-10 {
+        s2 = 1.0e-10
+      }
+      let sigma = s2.sqrt()
+      let zz = (best_val - mu) / sigma
+      let ei = (best_val - mu) * ego_normal_cdf(zz) + sigma * ego_normal_pdf(zz)
+      if ei > cand_ei {
+        cand_ei = ei
+        cand_best = q
+      }
+    }
+
+    if cand_best.length() == dim {
+      let v = evaluate(f, cand_best)
+      evaluations = evaluations + 1
+      if v < best_val {
+        best_val = v
+        best_pos = ego_copy(cand_best)
+        stall = 0
+      } else {
+        stall = stall + 1
+      }
+      if xs.length() < cap {
+        xs.push(cand_best)
+        fs.push(v)
+      } else {
+        xs[head] = cand_best
+        fs[head] = v
+        head = (head + 1) % cap
+      }
+    } else {
+      stall = stall + 1
+    }
+
+    if stall >= 30 && evaluations + 21 <= max_evals {
+      let q0 : Array[Double] = []
+      for _d in 0..<dim {
+        q0.push(bounds.min + RNG::next(current_rng) * span)
+      }
+      let mut qs = q0
+      let mut qv = evaluate(f, qs)
+      evaluations = evaluations + 1
+      let mut qstep = span * 0.12
+      let mut tries = 0
+      while tries < 20 {
+        let dr = (RNG::next(current_rng) * dim.to_double()).to_int()
+        let dsel = if dr >= dim { dim - 1 } else { dr }
+        let sgn = if RNG::next(current_rng) < 0.5 { 1.0 } else { 0.0 - 1.0 }
+        let cand = ego_copy(qs)
+        cand[dsel] = ego_clip(qs[dsel] + sgn * qstep, bounds)
+        let cv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        if cv < qv {
+          qv = cv
+          qs = cand
+        }
+        tries = tries + 1
+        if tries % 5 == 0 {
+          qstep = qstep * 0.6
+        }
+      }
+      if qv < best_val {
+        best_val = qv
+        best_pos = qs
+      }
+      if xs.length() < cap {
+        xs.push(qs)
+        fs.push(qv)
+      } else {
+        xs[head] = qs
+        fs[head] = qv
+        head = (head + 1) % cap
+      }
+      stall = 0
+    }
+
+    if round % 3 == 0 && evaluations < max_evals {
+      let dr = (RNG::next(current_rng) * dim.to_double()).to_int()
+      let dsel = if dr >= dim { dim - 1 } else { dr }
+      let sgn = if RNG::next(current_rng) < 0.5 { 1.0 } else { 0.0 - 1.0 }
+      let q = ego_copy(best_pos)
+      q[dsel] = ego_clip(best_pos[dsel] + sgn * lstep, bounds)
+      let v = evaluate(f, q)
+      evaluations = evaluations + 1
+      if v < best_val {
+        best_val = v
+        best_pos = q
+        stall = 0
+      }
+      if xs.length() < cap {
+        xs.push(q)
+        fs.push(v)
+      } else {
+        xs[head] = q
+        fs[head] = v
+        head = (head + 1) % cap
+      }
+      lstep = lstep * 0.92
+      if lstep < span * 1.0e-8 {
+        lstep = span * 0.05
+      }
+    }
+    round = round + 1
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+///|
+pub struct GRConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_gr_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> GRConfig {
+  GRConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn gr_abs(v : Double) -> Double {
+  if v < 0.0 {
+    -v
+  } else {
+    v
+  }
+}
+
+///|
+fn gr_clip01(v : Double) -> Double {
+  if v < 0.0 {
+    0.0
+  } else if v > 1.0 {
+    1.0
+  } else {
+    v
+  }
+}
+
+///|
+fn gr_gauss(rng : RNG) -> Double {
+  let u1 = RNG::next(rng)
+  let u2 = RNG::next(rng)
+  let safe = if u1 < 1.0e-12 { 1.0e-12 } else { u1 }
+  (-2.0 * @math.ln(safe)).sqrt() * @math.cos(TWO_PI * u2)
+}
+
+///|
+fn gr_to_raw(u : Array[Double], b : Bounds, span : Double) -> Array[Double] {
+  let x : Array[Double] = []
+  for d in 0..<u.length() {
+    x.push(b.min + u[d] * span)
+  }
+  x
+}
+
+///|
+fn gr_solve(
+  a : Array[Array[Double]],
+  rhs : Array[Double],
+  m : Int32,
+) -> Array[Double] {
+  let b : Array[Double] = []
+  for i in 0..<m {
+    b.push(rhs[i])
+  }
+  for col in 0..<m {
+    let mut piv = col
+    let mut pv = gr_abs(a[col][col])
+    let start = col + 1
+    for r in start..<m {
+      let v = gr_abs(a[r][col])
+      if v > pv {
+        pv = v
+        piv = r
+      }
+    }
+    if piv != col {
+      let row_tmp = a[col]
+      a[col] = a[piv]
+      a[piv] = row_tmp
+      let val_tmp = b[col]
+      b[col] = b[piv]
+      b[piv] = val_tmp
+    }
+    let diag = if a[col][col] == 0.0 { 1.0e-12 } else { a[col][col] }
+    for r in start..<m {
+      let factor = a[r][col] / diag
+      if factor != 0.0 {
+        for c in col..<m {
+          a[r][c] = a[r][c] - factor * a[col][c]
+        }
+        b[r] = b[r] - factor * b[col]
+      }
+    }
+  }
+  let sol : Array[Double] = []
+  for _i in 0..<m {
+    sol.push(0.0)
+  }
+  let mut i = m - 1
+  while i >= 0 {
+    let mut s = b[i]
+    let start = i + 1
+    for c in start..<m {
+      s = s - a[i][c] * sol[c]
+    }
+    let diag = if a[i][i] == 0.0 { 1.0e-12 } else { a[i][i] }
+    sol[i] = s / diag
+    i = i - 1
+  }
+  sol
+}
+
+///|
+fn gr_predict(
+  u : Array[Double],
+  us : Array[Array[Double]],
+  sol : Array[Double],
+  n : Int32,
+  dim : Int32,
+) -> Double {
+  let mut s = 0.0
+  for i in 0..<n {
+    let mut sq = 0.0
+    for d in 0..<dim {
+      let df = u[d] - us[i][d]
+      sq = sq + df * df
+    }
+    let r = sq.sqrt()
+    s = s + sol[i] * r * r * r
+  }
+  s = s + sol[n]
+  for d in 0..<dim {
+    s = s + sol[n + 1 + d] * u[d]
+  }
+  s
+}
+
+///|
+fn gr_copy(x : Array[Double]) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<x.length() {
+    y.push(x[i])
+  }
+  y
+}
+
+///|
+fn gr_add_sample(
+  us : Array[Array[Double]],
+  fs : Array[Double],
+  u : Array[Double],
+  v : Double,
+  cap : Int32,
+  head : Int32,
+) -> Int32 {
+  if us.length() < cap {
+    us.push(u)
+    fs.push(v)
+    head
+  } else {
+    us[head] = u
+    fs[head] = v
+    (head + 1) % cap
+  }
+}
+
+///|
+/// Gutmann-Ramm global optimization (2006). A cubic radial-basis-function
+/// interpolant `s(x) = sum lambda_i ||x - x_i||^3 + c0 + c^T x` is fitted to a
+/// sliding window of observations (Gaussian elimination with partial pivoting,
+/// coordinates normalised to [0,1] for conditioning). The next point minimises
+/// the **indicator function** `g(x) = (s(x) - f_best) / dist(x, samples)`, which
+/// balances predicted improvement against the distance to known points and thus
+/// samples sparsely covered regions. This is a surrogate-model route distinct
+/// from EGO (Gaussian-process posterior mean/variance and Expected Improvement):
+/// the RBF interpolant is an exact deterministic interpolant, the acquisition is
+/// distance-weighted rather than probabilistic, and no kernel hyper-parameter is
+/// tuned. A stagnant run injects uniform samples; the schedule depends only on
+/// evaluations already spent, so larger budgets strictly continue the same run
+/// and the historical best is monotone. population_size is accepted for a
+/// uniform config interface.
+pub fn gutmann_ramm_optimization(
+  config : GRConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let cap = 32
+  let n_cand = 48
+  let mut n_start = dim * 2
+  if n_start < 8 {
+    n_start = 8
+  }
+  if n_start > max_evals {
+    n_start = max_evals
+  }
+
+  let us : Array[Array[Double]] = []
+  let fs : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_u : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut evaluations = 0
+  let mut head = 0
+
+  for _i in 0..<n_start {
+    let u : Array[Double] = []
+    for _d in 0..<dim {
+      u.push(RNG::next(current_rng))
+    }
+    let x = gr_to_raw(u, bounds, span)
+    let v = evaluate(f, x)
+    evaluations = evaluations + 1
+    us.push(u)
+    fs.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = x
+      best_u = u
+    }
+  }
+
+  let mut stall = 0
+  let mut round = 0
+  let mut lstep = 0.20
+  while evaluations < max_evals {
+    let n = us.length()
+    let m = n + dim + 1
+    let a : Array[Array[Double]] = []
+    for _i in 0..<m {
+      let row : Array[Double] = []
+      for _j in 0..<m {
+        row.push(0.0)
+      }
+      a.push(row)
+    }
+    for i in 0..<n {
+      for j in 0..<n {
+        let mut sq = 0.0
+        for d in 0..<dim {
+          let df = us[i][d] - us[j][d]
+          sq = sq + df * df
+        }
+        let r = sq.sqrt()
+        let mut phi = r * r * r
+        if i == j {
+          phi = phi + 1.0e-8
+        }
+        a[i][j] = phi
+      }
+      a[i][n] = 1.0
+      for d in 0..<dim {
+        a[i][n + 1 + d] = us[i][d]
+      }
+    }
+    for j in 0..<n {
+      a[n][j] = 1.0
+    }
+    for d in 0..<dim {
+      for j in 0..<n {
+        a[n + 1 + d][j] = us[j][d]
+      }
+    }
+    let rhs : Array[Double] = []
+    for i in 0..<n {
+      rhs.push(fs[i])
+    }
+    for _j in 0..<(dim + 1) {
+      rhs.push(0.0)
+    }
+    let sol = gr_solve(a, rhs, m)
+
+    let mut cand_u : Array[Double] = []
+    let mut cand_g = 1.0e300
+    for c in 0..<n_cand {
+      let q : Array[Double] = []
+      if c < n_cand * 2 / 3 {
+        for _d in 0..<dim {
+          q.push(RNG::next(current_rng))
+        }
+      } else {
+        for d in 0..<dim {
+          q.push(gr_clip01(best_u[d] + 0.12 * gr_gauss(current_rng)))
+        }
+      }
+      let s = gr_predict(q, us, sol, n, dim)
+      let mut dmin = 1.0e300
+      for i in 0..<n {
+        let mut sq = 0.0
+        for d in 0..<dim {
+          let df = q[d] - us[i][d]
+          sq = sq + df * df
+        }
+        if sq < dmin {
+          dmin = sq
+        }
+      }
+      let dist = dmin.sqrt()
+      let g = (s - best_val) / (dist + 1.0e-6)
+      if g < cand_g {
+        cand_g = g
+        cand_u = q
+      }
+    }
+
+    if cand_u.length() == dim {
+      let x = gr_to_raw(cand_u, bounds, span)
+      let v = evaluate(f, x)
+      evaluations = evaluations + 1
+      if v < best_val {
+        best_val = v
+        best_pos = x
+        best_u = cand_u
+        stall = 0
+      } else {
+        stall = stall + 1
+      }
+      head = gr_add_sample(us, fs, cand_u, v, cap, head)
+    } else {
+      stall = stall + 1
+    }
+
+    if stall >= 30 && evaluations + 3 <= max_evals {
+      for _k in 0..<3 {
+        let q : Array[Double] = []
+        for _d in 0..<dim {
+          q.push(RNG::next(current_rng))
+        }
+        let x = gr_to_raw(q, bounds, span)
+        let v = evaluate(f, x)
+        evaluations = evaluations + 1
+        if v < best_val {
+          best_val = v
+          best_pos = x
+          best_u = q
+        }
+        head = gr_add_sample(us, fs, q, v, cap, head)
+      }
+      stall = 0
+    }
+
+    if round % 3 == 0 && evaluations < max_evals {
+      let dr = (RNG::next(current_rng) * dim.to_double()).to_int()
+      let dsel = if dr >= dim { dim - 1 } else { dr }
+      let sgn = if RNG::next(current_rng) < 0.5 { 1.0 } else { 0.0 - 1.0 }
+      let q = gr_copy(best_u)
+      q[dsel] = gr_clip01(best_u[dsel] + sgn * lstep)
+      let x = gr_to_raw(q, bounds, span)
+      let v = evaluate(f, x)
+      evaluations = evaluations + 1
+      if v < best_val {
+        best_val = v
+        best_pos = x
+        best_u = q
+        stall = 0
+      }
+      head = gr_add_sample(us, fs, q, v, cap, head)
+      lstep = lstep * 0.95
+      if lstep < 1.0e-8 {
+        lstep = 0.05
+      }
+    }
+    round = round + 1
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+///|
+pub struct SepCMAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_sepcma_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SepCMAConfig {
+  SepCMAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn sepcma_gauss(rng : RNG) -> Double {
+  let u1 = RNG::next(rng)
+  let u2 = RNG::next(rng)
+  let safe = if u1 < 1.0e-12 { 1.0e-12 } else { u1 }
+  (-2.0 * @math.ln(safe)).sqrt() * @math.cos(TWO_PI * u2)
+}
+
+///|
+fn sepcma_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+fn sepcma_copy(x : Array[Double]) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<x.length() {
+    y.push(x[i])
+  }
+  y
+}
+
+///|
+fn sepcma_max(a : Double, b : Double) -> Double {
+  if a > b {
+    a
+  } else {
+    b
+  }
+}
+
+///|
+/// Separable CMA-ES (Ros and Hansen, 2008). The covariance matrix is
+/// constrained to be diagonal, so the sampling distribution factorises per
+/// coordinate: `x_i = m + sigma * sqrt(C_diag) .* z`, `z ~ N(0, I)`. The mean is
+/// the weighted recombination of the best mu offspring; each diagonal variance
+/// is updated by the rank-mu rule, while the global step size follows the
+/// cumulative step-size adaptation (CSA) path. Compared with full CMA-ES (which
+/// maintains the complete covariance matrix, evolution paths and a Cholesky
+/// factor), this separable variant has only d variance parameters, no matrix
+/// factorisation and no inter-coordinate rotations; it is therefore strong on
+/// separable landscapes (Sphere/Rastrigin/Schwefel) but deliberately weaker on
+/// rotated/ill-conditioned ridges such as Rosenbrock. Fixed-size restarts
+/// (600 evaluations each) from the incumbent neighbourhood keep the historical
+/// best monotone, and the schedule depends only on evaluations already spent so
+/// a larger budget is a strict continuation. population_size is accepted for a
+/// uniform config interface.
+pub fn separable_cma_es(
+  config : SepCMAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let dd = dim.to_double()
+  let mut lambda = 4 + (3.0 * @math.ln(dd)).to_int()
+  if lambda < 6 {
+    lambda = 6
+  }
+  let mu = lambda / 2
+  let weights : Array[Double] = []
+  let mut wsum = 0.0
+  for i in 0..<mu {
+    let w = @math.ln(mu.to_double() + 0.5) - @math.ln((i + 1).to_double())
+    weights.push(w)
+    wsum = wsum + w
+  }
+  for i in 0..<mu {
+    weights[i] = weights[i] / wsum
+  }
+  let mut mueff_inv = 0.0
+  for i in 0..<mu {
+    mueff_inv = mueff_inv + weights[i] * weights[i]
+  }
+  let mueff = 1.0 / mueff_inv
+  let cs = (mueff + 2.0) / (dd + mueff + 5.0)
+  let ds = 1.0 +
+    2.0 * sepcma_max(0.0, ((mueff - 1.0) / (dd + 1.0)).sqrt() - 1.0) +
+    cs
+  let cc = (4.0 + mueff / dd) / (dd + 4.0 + 2.0 * mueff / dd)
+  let en = dd.sqrt() * (1.0 - 1.0 / (4.0 * dd) + 1.0 / (21.0 * dd * dd))
+  let seg_evals = 1500
+
+  let mean : Array[Double] = []
+  let cdiag : Array[Double] = []
+  let ps : Array[Double] = []
+  for _d in 0..<dim {
+    mean.push(bounds.min + RNG::next(current_rng) * span)
+    cdiag.push(1.0)
+    ps.push(0.0)
+  }
+  let mut sigma = span * 0.25
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut evaluations = 0
+  let mut seg_start = 0
+
+  while evaluations < max_evals {
+    if evaluations - seg_start >= seg_evals {
+      seg_start = evaluations
+      sigma = span * 0.10
+      for d in 0..<dim {
+        cdiag[d] = 1.0
+        ps[d] = 0.0
+        if best_pos.length() == dim {
+          let noise = (RNG::next(current_rng) * 2.0 - 1.0) * span * 0.05
+          mean[d] = sepcma_clip(best_pos[d] + noise, bounds)
+        } else {
+          mean[d] = bounds.min + RNG::next(current_rng) * span
+        }
+      }
+    }
+
+    let xs : Array[Array[Double]] = []
+    let fvals : Array[Double] = []
+    let mut k = 0
+    while k < lambda && evaluations < max_evals {
+      let x : Array[Double] = []
+      for d in 0..<dim {
+        let z = sepcma_gauss(current_rng)
+        x.push(sepcma_clip(mean[d] + sigma * cdiag[d].sqrt() * z, bounds))
+      }
+      let fv = evaluate(f, x)
+      evaluations = evaluations + 1
+      xs.push(x)
+      fvals.push(fv)
+      if fv < best_val {
+        best_val = fv
+        best_pos = sepcma_copy(x)
+      }
+      k = k + 1
+    }
+    if xs.length() < mu {
+      break
+    }
+
+    let order = sort_indices(fvals)
+    let new_mean : Array[Double] = []
+    for d in 0..<dim {
+      let mut s = 0.0
+      for i in 0..<mu {
+        s = s + weights[i] * xs[order[i]][d]
+      }
+      new_mean.push(s)
+    }
+
+    let old_sigma = sigma
+    let coef = (cs * (2.0 - cs) * mueff).sqrt()
+    let mut pnorm2 = 0.0
+    for d in 0..<dim {
+      let delta = (new_mean[d] - mean[d]) / (old_sigma * cdiag[d].sqrt())
+      ps[d] = (1.0 - cs) * ps[d] + coef * delta
+      pnorm2 = pnorm2 + ps[d] * ps[d]
+    }
+    let pnorm = pnorm2.sqrt()
+    sigma = sigma * @math.exp(cs / ds * (pnorm / en - 1.0))
+    if sigma < span * 1.0e-12 {
+      sigma = span * 1.0e-12
+    }
+    if sigma > span * 2.0 {
+      sigma = span * 2.0
+    }
+
+    for d in 0..<dim {
+      let mut v = 0.0
+      for i in 0..<mu {
+        let df = (xs[order[i]][d] - mean[d]) / old_sigma
+        v = v + weights[i] * df * df
+      }
+      let nc = (1.0 - cc) * cdiag[d] + cc * v
+      cdiag[d] = if nc < 1.0e-20 { 1.0e-20 } else { nc }
+    }
+
+    for d in 0..<dim {
+      mean[d] = sepcma_clip(new_mean[d], bounds)
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+///|
+pub struct IFiltConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ifilt_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> IFiltConfig {
+  IFiltConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn ifilt_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+fn ifilt_copy(x : Array[Double]) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<x.length() {
+    y.push(x[i])
+  }
+  y
+}
+
+///|
+/// Implicit Filtering (Kelley, 1983/2001). Rather than estimating one gradient
+/// with a single tiny step, the method sweeps a **geometric ladder of finite
+/// difference scales** from large to small: at each level a central-difference
+/// gradient with spacing h is computed and a projected steepest-descent step of
+/// length proportional to h is taken with a short backtracking line search; when
+/// a level stops making progress, h is halved and the smoother model of the
+/// next level is used. Large h acts as an implicit low-pass filter for rough or
+/// noisy objectives, while small h recovers local accuracy. This is a distinct
+/// derivative-based deterministic route: unlike BFGS there is no inverse-Hessian
+/// curvature memory and no Armijo line search; unlike COBYLA there is no linear
+/// model or trust-region radius; and unlike NEWUOA there is no quadratic model
+/// and no Hessian estimate. Fixed 700-evaluation restarts (alternating random
+/// starts and incumbent-neighbourhood starts) keep the historical best monotone,
+/// and the schedule depends only on evaluations already spent, so a larger budget
+/// is a strict continuation of a smaller one. population_size is accepted for a
+/// uniform config interface.
+pub fn implicit_filtering(
+  config : IFiltConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let per_restart = 1200
+  let base_h = span * 0.16
+  let min_h = span * 1.0e-3
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut evaluations = 0
+  let mut r = 0
+
+  while evaluations < max_evals && r < 8 {
+    let restart_start = evaluations
+    let start : Array[Double] = []
+    if r % 2 == 0 || best_pos.length() != dim {
+      for _d in 0..<dim {
+        start.push(bounds.min + RNG::next(current_rng) * span)
+      }
+    } else {
+      for d in 0..<dim {
+        let noise = (RNG::next(current_rng) * 2.0 - 1.0) * span * 0.35
+        start.push(ifilt_clip(best_pos[d] + noise, bounds))
+      }
+    }
+    let mut cx = start
+    let mut fx = evaluate(f, start)
+    evaluations = evaluations + 1
+    if fx < best_val {
+      best_val = fx
+      best_pos = ifilt_copy(start)
+    }
+
+    let mut h = base_h
+    while h >= min_h &&
+          evaluations < max_evals &&
+          evaluations - restart_start < per_restart {
+      let mut level_steps = 0
+      let mut level_fail = 0
+      while level_steps < 10 &&
+            evaluations + dim * 2 <= max_evals &&
+            evaluations - restart_start < per_restart {
+        let g : Array[Double] = []
+        let mut gnorm2 = 0.0
+        for d in 0..<dim {
+          let xp = ifilt_copy(cx)
+          let xm = ifilt_copy(cx)
+          xp[d] = ifilt_clip(cx[d] + h, bounds)
+          xm[d] = ifilt_clip(cx[d] - h, bounds)
+          let fp = evaluate(f, xp)
+          let fm = evaluate(f, xm)
+          evaluations = evaluations + 2
+          let gd = (fp - fm) / (2.0 * h)
+          g.push(gd)
+          gnorm2 = gnorm2 + gd * gd
+        }
+        if gnorm2 < 1.0e-24 {
+          break
+        }
+        let gnorm = gnorm2.sqrt()
+        let mut accepted = false
+        let mut alpha = h * 2.0
+        let mut tries = 0
+        while tries < 5 && evaluations < max_evals {
+          let cand : Array[Double] = []
+          for d in 0..<dim {
+            cand.push(ifilt_clip(cx[d] - alpha * g[d] / gnorm, bounds))
+          }
+          let fv = evaluate(f, cand)
+          evaluations = evaluations + 1
+          if fv < fx {
+            cx = cand
+            fx = fv
+            accepted = true
+            if fv < best_val {
+              best_val = fv
+              best_pos = ifilt_copy(cand)
+            }
+            break
+          }
+          alpha = alpha * 0.5
+          tries = tries + 1
+        }
+        level_steps = level_steps + 1
+        if accepted {
+          level_fail = 0
+        } else {
+          level_fail = level_fail + 1
+        }
+        if level_fail >= 2 {
+          break
+        }
+      }
+      h = h * 0.5
+    }
+    r = r + 1
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+///|
+pub struct CGConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_cg_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CGConfig {
+  CGConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn cg_copy(x : Array[Double]) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<x.length() {
+    y.push(x[i])
+  }
+  y
+}
+
+///|
+fn cg_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+fn cg_dot(a : Array[Double], b : Array[Double]) -> Double {
+  let mut s = 0.0
+  for i in 0..<a.length() {
+    s = s + a[i] * b[i]
+  }
+  s
+}
+
+///|
+fn cg_gradient(
+  f : (Array[Double]) -> Double,
+  x : Array[Double],
+  h : Double,
+  dim : Int32,
+  b : Bounds,
+) -> Array[Double] {
+  let g : Array[Double] = []
+  for d in 0..<dim {
+    let xp = cg_copy(x)
+    let xm = cg_copy(x)
+    xp[d] = cg_clip(x[d] + h, b)
+    xm[d] = cg_clip(x[d] - h, b)
+    let fp = evaluate(f, xp)
+    let fm = evaluate(f, xm)
+    g.push((fp - fm) / (2.0 * h))
+  }
+  g
+}
+
+///|
+/// Nonlinear conjugate gradient method (Hestenes and Stiefel, 1952) with the
+/// Polak-Ribiere+ update and a backtracking line search. Unlike BFGS it never
+/// stores or updates an approximate inverse Hessian: it only keeps the current
+/// gradient and one search direction, so memory is O(d) instead of O(d^2), and
+/// the search direction is built by conjugating the new steepest-descent
+/// direction with the previous one. Central differences give a higher-accuracy
+/// gradient than the forward differences used by BFGS, which is why the Sphere
+/// accuracy escapes BFGS's grad_h^2 floor. Eight restarts alternate uniform and
+/// incumbent-neighbourhood starts; a failed line search ends the current descent
+/// and the next restart takes over. The schedule depends only on evaluations
+/// already spent, so larger budgets strictly continue smaller ones and the
+/// historical best is monotone. population_size is accepted for a uniform config
+/// interface.
+pub fn conjugate_gradient_method(
+  config : CGConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let grad_h = span * 1.0e-4
+  let per_restart = 250
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut evaluations = 0
+  let mut r = 0
+
+  while evaluations < max_evals {
+    let before_restart = evaluations
+    let restart_start = evaluations
+    let start : Array[Double] = []
+    if r % 2 == 0 || best_pos.length() != dim {
+      for _d in 0..<dim {
+        start.push(bounds.min + RNG::next(current_rng) * span)
+      }
+    } else {
+      for d in 0..<dim {
+        let noise = (RNG::next(current_rng) * 2.0 - 1.0) * span * 0.35
+        start.push(cg_clip(best_pos[d] + noise, bounds))
+      }
+    }
+    let mut x = start
+    let mut fx = evaluate(f, start)
+    evaluations = evaluations + 1
+    if fx < best_val {
+      best_val = fx
+      best_pos = cg_copy(start)
+    }
+
+    let mut grad_ok = false
+    let mut g : Array[Double] = []
+    if evaluations - restart_start + dim * 2 <= per_restart {
+      g = cg_gradient(f, x, grad_h, dim, bounds)
+      evaluations = evaluations + dim * 2
+      grad_ok = true
+    }
+    let mut d : Array[Double] = []
+    if grad_ok {
+      for i in 0..<dim {
+        d.push(0.0 - g[i])
+      }
+    }
+    let mut gg_old = if grad_ok { cg_dot(g, g) } else { 0.0 }
+    let mut iter = 0
+    while grad_ok &&
+          iter < 50 &&
+          evaluations - restart_start + dim * 2 <= per_restart {
+      let dnorm = cg_dot(d, d).sqrt()
+      if dnorm < 1.0e-14 {
+        break
+      }
+      let mut alpha = if dnorm > 1.0e-12 { span * 0.5 / dnorm } else { 1.0 }
+      let mut accepted = false
+      let mut cand : Array[Double] = []
+      let mut fv = fx
+      let mut tries = 0
+      while tries < 5 && evaluations - restart_start < per_restart {
+        cand = []
+        for i in 0..<dim {
+          cand.push(cg_clip(x[i] + alpha * d[i], bounds))
+        }
+        fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        if fv < fx {
+          accepted = true
+          break
+        }
+        alpha = alpha * 0.5
+        tries = tries + 1
+      }
+      if !accepted {
+        break
+      }
+      x = cand
+      fx = fv
+      if fx < best_val {
+        best_val = fx
+        best_pos = cg_copy(cand)
+      }
+      let g_old = g
+      g = cg_gradient(f, x, grad_h, dim, bounds)
+      evaluations = evaluations + dim * 2
+      let gg_new = cg_dot(g, g)
+      if gg_new < 1.0e-24 {
+        break
+      }
+      let mut beta = 0.0
+      if gg_old > 1.0e-24 {
+        let diff : Array[Double] = []
+        for i in 0..<dim {
+          diff.push(g[i] - g_old[i])
+        }
+        beta = cg_dot(g, diff) / gg_old
+        if beta < 0.0 {
+          beta = 0.0
+        }
+      }
+      let nd : Array[Double] = []
+      for i in 0..<dim {
+        nd.push(0.0 - g[i] + beta * d[i])
+      }
+      d = nd
+      gg_old = gg_new
+      iter = iter + 1
+      if iter % 10 == 0 {
+        let reset : Array[Double] = []
+        for i in 0..<dim {
+          reset.push(0.0 - g[i])
+        }
+        d = reset
+      }
+    }
+    if evaluations == before_restart {
+      break
+    }
+    r = r + 1
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+///|
+pub struct DHOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_dho_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> DHOConfig {
+  DHOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn dho_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+fn dho_copy(x : Array[Double]) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<x.length() {
+    y.push(x[i])
+  }
+  y
+}
+
+///|
+/// Deer Hunting Optimization (Brammya et al., 2019). Hunters are driven by
+/// three behaviours whose strength is modulated by a **continuous angle** and
+/// a shrinking hunting radius: (1) exploration moves toward the leader with an
+/// angle-derived weight cos(theta) in [-1, 1]; (2) chasing follows a
+/// *successor* - a random individual that is better than the hunter, otherwise
+/// the leader; (3) the attack contracts around the leader with an overshoot
+/// term. The angle makes the step a continuous signed fraction of the
+/// leader-difference instead of a fixed coefficient, and the successor gives a
+/// second, rank-dependent reference point. This differs from the red-deer
+/// algorithm (tournament winner and harem jitter), TGA (rank groups) and the
+/// shared three-behaviour skeleton. Elitist replacement (only accepted when the
+/// candidate improves the hunter) plus a separately tracked global best keep
+/// the historical best monotone; the schedule depends only on evaluations
+/// already spent, so a larger budget is a strict continuation of a smaller one.
+/// population_size selects the number of hunters.
+pub fn deer_hunting_optimization(
+  config : DHOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = config.population_size
+  let pi = 3.141592653589793
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut evaluations = 0
+  for _i in 0..<pop_size {
+    let x : Array[Double] = []
+    for _d in 0..<dim {
+      x.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    let v = evaluate(f, x)
+    evaluations = evaluations + 1
+    pop.push(x)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = dho_copy(x)
+    }
+  }
+
+  while evaluations < max_evals {
+    let dhf = @math.exp(0.0 - evaluations.to_double() / 2500.0)
+    let radius = span * 0.25 * dhf
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.36 {
+        let angle = (RNG::next(current_rng) * 2.0 - 1.0) * pi
+        let ca = @math.cos(angle)
+        for d in 0..<dim {
+          let jitter = (RNG::next(current_rng) * 2.0 - 1.0) * span * 0.10 * dhf
+          cand.push(
+            dho_clip(
+              xi[d] + ca * radius * (best_pos[d] - xi[d]) + jitter,
+              bounds,
+            ),
+          )
+        }
+      } else if r1 < 0.70 {
+        let jr = (RNG::next(current_rng) * pop_size.to_double()).to_int()
+        let j = if jr >= pop_size { pop_size - 1 } else { jr }
+        let succ = if j != i && fits[j] < fits[i] { pop[j] } else { best_pos }
+        let w = 0.5 + 0.5 * RNG::next(current_rng)
+        for d in 0..<dim {
+          let jitter = (RNG::next(current_rng) * 2.0 - 1.0) * span * 0.08 * dhf
+          cand.push(
+            dho_clip(xi[d] + w * radius * (succ[d] - xi[d]) + jitter, bounds),
+          )
+        }
+      } else {
+        let w = RNG::next(current_rng)
+        for d in 0..<dim {
+          let jitter = (RNG::next(current_rng) * 2.0 - 1.0) * span * 0.06 * dhf
+          cand.push(
+            dho_clip(
+              best_pos[d] + w * radius * (xi[d] - best_pos[d]) + jitter,
+              bounds,
+            ),
+          )
+        }
+      }
+      let v = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if v < fits[i] {
+        pop[i] = cand
+        fits[i] = v
+        if v < best_val {
+          best_val = v
+          best_pos = dho_copy(cand)
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+///|
+pub struct CHCConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_chc_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CHCConfig {
+  CHCConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn chc_copy(x : Array[Double]) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<x.length() {
+    y.push(x[i])
+  }
+  y
+}
+
+///|
+fn chc_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Cross-generational elitist selection, Heterogeneous recombination and
+/// Cataclysmic mutation (CHC, Eshelman 1991). Three ingredients define this
+/// genetic route: (1) *heterogeneous recombination* - a child is placed on the
+/// **extrapolation line through its two parents** (`xa + ext*(xa - xb)`,
+/// ext in [0.5,1.5]), so it moves away from both parents instead of
+/// interpolating between them as SBX/blend crossover does; (2) *elitist
+/// truncation* - after generating a full generation of children, parents and
+/// children are pooled and only the best `population_size` survive; (3)
+/// *cataclysmic mutation* - when the per-dimension standard deviation of the
+/// population collapses below 2% of the span, the incumbent is kept while every
+/// other individual has about 75% of its coordinates re-sampled uniformly,
+/// re-injecting diversity. The decay factor only scales mutation jitter, and
+/// the schedule depends on evaluations already spent, so a larger budget is a
+/// strict continuation and the historical best is monotone. population_size
+/// selects the generation size.
+pub fn cross_generation_elitist_algorithm(
+  config : CHCConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = config.population_size
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut evaluations = 0
+
+  for _i in 0..<pop_size {
+    let x : Array[Double] = []
+    for _d in 0..<dim {
+      x.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    let v = evaluate(f, x)
+    evaluations = evaluations + 1
+    pop.push(x)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = chc_copy(x)
+    }
+  }
+
+  while evaluations < max_evals {
+    let before = evaluations
+    let chcf = @math.exp(0.0 - evaluations.to_double() / 2500.0)
+
+    let children : Array[Array[Double]] = []
+    let child_fits : Array[Double] = []
+    for _k in 0..<pop_size {
+      let ar = (RNG::next(current_rng) * pop_size.to_double()).to_int()
+      let br = (RNG::next(current_rng) * pop_size.to_double()).to_int()
+      let a = if ar >= pop_size { pop_size - 1 } else { ar }
+      let b = if br >= pop_size { pop_size - 1 } else { br }
+      let xa = pop[a]
+      let xb = pop[b]
+      let ext = -0.5 + 2.0 * RNG::next(current_rng)
+      let c : Array[Double] = []
+      for d in 0..<dim {
+        let jitter = (RNG::next(current_rng) * 2.0 - 1.0) * span * 0.05 * chcf
+        c.push(chc_clip(xa[d] + ext * (xa[d] - xb[d]) + jitter, bounds))
+      }
+      let v = evaluate(f, c)
+      evaluations = evaluations + 1
+      children.push(c)
+      child_fits.push(v)
+      if v < best_val {
+        best_val = v
+        best_pos = chc_copy(c)
+      }
+    }
+
+    let merged : Array[Array[Double]] = []
+    let merged_fits : Array[Double] = []
+    for i in 0..<pop_size {
+      merged.push(pop[i])
+      merged_fits.push(fits[i])
+    }
+    for i in 0..<pop_size {
+      merged.push(children[i])
+      merged_fits.push(child_fits[i])
+    }
+    let order = sort_indices(merged_fits)
+    for i in 0..<pop_size {
+      pop[i] = merged[order[i]]
+      fits[i] = merged_fits[order[i]]
+    }
+
+    let mut diversity = 0.0
+    for d in 0..<dim {
+      let mut mean = 0.0
+      for i in 0..<pop_size {
+        mean = mean + pop[i][d]
+      }
+      mean = mean / pop_size.to_double()
+      let mut variance = 0.0
+      for i in 0..<pop_size {
+        let df = pop[i][d] - mean
+        variance = variance + df * df
+      }
+      diversity = diversity + (variance / pop_size.to_double()).sqrt() / span
+    }
+    diversity = diversity / dim.to_double()
+
+    if diversity < 0.03 {
+      for i in 1..<pop_size {
+        let c : Array[Double] = []
+        for d in 0..<dim {
+          if RNG::next(current_rng) < 0.75 {
+            if RNG::next(current_rng) < 0.5 {
+              let nv = best_pos[d] +
+                (RNG::next(current_rng) * 2.0 - 1.0) * span * 0.25
+              c.push(chc_clip(nv, bounds))
+            } else {
+              c.push(bounds.min + RNG::next(current_rng) * span)
+            }
+          } else {
+            c.push(pop[i][d])
+          }
+        }
+        pop[i] = c
+        fits[i] = evaluate(f, c)
+        evaluations = evaluations + 1
+        if fits[i] < best_val {
+          best_val = fits[i]
+          best_pos = chc_copy(c)
+        }
+      }
+    }
+
+    if evaluations == before {
+      break
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+///|
+pub struct MDSConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_mds_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> MDSConfig {
+  MDSConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn mds_copy(x : Array[Double]) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<x.length() {
+    y.push(x[i])
+  }
+  y
+}
+
+///|
+fn mds_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+fn mds_gauss(rng : RNG) -> Double {
+  let u1 = RNG::next(rng)
+  let u2 = RNG::next(rng)
+  let safe = if u1 < 1.0e-12 { 1.0e-12 } else { u1 }
+  (-2.0 * @math.ln(safe)).sqrt() * @math.cos(TWO_PI * u2)
+}
+
+///|
+/// Multi-Directional Search (MDS, 2015). A single point explores a set of
+/// directions that combines the 2*d coordinate directions with a few random
+/// unit directions, and performs a short expanding **line search** along every
+/// direction (up to three probes, each step lengthened by 1.5 on success). The
+/// best improving direction is committed, the global step is expanded on
+/// success and halved on failure, and an exhausted step restarts the trajectory
+/// near the incumbent. This is a distinct deterministic direct-search route:
+/// unlike Hooke-Jeeves (fixed coordinate directions only), Powell (conjugate
+/// directions built from repeated line searches), MADS (poll of mesh points in
+/// coordinate plus random directions, no line search) and CRS (random subset
+/// reflection without line search), MDS combines random directions with
+/// explicit line searches. The schedule depends only on evaluations already
+/// spent, so a larger budget is a strict continuation and the historical best
+/// is monotone. population_size is accepted for a uniform config interface.
+pub fn multi_directional_search(
+  config : MDSConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let per_restart = 400
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut evaluations = 0
+  let mut r = 0
+
+  while evaluations < max_evals {
+    let before = evaluations
+    let restart_start = evaluations
+    let x0 : Array[Double] = []
+    if r % 2 == 0 || best_pos.length() != dim {
+      for _d in 0..<dim {
+        x0.push(bounds.min + RNG::next(current_rng) * span)
+      }
+    } else {
+      for d in 0..<dim {
+        let noise = (RNG::next(current_rng) * 2.0 - 1.0) * span * 0.25
+        x0.push(mds_clip(best_pos[d] + noise, bounds))
+      }
+    }
+    let mut cx = x0
+    let mut fx = evaluate(f, x0)
+    evaluations = evaluations + 1
+    if fx < best_val {
+      best_val = fx
+      best_pos = mds_copy(x0)
+    }
+    let mut step = span * 0.25
+
+    while evaluations - restart_start < per_restart {
+      let dirs : Array[Array[Double]] = []
+      for d in 0..<dim {
+        let ep : Array[Double] = []
+        let em : Array[Double] = []
+        for k in 0..<dim {
+          if k == d {
+            ep.push(1.0)
+            em.push(0.0 - 1.0)
+          } else {
+            ep.push(0.0)
+            em.push(0.0)
+          }
+        }
+        dirs.push(ep)
+        dirs.push(em)
+      }
+      for _k in 0..<2 {
+        let v : Array[Double] = []
+        let mut n2 = 0.0
+        for _d in 0..<dim {
+          let z = mds_gauss(current_rng)
+          v.push(z)
+          n2 = n2 + z * z
+        }
+        let nrm = n2.sqrt()
+        let u : Array[Double] = []
+        if nrm < 1.0e-12 {
+          for d in 0..<dim {
+            u.push(if d == 0 { 1.0 } else { 0.0 })
+          }
+        } else {
+          for d in 0..<dim {
+            u.push(v[d] / nrm)
+          }
+        }
+        dirs.push(u)
+      }
+
+      let mut best_cand : Array[Double] = []
+      let mut best_f = fx
+      let mut improved = false
+      for k in 0..<dirs.length() {
+        if evaluations - restart_start >= per_restart {
+          break
+        }
+        let dir = dirs[k]
+        let mut lx = cx
+        let mut lf = fx
+        let mut ls = step
+        let mut probe = 0
+        while probe < 3 && evaluations - restart_start < per_restart {
+          let cand : Array[Double] = []
+          for d in 0..<dim {
+            cand.push(mds_clip(lx[d] + ls * dir[d], bounds))
+          }
+          let fv = evaluate(f, cand)
+          evaluations = evaluations + 1
+          if fv < lf {
+            lx = cand
+            lf = fv
+            ls = ls * 1.5
+            probe = probe + 1
+          } else {
+            break
+          }
+        }
+        if lf < best_f {
+          best_f = lf
+          best_cand = lx
+          improved = true
+        }
+      }
+
+      if improved {
+        cx = best_cand
+        fx = best_f
+        if fx < best_val {
+          best_val = fx
+          best_pos = mds_copy(cx)
+        }
+        step = step * 1.15
+        if step > span * 0.5 {
+          step = span * 0.5
+        }
+      } else {
+        step = step * 0.5
+        if step < span * 1.0e-6 {
+          break
+        }
+      }
+    }
+    r = r + 1
+    if evaluations == before {
+      break
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
