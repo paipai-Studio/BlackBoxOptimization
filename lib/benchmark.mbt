@@ -2308,6 +2308,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       cross_generation_elitist_algorithm(make_chc_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "MDS",
+    run: (e, d, b, r, f) => {
+      multi_directional_search(make_mds_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

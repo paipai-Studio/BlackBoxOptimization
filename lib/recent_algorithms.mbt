@@ -41119,3 +41119,212 @@ pub fn cross_generation_elitist_algorithm(
     evaluations,
   }
 }
+
+///|
+pub struct MDSConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_mds_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> MDSConfig {
+  MDSConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn mds_copy(x : Array[Double]) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<x.length() {
+    y.push(x[i])
+  }
+  y
+}
+
+///|
+fn mds_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+fn mds_gauss(rng : RNG) -> Double {
+  let u1 = RNG::next(rng)
+  let u2 = RNG::next(rng)
+  let safe = if u1 < 1.0e-12 { 1.0e-12 } else { u1 }
+  (-2.0 * @math.ln(safe)).sqrt() * @math.cos(TWO_PI * u2)
+}
+
+///|
+/// Multi-Directional Search (MDS, 2015). A single point explores a set of
+/// directions that combines the 2*d coordinate directions with a few random
+/// unit directions, and performs a short expanding **line search** along every
+/// direction (up to three probes, each step lengthened by 1.5 on success). The
+/// best improving direction is committed, the global step is expanded on
+/// success and halved on failure, and an exhausted step restarts the trajectory
+/// near the incumbent. This is a distinct deterministic direct-search route:
+/// unlike Hooke-Jeeves (fixed coordinate directions only), Powell (conjugate
+/// directions built from repeated line searches), MADS (poll of mesh points in
+/// coordinate plus random directions, no line search) and CRS (random subset
+/// reflection without line search), MDS combines random directions with
+/// explicit line searches. The schedule depends only on evaluations already
+/// spent, so a larger budget is a strict continuation and the historical best
+/// is monotone. population_size is accepted for a uniform config interface.
+pub fn multi_directional_search(
+  config : MDSConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let per_restart = 400
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut evaluations = 0
+  let mut r = 0
+
+  while evaluations < max_evals {
+    let before = evaluations
+    let restart_start = evaluations
+    let x0 : Array[Double] = []
+    if r % 2 == 0 || best_pos.length() != dim {
+      for _d in 0..<dim {
+        x0.push(bounds.min + RNG::next(current_rng) * span)
+      }
+    } else {
+      for d in 0..<dim {
+        let noise = (RNG::next(current_rng) * 2.0 - 1.0) * span * 0.25
+        x0.push(mds_clip(best_pos[d] + noise, bounds))
+      }
+    }
+    let mut cx = x0
+    let mut fx = evaluate(f, x0)
+    evaluations = evaluations + 1
+    if fx < best_val {
+      best_val = fx
+      best_pos = mds_copy(x0)
+    }
+    let mut step = span * 0.25
+
+    while evaluations - restart_start < per_restart {
+      let dirs : Array[Array[Double]] = []
+      for d in 0..<dim {
+        let ep : Array[Double] = []
+        let em : Array[Double] = []
+        for k in 0..<dim {
+          if k == d {
+            ep.push(1.0)
+            em.push(0.0 - 1.0)
+          } else {
+            ep.push(0.0)
+            em.push(0.0)
+          }
+        }
+        dirs.push(ep)
+        dirs.push(em)
+      }
+      for _k in 0..<2 {
+        let v : Array[Double] = []
+        let mut n2 = 0.0
+        for _d in 0..<dim {
+          let z = mds_gauss(current_rng)
+          v.push(z)
+          n2 = n2 + z * z
+        }
+        let nrm = n2.sqrt()
+        let u : Array[Double] = []
+        if nrm < 1.0e-12 {
+          for d in 0..<dim {
+            u.push(if d == 0 { 1.0 } else { 0.0 })
+          }
+        } else {
+          for d in 0..<dim {
+            u.push(v[d] / nrm)
+          }
+        }
+        dirs.push(u)
+      }
+
+      let mut best_cand : Array[Double] = []
+      let mut best_f = fx
+      let mut improved = false
+      for k in 0..<dirs.length() {
+        if evaluations - restart_start >= per_restart {
+          break
+        }
+        let dir = dirs[k]
+        let mut lx = cx
+        let mut lf = fx
+        let mut ls = step
+        let mut probe = 0
+        while probe < 3 && evaluations - restart_start < per_restart {
+          let cand : Array[Double] = []
+          for d in 0..<dim {
+            cand.push(mds_clip(lx[d] + ls * dir[d], bounds))
+          }
+          let fv = evaluate(f, cand)
+          evaluations = evaluations + 1
+          if fv < lf {
+            lx = cand
+            lf = fv
+            ls = ls * 1.5
+            probe = probe + 1
+          } else {
+            break
+          }
+        }
+        if lf < best_f {
+          best_f = lf
+          best_cand = lx
+          improved = true
+        }
+      }
+
+      if improved {
+        cx = best_cand
+        fx = best_f
+        if fx < best_val {
+          best_val = fx
+          best_pos = mds_copy(cx)
+        }
+        step = step * 1.15
+        if step > span * 0.5 {
+          step = span * 0.5
+        }
+      } else {
+        step = step * 0.5
+        if step < span * 1.0e-6 {
+          break
+        }
+      }
+    }
+    r = r + 1
+    if evaluations == before {
+      break
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
