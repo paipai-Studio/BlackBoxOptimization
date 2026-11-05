@@ -2296,6 +2296,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       conjugate_gradient_method(make_cg_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "DHO",
+    run: (e, d, b, r, f) => {
+      deer_hunting_optimization(make_dho_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

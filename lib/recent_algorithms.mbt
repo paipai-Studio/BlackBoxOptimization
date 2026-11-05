@@ -40773,3 +40773,159 @@ pub fn conjugate_gradient_method(
     evaluations,
   }
 }
+
+///|
+pub struct DHOConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_dho_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> DHOConfig {
+  DHOConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn dho_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+fn dho_copy(x : Array[Double]) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<x.length() {
+    y.push(x[i])
+  }
+  y
+}
+
+///|
+/// Deer Hunting Optimization (Brammya et al., 2019). Hunters are driven by
+/// three behaviours whose strength is modulated by a **continuous angle** and
+/// a shrinking hunting radius: (1) exploration moves toward the leader with an
+/// angle-derived weight cos(theta) in [-1, 1]; (2) chasing follows a
+/// *successor* - a random individual that is better than the hunter, otherwise
+/// the leader; (3) the attack contracts around the leader with an overshoot
+/// term. The angle makes the step a continuous signed fraction of the
+/// leader-difference instead of a fixed coefficient, and the successor gives a
+/// second, rank-dependent reference point. This differs from the red-deer
+/// algorithm (tournament winner and harem jitter), TGA (rank groups) and the
+/// shared three-behaviour skeleton. Elitist replacement (only accepted when the
+/// candidate improves the hunter) plus a separately tracked global best keep
+/// the historical best monotone; the schedule depends only on evaluations
+/// already spent, so a larger budget is a strict continuation of a smaller one.
+/// population_size selects the number of hunters.
+pub fn deer_hunting_optimization(
+  config : DHOConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = config.population_size
+  let pi = 3.141592653589793
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut evaluations = 0
+  for _i in 0..<pop_size {
+    let x : Array[Double] = []
+    for _d in 0..<dim {
+      x.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    let v = evaluate(f, x)
+    evaluations = evaluations + 1
+    pop.push(x)
+    fits.push(v)
+    if v < best_val {
+      best_val = v
+      best_pos = dho_copy(x)
+    }
+  }
+
+  while evaluations < max_evals {
+    let dhf = @math.exp(0.0 - evaluations.to_double() / 2500.0)
+    let radius = span * 0.25 * dhf
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let xi = pop[i]
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.36 {
+        let angle = (RNG::next(current_rng) * 2.0 - 1.0) * pi
+        let ca = @math.cos(angle)
+        for d in 0..<dim {
+          let jitter = (RNG::next(current_rng) * 2.0 - 1.0) * span * 0.10 * dhf
+          cand.push(
+            dho_clip(
+              xi[d] + ca * radius * (best_pos[d] - xi[d]) + jitter,
+              bounds,
+            ),
+          )
+        }
+      } else if r1 < 0.70 {
+        let jr = (RNG::next(current_rng) * pop_size.to_double()).to_int()
+        let j = if jr >= pop_size { pop_size - 1 } else { jr }
+        let succ = if j != i && fits[j] < fits[i] { pop[j] } else { best_pos }
+        let w = 0.5 + 0.5 * RNG::next(current_rng)
+        for d in 0..<dim {
+          let jitter = (RNG::next(current_rng) * 2.0 - 1.0) * span * 0.08 * dhf
+          cand.push(
+            dho_clip(xi[d] + w * radius * (succ[d] - xi[d]) + jitter, bounds),
+          )
+        }
+      } else {
+        let w = RNG::next(current_rng)
+        for d in 0..<dim {
+          let jitter = (RNG::next(current_rng) * 2.0 - 1.0) * span * 0.06 * dhf
+          cand.push(
+            dho_clip(
+              best_pos[d] + w * radius * (xi[d] - best_pos[d]) + jitter,
+              bounds,
+            ),
+          )
+        }
+      }
+      let v = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if v < fits[i] {
+        pop[i] = cand
+        fits[i] = v
+        if v < best_val {
+          best_val = v
+          best_pos = dho_copy(cand)
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
