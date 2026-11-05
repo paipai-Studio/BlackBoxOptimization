@@ -40552,3 +40552,224 @@ pub fn implicit_filtering(
     evaluations,
   }
 }
+
+///|
+pub struct CGConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_cg_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CGConfig {
+  CGConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn cg_copy(x : Array[Double]) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<x.length() {
+    y.push(x[i])
+  }
+  y
+}
+
+///|
+fn cg_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+fn cg_dot(a : Array[Double], b : Array[Double]) -> Double {
+  let mut s = 0.0
+  for i in 0..<a.length() {
+    s = s + a[i] * b[i]
+  }
+  s
+}
+
+///|
+fn cg_gradient(
+  f : (Array[Double]) -> Double,
+  x : Array[Double],
+  h : Double,
+  dim : Int32,
+  b : Bounds,
+) -> Array[Double] {
+  let g : Array[Double] = []
+  for d in 0..<dim {
+    let xp = cg_copy(x)
+    let xm = cg_copy(x)
+    xp[d] = cg_clip(x[d] + h, b)
+    xm[d] = cg_clip(x[d] - h, b)
+    let fp = evaluate(f, xp)
+    let fm = evaluate(f, xm)
+    g.push((fp - fm) / (2.0 * h))
+  }
+  g
+}
+
+///|
+/// Nonlinear conjugate gradient method (Hestenes and Stiefel, 1952) with the
+/// Polak-Ribiere+ update and a backtracking line search. Unlike BFGS it never
+/// stores or updates an approximate inverse Hessian: it only keeps the current
+/// gradient and one search direction, so memory is O(d) instead of O(d^2), and
+/// the search direction is built by conjugating the new steepest-descent
+/// direction with the previous one. Central differences give a higher-accuracy
+/// gradient than the forward differences used by BFGS, which is why the Sphere
+/// accuracy escapes BFGS's grad_h^2 floor. Eight restarts alternate uniform and
+/// incumbent-neighbourhood starts; a failed line search ends the current descent
+/// and the next restart takes over. The schedule depends only on evaluations
+/// already spent, so larger budgets strictly continue smaller ones and the
+/// historical best is monotone. population_size is accepted for a uniform config
+/// interface.
+pub fn conjugate_gradient_method(
+  config : CGConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let grad_h = span * 1.0e-4
+  let per_restart = 250
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut evaluations = 0
+  let mut r = 0
+
+  while evaluations < max_evals {
+    let before_restart = evaluations
+    let restart_start = evaluations
+    let start : Array[Double] = []
+    if r % 2 == 0 || best_pos.length() != dim {
+      for _d in 0..<dim {
+        start.push(bounds.min + RNG::next(current_rng) * span)
+      }
+    } else {
+      for d in 0..<dim {
+        let noise = (RNG::next(current_rng) * 2.0 - 1.0) * span * 0.35
+        start.push(cg_clip(best_pos[d] + noise, bounds))
+      }
+    }
+    let mut x = start
+    let mut fx = evaluate(f, start)
+    evaluations = evaluations + 1
+    if fx < best_val {
+      best_val = fx
+      best_pos = cg_copy(start)
+    }
+
+    let mut grad_ok = false
+    let mut g : Array[Double] = []
+    if evaluations - restart_start + dim * 2 <= per_restart {
+      g = cg_gradient(f, x, grad_h, dim, bounds)
+      evaluations = evaluations + dim * 2
+      grad_ok = true
+    }
+    let mut d : Array[Double] = []
+    if grad_ok {
+      for i in 0..<dim {
+        d.push(0.0 - g[i])
+      }
+    }
+    let mut gg_old = if grad_ok { cg_dot(g, g) } else { 0.0 }
+    let mut iter = 0
+    while grad_ok &&
+          iter < 50 &&
+          evaluations - restart_start + dim * 2 <= per_restart {
+      let dnorm = cg_dot(d, d).sqrt()
+      if dnorm < 1.0e-14 {
+        break
+      }
+      let mut alpha = if dnorm > 1.0e-12 { span * 0.5 / dnorm } else { 1.0 }
+      let mut accepted = false
+      let mut cand : Array[Double] = []
+      let mut fv = fx
+      let mut tries = 0
+      while tries < 5 && evaluations - restart_start < per_restart {
+        cand = []
+        for i in 0..<dim {
+          cand.push(cg_clip(x[i] + alpha * d[i], bounds))
+        }
+        fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        if fv < fx {
+          accepted = true
+          break
+        }
+        alpha = alpha * 0.5
+        tries = tries + 1
+      }
+      if !accepted {
+        break
+      }
+      x = cand
+      fx = fv
+      if fx < best_val {
+        best_val = fx
+        best_pos = cg_copy(cand)
+      }
+      let g_old = g
+      g = cg_gradient(f, x, grad_h, dim, bounds)
+      evaluations = evaluations + dim * 2
+      let gg_new = cg_dot(g, g)
+      if gg_new < 1.0e-24 {
+        break
+      }
+      let mut beta = 0.0
+      if gg_old > 1.0e-24 {
+        let diff : Array[Double] = []
+        for i in 0..<dim {
+          diff.push(g[i] - g_old[i])
+        }
+        beta = cg_dot(g, diff) / gg_old
+        if beta < 0.0 {
+          beta = 0.0
+        }
+      }
+      let nd : Array[Double] = []
+      for i in 0..<dim {
+        nd.push(0.0 - g[i] + beta * d[i])
+      }
+      d = nd
+      gg_old = gg_new
+      iter = iter + 1
+      if iter % 10 == 0 {
+        let reset : Array[Double] = []
+        for i in 0..<dim {
+          reset.push(0.0 - g[i])
+        }
+        d = reset
+      }
+    }
+    if evaluations == before_restart {
+      break
+    }
+    r = r + 1
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

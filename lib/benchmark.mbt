@@ -2290,6 +2290,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       implicit_filtering(make_ifilt_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "CG",
+    run: (e, d, b, r, f) => {
+      conjugate_gradient_method(make_cg_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

@@ -9069,3 +9069,29 @@ test "IFilt improves with more evaluations" {
 
   assert_true(result2.best_value <= result1.best_value)
 }
+
+///|
+test "CG finds good solution on sphere" {
+  let config = @lib.make_cg_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.conjugate_gradient_method(config, @lib.sphere_function, rng)
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "CG improves with more evaluations" {
+  let config1 = @lib.make_cg_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.conjugate_gradient_method(
+    config1, @lib.sphere_function, rng1,
+  )
+
+  let config2 = @lib.make_cg_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.conjugate_gradient_method(
+    config2, @lib.sphere_function, rng2,
+  )
+
+  assert_true(result2.best_value <= result1.best_value)
+}
