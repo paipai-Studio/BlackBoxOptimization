@@ -40382,3 +40382,173 @@ pub fn separable_cma_es(
     evaluations,
   }
 }
+
+///|
+pub struct IFiltConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_ifilt_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> IFiltConfig {
+  IFiltConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn ifilt_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+fn ifilt_copy(x : Array[Double]) -> Array[Double] {
+  let y : Array[Double] = []
+  for i in 0..<x.length() {
+    y.push(x[i])
+  }
+  y
+}
+
+///|
+/// Implicit Filtering (Kelley, 1983/2001). Rather than estimating one gradient
+/// with a single tiny step, the method sweeps a **geometric ladder of finite
+/// difference scales** from large to small: at each level a central-difference
+/// gradient with spacing h is computed and a projected steepest-descent step of
+/// length proportional to h is taken with a short backtracking line search; when
+/// a level stops making progress, h is halved and the smoother model of the
+/// next level is used. Large h acts as an implicit low-pass filter for rough or
+/// noisy objectives, while small h recovers local accuracy. This is a distinct
+/// derivative-based deterministic route: unlike BFGS there is no inverse-Hessian
+/// curvature memory and no Armijo line search; unlike COBYLA there is no linear
+/// model or trust-region radius; and unlike NEWUOA there is no quadratic model
+/// and no Hessian estimate. Fixed 700-evaluation restarts (alternating random
+/// starts and incumbent-neighbourhood starts) keep the historical best monotone,
+/// and the schedule depends only on evaluations already spent, so a larger budget
+/// is a strict continuation of a smaller one. population_size is accepted for a
+/// uniform config interface.
+pub fn implicit_filtering(
+  config : IFiltConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let per_restart = 1200
+  let base_h = span * 0.16
+  let min_h = span * 1.0e-3
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut evaluations = 0
+  let mut r = 0
+
+  while evaluations < max_evals && r < 8 {
+    let restart_start = evaluations
+    let start : Array[Double] = []
+    if r % 2 == 0 || best_pos.length() != dim {
+      for _d in 0..<dim {
+        start.push(bounds.min + RNG::next(current_rng) * span)
+      }
+    } else {
+      for d in 0..<dim {
+        let noise = (RNG::next(current_rng) * 2.0 - 1.0) * span * 0.35
+        start.push(ifilt_clip(best_pos[d] + noise, bounds))
+      }
+    }
+    let mut cx = start
+    let mut fx = evaluate(f, start)
+    evaluations = evaluations + 1
+    if fx < best_val {
+      best_val = fx
+      best_pos = ifilt_copy(start)
+    }
+
+    let mut h = base_h
+    while h >= min_h &&
+          evaluations < max_evals &&
+          evaluations - restart_start < per_restart {
+      let mut level_steps = 0
+      let mut level_fail = 0
+      while level_steps < 10 &&
+            evaluations + dim * 2 <= max_evals &&
+            evaluations - restart_start < per_restart {
+        let g : Array[Double] = []
+        let mut gnorm2 = 0.0
+        for d in 0..<dim {
+          let xp = ifilt_copy(cx)
+          let xm = ifilt_copy(cx)
+          xp[d] = ifilt_clip(cx[d] + h, bounds)
+          xm[d] = ifilt_clip(cx[d] - h, bounds)
+          let fp = evaluate(f, xp)
+          let fm = evaluate(f, xm)
+          evaluations = evaluations + 2
+          let gd = (fp - fm) / (2.0 * h)
+          g.push(gd)
+          gnorm2 = gnorm2 + gd * gd
+        }
+        if gnorm2 < 1.0e-24 {
+          break
+        }
+        let gnorm = gnorm2.sqrt()
+        let mut accepted = false
+        let mut alpha = h * 2.0
+        let mut tries = 0
+        while tries < 5 && evaluations < max_evals {
+          let cand : Array[Double] = []
+          for d in 0..<dim {
+            cand.push(ifilt_clip(cx[d] - alpha * g[d] / gnorm, bounds))
+          }
+          let fv = evaluate(f, cand)
+          evaluations = evaluations + 1
+          if fv < fx {
+            cx = cand
+            fx = fv
+            accepted = true
+            if fv < best_val {
+              best_val = fv
+              best_pos = ifilt_copy(cand)
+            }
+            break
+          }
+          alpha = alpha * 0.5
+          tries = tries + 1
+        }
+        level_steps = level_steps + 1
+        if accepted {
+          level_fail = 0
+        } else {
+          level_fail = level_fail + 1
+        }
+        if level_fail >= 2 {
+          break
+        }
+      }
+      h = h * 0.5
+    }
+    r = r + 1
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
