@@ -2404,6 +2404,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       crowding_genetic_algorithm(make_crowd_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "PBT",
+    run: (e, d, b, r, f) => {
+      population_based_training(make_pbt_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

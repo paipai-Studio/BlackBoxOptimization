@@ -44964,3 +44964,195 @@ pub fn crowding_genetic_algorithm(
     evaluations,
   }
 }
+
+// ===== PBT: population-based training (2017) =====
+
+///|
+pub struct PbtConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_pbt_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> PbtConfig {
+  PbtConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn pbt_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Population-Based Training (PBT, Jaderberg et al. 2017, DeepMind). The
+/// only algorithm in the library whose **evolving objects are the
+/// algorithm's own parameters**: every individual carries a private
+/// hyperparameter pair (mutation stride `step_i` ∈ [0.02, 0.30]·span and
+/// pull toward the incumbent best `pull_i` ∈ [0.1, 1.5], seeded uniformly),
+/// and the search alternates between two loops — *regular steps* where each
+/// individual moves using **its own** hyperparameters (pull-weighted drift
+/// toward the incumbent best plus a stride-scaled Gaussian jitter,
+/// improvement-only replacement), and a **periodic exploit-then-explore
+/// cycle** on the hyperparameters alone (positions frozen): *exploit* —
+/// below-median individuals copy the hyperparameter pair of a random
+/// above-median individual (bad configurations die, good configurations
+/// spread), then *explore* — every pair is perturbed (stride in log-space
+/// ×exp(N(0,0.3)), pull additively ±0.1), clamped. Every other algorithm
+/// keeps its update rule fixed or adapts a scalar (1+1ES' 1/5 rule, jDE's
+/// per-individual F/CR, ALNS' operator weights, DEO's radius) — PBT makes
+/// the **configuration itself a chromosome**, so the update rule evolves
+/// with the population and good settings propagate without any hand-tuned
+/// schedule. The cycle runs every 8 generations; crf = e^{-t/2500} decays
+/// the global stride scale. Everything depends only on evaluations already
+/// spent, so a larger budget is a strict continuation and the historical
+/// best is monotone. population_size is accepted for a uniform config
+/// interface but not used (the population is fixed at 25).
+pub fn population_based_training(
+  config : PbtConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = 25
+  let exploit_every = 8
+
+  // population plus each individual's private, evolvable hyperparameters
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let step : Array[Double] = []
+  let pull : Array[Double] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut gen = 0
+  for _j in 0..<pop_size {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    let st = 0.05 + RNG::next(current_rng) * 0.15
+    let pl = 0.2 + RNG::next(current_rng) * 1.0
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pop.push(ind)
+      fits.push(fv)
+      step.push(st)
+      pull.push(pl)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pop.push(ind)
+      fits.push(1.0e300)
+      step.push(st)
+      pull.push(pl)
+    }
+  }
+
+  while evaluations < max_evals {
+    gen = gen + 1
+    // regular steps: each individual moves with its own hyperparameters
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let crf = @math.exp(-evaluations.to_double() / 2500.0)
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let u1 = RNG::next(current_rng)
+        let u2 = RNG::next(current_rng)
+        let z = box_muller(u1, u2)
+        cand.push(
+          pbt_clip(
+            pop[i][d] +
+            pull[i] * (best_pos[d] - pop[i][d]) +
+            z * span * step[i] * crf,
+            bounds,
+          ),
+        )
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < fits[i] {
+        pop[i] = cand
+        fits[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(cand[d])
+          }
+        }
+      }
+    }
+    // periodic exploit-then-explore on the hyperparameters (positions
+    // stay frozen): below-median individuals adopt a random above-median
+    // individual's configuration, then every configuration is perturbed
+    if gen % exploit_every == 0 {
+      let order = sort_indices(fits)
+      let mid = pop_size / 2
+      for k in mid..<pop_size {
+        let i = order[k]
+        let wj = mid + (RNG::next(current_rng) * mid.to_double()).to_int()
+        let wi = if wj >= pop_size { pop_size - 1 } else { wj }
+        let w = order[wi]
+        step[i] = step[w]
+        pull[i] = pull[w]
+      }
+      for i in 0..<pop_size {
+        let u1 = RNG::next(current_rng)
+        let u2 = RNG::next(current_rng)
+        let z = box_muller(u1, u2)
+        let nstep = step[i] * @math.exp(z * 0.3)
+        step[i] = if nstep < 0.02 {
+          0.02
+        } else if nstep > 0.30 {
+          0.30
+        } else {
+          nstep
+        }
+        let u3 = RNG::next(current_rng)
+        let npull = pull[i] + (2.0 * u3 - 1.0) * 0.1
+        pull[i] = if npull < 0.1 {
+          0.1
+        } else if npull > 1.5 {
+          1.5
+        } else {
+          npull
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
