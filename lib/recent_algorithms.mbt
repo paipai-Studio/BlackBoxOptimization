@@ -46242,3 +46242,180 @@ pub fn orthogonal_genetic_algorithm(
     evaluations,
   }
 }
+
+// ===== G3: generalized generation gap with parent-centric crossover (2003) =====
+
+///|
+pub struct G3Config {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_g3_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> G3Config {
+  G3Config::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn g3_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Generalized Generation Gap with Parent-Centric Crossover (G3-PCX, Deb,
+/// Anand & Joshi 2003). Each generation the main parent is chosen elitist or
+/// random (50/50) and two distinct reference members provide a mean; two
+/// children are
+/// generated *around the main parent* along the direction from that mean
+/// (sigma_xi = 0.1 of |D|) with per-dimension Gaussian noise scaled by |D|
+/// (sigma_eta = 0.1) — a *parent-centric* operator: offspring explore the
+/// vicinity of the elite parent along the parent configuration rather than
+/// mating-centre interpolation (SBX/BLX), block transplant (GOMEA) or line
+/// extrapolation (CHC), a crossover family no other algorithm in the library
+/// uses. A child replaces the worst member only when it beats it (generation
+/// gap with competition — inferior children are discarded). The direction
+/// term self-scales as the population converges
+/// (|D| shrinks with it), so late-stage refinement needs no step schedule; a
+/// span * 0.007 noise floor guards against a fully collapsed population (the
+/// MKE diversity lesson). All randomness depends only on evaluations already
+/// spent, so a larger budget is a strict continuation and the historical
+/// best is monotone.
+pub fn generalized_generation_gap_pcx(
+  config : G3Config,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = if config.population_size < 8 {
+    8
+  } else {
+    config.population_size
+  }
+  let mut evaluations = 0
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _i in 0..<pop_size {
+    let x = random_solution(dim, bounds, current_rng)
+    let fv = evaluate(f, x)
+    evaluations = evaluations + 1
+    pop.push(x)
+    fits.push(fv)
+    if fv < best_val {
+      best_val = fv
+      best_pos = []
+      for d in 0..<dim {
+        best_pos.push(x[d])
+      }
+    }
+  }
+
+  while evaluations < max_evals {
+    if evaluations + 2 > max_evals {
+      break
+    }
+    // main parent: elitist half the time, random otherwise (exploration /
+    // development balance, the MKE diversity lesson); the two references are
+    // the other distinct members of {elite, r1, r2}
+    let mut elite = 0
+    for i in 1..<pop_size {
+      if fits[i] < fits[elite] {
+        elite = i
+      }
+    }
+    let r1 = (RNG::next(current_rng) * pop_size.to_double()).to_int() % pop_size
+    let mut r2 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+      pop_size
+    if r2 == r1 {
+      r2 = (r2 + 1) % pop_size
+    }
+    let main = if RNG::next(current_rng) < 0.66 { elite } else { r1 }
+    let refs : Array[Int32] = []
+    if elite != main {
+      refs.push(elite)
+    }
+    if r1 != main && r1 != elite {
+      refs.push(r1)
+    }
+    if r2 != main && r2 != elite && r2 != r1 {
+      refs.push(r2)
+    }
+    let mua = if refs.length() >= 1 { refs[0] } else { main }
+    let mub = if refs.length() >= 2 { refs[1] } else { mua }
+    let dir : Array[Double] = []
+    let mut dnorm = 0.0
+    for d in 0..<dim {
+      let mu = (pop[mua][d] + pop[mub][d]) * 0.5
+      let v = pop[main][d] - mu
+      dir.push(v)
+      dnorm = dnorm + v * v
+    }
+    dnorm = dnorm.sqrt()
+    // noise scale: sigma_eta * |D| with a floor to keep exploration alive
+    let ns = if 0.1 * dnorm > span * 0.007 { 0.1 * dnorm } else { span * 0.007 }
+    for _c in 0..<2 {
+      if evaluations + 1 > max_evals {
+        break
+      }
+      let child : Array[Double] = []
+      for d in 0..<dim {
+        let u1 = RNG::next(current_rng)
+        let u2 = RNG::next(current_rng)
+        let z = box_muller(u1, u2)
+        let v = pop[main][d] + 0.1 * dir[d] + z * ns
+        child.push(g3_clip(v, bounds))
+      }
+      let fv = evaluate(f, child)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(child[d])
+        }
+      }
+      // generation gap with competition: replace the worst member only when
+      // the child beats it (inferior children are discarded so they cannot
+      // pollute the pool)
+      let mut worst = 0
+      for i in 1..<pop_size {
+        if fits[i] > fits[worst] {
+          worst = i
+        }
+      }
+      if fv < fits[worst] {
+        pop[worst] = child
+        fits[worst] = fv
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

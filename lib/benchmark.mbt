@@ -2438,6 +2438,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       orthogonal_genetic_algorithm(make_oga_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "G3",
+    run: (e, d, b, r, f) => {
+      generalized_generation_gap_pcx(make_g3_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
