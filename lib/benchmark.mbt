@@ -2358,6 +2358,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       anderson_acceleration(make_anderson_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "GWSO",
+    run: (e, d, b, r, f) => {
+      great_white_shark_optimizer(make_gwso_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

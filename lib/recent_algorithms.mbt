@@ -43344,3 +43344,169 @@ pub fn anderson_acceleration(
     evaluations,
   }
 }
+
+// ===== GWSO: great white shark optimizer (Mallick et al. 2022) =====
+
+///|
+pub struct GwsoConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_gwso_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> GwsoConfig {
+  GwsoConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn gwso_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Great White Shark Optimizer (GWSO, Mallick et al. 2022). A swarm method
+/// whose defining feature is a **sine-phase-modulated wave envelope**: every
+/// shark carries a persistent phase `phase_i ∈ [0, 2π]` and the wave-motion
+/// step is scaled by `|sin(2π·t/500 + phase_i)|` with a fixed 500-evaluation
+/// period — the envelope oscillates per shark with individual phase offsets,
+/// so at any moment some sharks ride wave crests (large exploratory steps)
+/// while others ride troughs (fine refinement), a spatial-temporal division
+/// of labor that no linear / exponential / power-law / heavy-tailed step
+/// schedule in the library provides. Behaviors: blood-scent tracking (toward
+/// the best with differential kicks), wave motion (envelope-scaled
+/// oscillation), and deep cruising (random walk with a weak pull toward the
+/// best). The schedule depends only on evaluations already spent, so a
+/// larger budget is a strict continuation and the historical best is
+/// monotone.
+pub fn great_white_shark_optimizer(
+  config : GwsoConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = 25
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let phase : Array[Double] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _j in 0..<pop_size {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    phase.push(RNG::next(current_rng) * TWO_PI)
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pop.push(ind)
+      fits.push(fv)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pop.push(ind)
+      fits.push(1.0e300)
+    }
+  }
+
+  while evaluations < max_evals {
+    let gsf = @math.exp(-evaluations.to_double() / 2500.0)
+    let wave_t = evaluations.to_double() / 500.0
+    let mut consumed = 0
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let ph = phase[i]
+      let raw = @math.sin(TWO_PI * wave_t + ph)
+      let wave = raw.abs()
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.44 {
+        // blood-scent tracking: toward the best with differential kicks
+        let p = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let q = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        for d in 0..<dim {
+          let v = pop[i][d] +
+            0.8 * gsf * (best_pos[d] - pop[i][d]) +
+            0.4 * (pop[p][d] - pop[q][d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10 * gsf
+          cand.push(gwso_clip(v, bounds))
+        }
+      } else if r1 < 0.74 {
+        // wave motion: sine-envelope scaled oscillation (per-shark phase)
+        let p = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let q = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        for d in 0..<dim {
+          let v = pop[i][d] +
+            wave * 0.6 * (pop[p][d] - pop[q][d]) +
+            wave * (2.0 * RNG::next(current_rng) - 1.0) * span * 0.16 * gsf
+          cand.push(gwso_clip(v, bounds))
+        }
+      } else {
+        // deep cruising: random walk with a weak pull toward the best
+        for d in 0..<dim {
+          let v = pop[i][d] +
+            0.3 * gsf * (best_pos[d] - pop[i][d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.15 * gsf * wave
+          cand.push(gwso_clip(v, bounds))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      consumed = consumed + 1
+      if fv < fits[i] {
+        fits[i] = fv
+        pop[i] = cand
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(cand[d])
+          }
+        }
+      }
+    }
+    if consumed == 0 {
+      break
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

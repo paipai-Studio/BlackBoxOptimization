@@ -1,10 +1,10 @@
 # BlackBoxOptimization
 
-基于 MoonBit 实现的黑盒优化算法框架，支持 352 种经典优化算法，提供统一的接口和基准测试框架。
+基于 MoonBit 实现的黑盒优化算法框架，支持 353 种经典优化算法，提供统一的接口和基准测试框架。
 
 ## 算法分类
 
-本框架实现了 **352 种**黑盒优化算法，按设计灵感和机制分为以下类别：
+本框架实现了 **353 种**黑盒优化算法，按设计灵感和机制分为以下类别：
 
 ### 🔍 单点搜索算法
 最简单的优化策略，从单个初始解出发，通过迭代改进逐步逼近最优值。
@@ -159,6 +159,7 @@
 | 饥饿游戏搜索 | HGS | 饥饿权重驱动的自适应搜索 (2021) |
 | 爬行动物搜索算法 | RSA | 包围/狩猎/协调多阶段搜索 (2022) |
 | 海洋捕食者算法 | MPA | 布朗/Levy 三阶段速度比捕食机制 (2020) |
+| 大白鲨优化算法 | GWSO | **正弦相位调制波动包络**——每条鲨鱼持持久相位 phase∈[0,2π]，波浪步幅按 \|sin(2π·t/500+phase)\| 振荡（500 评估固定周期、逐个体错相），波峰大步探索/波谷小步精修形成时空分工；血腥味追踪（朝最优+差分踢）/波浪运动/深潜巡游三行为 (2022) |
 | 金鹰优化器 | GEO | 攻击-巡航双倾向的正交向量搜索 (2021) |
 | 非洲秃鹫优化 | AVOA | 饥饿因子驱动的探索-开发切换 (2021) |
 | 白鲨优化器 | WSO | 速度惯性+猎物跟随的白鲨觅食 (2022) |
@@ -373,7 +374,7 @@
 | WCA | `num_rivers` | 4 |
 | MFO | `spiral_constant` | 1.0 |
 | WOA | `spiral_constant` | 1.0 |
-| 其余算法 (GWO, SCA, ALO, HHO, SalpSA, AEO, SOS, GBPSO, MSA, PFA, CPA, BCO, FFOA, FWA, PIO, HBA, POA, TSA, GJO, GOA, SOA, GTO, SMA, AO, ChOA, DO, ZOA, MRFO, HGS, RSA, MPA, GEO, AVOA, WSO, COA, OOA, TDO, PDO, NGO, BWO, GO, WaOA, ABC, DBO, TSO, KOA, FHO, SO, MGO, HPO, AHA, BKA, ARO, FOX, DMO, RSO, EVO, EEFO, YSGA, CapSA, SWO, GAO, MAO, COY, BES, GOOSE, SHO, ROA, HOA, BWA, CPSO, LPSO, WHO, BOA, SBO, ACOR, QPSO, UPSO, RTH, COOT, DOA, STOA, GKSO, FLA, HO, NMRA, FFO, EPO, CPO, MTBO, CryStAl, NOA, ESOA, MOA, AOS, MA, SSO, SLnO, FOA, SFO, NNA, PBO, FSS, CFO, CGO, CDO, ILS, SCE, GRASP, BO, FSA, SMO, HLO, FDA, CRO, AAA, VSA, VPL, WEO, SNS, TCO, RO, GbSA, BA, CO, CSS, MBA, PCA, IMO, EMA, WCO, AEFA, OIO, LAPO, FGBO, EA, LAHC, HuS, RRT, NRO, HTS, PGO, IWD, RFD, LSA, SS, OBA, APO, HBO, SAO, BRO, EFO, GBMO, DSA, GSK, ALNS, SGO, ASO, BCMO, MKE, RFO, SAR, ChSA, RDA, SqSA, Puma, StMO, SFOA, ABO, Gannet, Narwhal, Serval, ChSO, PR, CrSO, JS, WSA, SeHO, WBO, OWL, RRO, SaFO, GPC, SSD, FDO, CFA, OPA, APuf, WPA, Racc, Monkey, BSwA, TGA, PPA, HBMO, Crayfish, QSA, Starfish, TBO, Lyrebird, SEOA, GFO, DEO, BAS, ManSA, EWA, GrSA, FrOA, ChRO, SPBO, PTO, CLPSO, ExtO, BFGS, SOMA, SDS, DHO) | 仅需 `population_size` | 25 |
+| 其余算法 (GWO, SCA, ALO, HHO, SalpSA, AEO, SOS, GBPSO, MSA, PFA, CPA, BCO, FFOA, FWA, PIO, HBA, POA, TSA, GJO, GOA, SOA, GTO, SMA, AO, ChOA, DO, ZOA, MRFO, HGS, RSA, MPA, GEO, AVOA, WSO, COA, OOA, TDO, PDO, NGO, BWO, GO, WaOA, ABC, DBO, TSO, KOA, FHO, SO, MGO, HPO, AHA, BKA, ARO, FOX, DMO, RSO, EVO, EEFO, YSGA, CapSA, SWO, GAO, MAO, COY, BES, GOOSE, SHO, ROA, HOA, BWA, CPSO, LPSO, WHO, BOA, SBO, ACOR, QPSO, UPSO, RTH, COOT, DOA, STOA, GKSO, FLA, HO, NMRA, FFO, EPO, CPO, MTBO, CryStAl, NOA, ESOA, MOA, AOS, MA, SSO, SLnO, FOA, SFO, NNA, PBO, FSS, CFO, CGO, CDO, ILS, SCE, GRASP, BO, FSA, SMO, HLO, FDA, CRO, AAA, VSA, VPL, WEO, SNS, TCO, RO, GbSA, BA, CO, CSS, MBA, PCA, IMO, EMA, WCO, AEFA, OIO, LAPO, FGBO, EA, LAHC, HuS, RRT, NRO, HTS, PGO, IWD, RFD, LSA, SS, OBA, APO, HBO, SAO, BRO, EFO, GBMO, DSA, GSK, ALNS, SGO, ASO, BCMO, MKE, RFO, SAR, ChSA, RDA, SqSA, Puma, StMO, SFOA, ABO, Gannet, Narwhal, Serval, ChSO, PR, CrSO, JS, WSA, SeHO, WBO, OWL, RRO, SaFO, GPC, SSD, FDO, CFA, OPA, APuf, WPA, Racc, Monkey, BSwA, TGA, PPA, HBMO, Crayfish, QSA, Starfish, TBO, Lyrebird, SEOA, GFO, DEO, BAS, ManSA, EWA, GrSA, FrOA, ChRO, SPBO, PTO, CLPSO, ExtO, BFGS, SOMA, SDS, DHO, GWSO) | 仅需 `population_size` | 25 |
 
 ### 📐 确定性直接搜索
 无需梯度信息，通过几何模式进行直接搜索，适合不可导函数。
@@ -585,7 +586,7 @@ moon run main
 ### 运行测试
 
 ```bash
-# 运行所有测试（726 个测试用例）
+# 运行所有测试（728 个测试用例）
 moon test
 
 # 代码检查
@@ -1045,7 +1046,7 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | **🔍 单点搜索** | 随机搜索、爬山法、模拟退火、SPSA、盆地跳跃、BAS、PTO、DAnl、SQA、PA、Demon、WL、ASA、MLSL | 简单、易于实现，适合低维问题 |
 | **🔧 局部搜索** | 禁忌搜索、引导局部搜索、大洪水、变邻域、阈值接受 | 强化局部开发，避免陷入局部最优 |
 | **🧬 进化算法** | DE、GA、jDE、SHADE、LSHADE、JADE、SaDE、Memetic、CLONALG、OAIN、ICA、BBO、BSA、CHC、CC、MGA、CellGA、GOMEA、SPSO、OSA | 基于种群进化，鲁棒性好 |
-| **🐝 群体智能** | PSO、萤火虫、蚁群、蜂群、灰狼、鲸群、蝙蝠、和声、麻雀搜索、哈里斯鹰、GOA、SOA、CSO、GTO、SMA、AO、ChOA、DO、ZOA、CPSO、LPSO、QPSO、UPSO、ACOR、COOT、DOA、STOA、GKSO、FLA、HO、NMRA、FFO、EPO、CPO、MTBO、CryStAl、NOA、ESOA、MOA、AOS、MA、SSO、SLnO、FOA、SFO、NNA、PBO、FSS、CFO、CGO、CDO、ILS、SCE、GRASP、BO、FSA、SMO、HLO、FDA、CRO、AAA、VSA、VPL、WEO、SNS、TCO、RO、GbSA、BA、CO、CSS、MBA、PCA、IMO、EMA、WCO、AEFA、OIO、LAPO、FGBO、EA、LAHC、HuS、RRT、NRO、HTS、PGO、IWD、RFD、LSA、SS、OBA、APO、HBO、SAO、BRO、EFO、GBMO、DSA、GSK、ALNS、SGO、ASO、BCMO、MKE、RFO、SAR、ChSA、RDA、SqSA、Puma、StMO、SFOA、ABO、Gannet、Narwhal、Serval、ChSO、PR、CrSO、JS、WSA、SeHO、WBO、OWL、RRO、SaFO、GPC、SSD、FDO、CFA、OPA、APuf、WPA、Racc、Monkey、BSwA、TGA、PPA、HBMO、Crayfish、QSA、Starfish、TBO、Lyrebird、SEOA、GFO、DEO、ManSA、EWA、GrSA、FrOA、ChRO、SPBO、CLPSO、ExtO、SOMA、SDS、DHO 等 | 基于群体行为，全局搜索能力强 |
+| **🐝 群体智能** | PSO、萤火虫、蚁群、蜂群、灰狼、鲸群、蝙蝠、和声、麻雀搜索、哈里斯鹰、GOA、SOA、CSO、GTO、SMA、AO、ChOA、DO、ZOA、CPSO、LPSO、QPSO、UPSO、ACOR、COOT、DOA、STOA、GKSO、FLA、HO、NMRA、FFO、EPO、CPO、MTBO、CryStAl、NOA、ESOA、MOA、AOS、MA、SSO、SLnO、FOA、SFO、NNA、PBO、FSS、CFO、CGO、CDO、ILS、SCE、GRASP、BO、FSA、SMO、HLO、FDA、CRO、AAA、VSA、VPL、WEO、SNS、TCO、RO、GbSA、BA、CO、CSS、MBA、PCA、IMO、EMA、WCO、AEFA、OIO、LAPO、FGBO、EA、LAHC、HuS、RRT、NRO、HTS、PGO、IWD、RFD、LSA、SS、OBA、APO、HBO、SAO、BRO、EFO、GBMO、DSA、GSK、ALNS、SGO、ASO、BCMO、MKE、RFO、SAR、ChSA、RDA、SqSA、Puma、StMO、SFOA、ABO、Gannet、Narwhal、Serval、ChSO、PR、CrSO、JS、WSA、SeHO、WBO、OWL、RRO、SaFO、GPC、SSD、FDO、CFA、OPA、APuf、WPA、Racc、Monkey、BSwA、TGA、PPA、HBMO、Crayfish、QSA、Starfish、TBO、Lyrebird、SEOA、GFO、DEO、ManSA、EWA、GrSA、FrOA、ChRO、SPBO、CLPSO、ExtO、SOMA、SDS、DHO、GWSO 等 | 基于群体行为，全局搜索能力强 |
 | **📐 确定性直接搜索** | Nelder-Mead、Hooke-Jeeves、Powell、Rosenbrock、CRS、DIRECT、BFGS、COBYLA、MADS、NEWUOA、MCS、PRAXIS、BOBYQA、GSS、Subplex、LBB、MTS、IFilt、CG、MDS、BB、Anderson | 无需梯度（或数值梯度近似），适合不可导函数 |
 | **🧮 进化策略** | CMA-ES、ES、xNES、1+1ES、sepCMA | 协方差/步长自适应，适合病态问题 |
 | **📊 估计分布** | CEM、SFS、PBIL、UMDA、cGA、NS、TPE、EGO、GR | 基于概率分布/代理模型估计，适合连续优化 |
