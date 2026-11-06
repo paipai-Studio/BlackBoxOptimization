@@ -2320,6 +2320,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       cooperative_coevolution(make_cc_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "MGA",
+    run: (e, d, b, r, f) => {
+      micro_genetic_algorithm(make_mga_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
