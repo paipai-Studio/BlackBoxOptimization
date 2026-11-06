@@ -1,10 +1,10 @@
 # BlackBoxOptimization
 
-基于 MoonBit 实现的黑盒优化算法框架，支持 353 种经典优化算法，提供统一的接口和基准测试框架。
+基于 MoonBit 实现的黑盒优化算法框架，支持 354 种经典优化算法，提供统一的接口和基准测试框架。
 
 ## 算法分类
 
-本框架实现了 **353 种**黑盒优化算法，按设计灵感和机制分为以下类别：
+本框架实现了 **354 种**黑盒优化算法，按设计灵感和机制分为以下类别：
 
 ### 🔍 单点搜索算法
 最简单的优化策略，从单个初始解出发，通过迭代改进逐步逼近最优值。
@@ -394,6 +394,7 @@
 | 主成分方向搜索 | PRAXIS | 每轮沿各方向做抛物线线搜索，扫掠后以方向集的加权主成分轴置换最不产出的方向，位移方向作为新方向，周期性重置坐标基 (1973) |
 | 有界二次近似优化 | BOBYQA | 中心差分构建全二次模型（梯度/对角二阶导/交叉项）+ 信赖域牛顿步并投影到边界，成功扩/失败缩，停滞时梯度下降回退与最优邻域重启 (2009) |
 | Barzilai-Borwein 梯度法 | BB | **两点差分估计标量步长**（BB1=sᵀs/sᵀy 与 BB2=sᵀy/yᵀy 交替，Raydan 1997）+ **非单调接受**（Grippo-Lampariello-Lucidi：允许暂时劣于最近 10 步记录以跳出浅坑，区别于 Armijo 单调线搜索）+ 回溯减半与停滞向最优邻域逃逸；无矩阵、无矩累积、无信赖域，单标量步长即全部机制 (1988) |
+| 响应面方法 | RSM | **中心复合设计采样 + 含交叉项二阶模型最小二乘拟合**——中心复合设计（中心复用已知值 + 2d 轴点 + 每坐标对一个配对点）采样后，正则化最小二乘拟合含全部 C(d,2) 交叉项的完整二次模型（1+d+d+C(d,2) 参数），由含交叉项的对称 Hessian 解牛顿方向并做步长倍增/减半的自适应线搜索；区别于 NEWUOA/BOBYQA 的逐维差分对角曲率——RSM 的整体最小二乘能捕获变量交叉耦合，两轮无改进则收缩设计半径并回到最优 (1951) |
 | 安德森加速 | Anderson | **残差最小二乘混合外推**——维护最近 6 个迭代点与梯度下降映射残差的环形窗口，每 5 步解一次增广正规方程（正则化 Gram 矩阵 + 部分主元高斯消元）得到线性组合系数，加速点为历史点的残差混合并经信赖域（0.3·span）投影；与基础梯度步取优、严格改进才前进；多点残差混合机制区别于 BB 标量割线步长、BFGS 矩阵累积与 CG 共轭方向 (1965) |
 | 黄金分割搜索 | GSS | 逐坐标黄金分割线搜索（两个内点按 0.618 收缩区间），区间按成败扩张/收缩，停滞时最优邻域跳跃 (1953) |
 | 子空间单纯形优化 | Subplex | 将坐标分成小组，在子空间内运行 Nelder-Mead 单纯形（其余坐标固定），逐组轮换并每轮旋转分组；逐维边缘长度按组成败扩张/收缩 (1990) |
@@ -407,7 +408,7 @@
 |------|----------|--------|
 | Nelder-Mead | `reflection_coeff` (α), `expansion_coeff` (γ), `contraction_coeff` (ρ), `shrink_coeff` (σ) | 1.0, 2.0, 0.5, 0.5 |
 | Hooke-Jeeves | `initial_step`, `step_reduction`, `min_step` | 0.5, 0.5, 1e-6 |
-| Powell / Rosenbrock / CRS / DIRECT / COBYLA / MADS / NEWUOA / MCS / PRAXIS / BOBYQA / GSS / Subplex / LBB / MTS / IFilt / CG / MDS / BB / Anderson | 仅需 `population_size` | 25 |
+| Powell / Rosenbrock / CRS / DIRECT / COBYLA / MADS / NEWUOA / MCS / PRAXIS / BOBYQA / GSS / Subplex / LBB / MTS / IFilt / CG / MDS / BB / Anderson / RSM | 仅需 `population_size` | 25 |
 
 ### 🧮 进化策略
 基于概率分布的参数自适应优化，适合复杂病态问题。
@@ -586,7 +587,7 @@ moon run main
 ### 运行测试
 
 ```bash
-# 运行所有测试（728 个测试用例）
+# 运行所有测试（729 个测试用例）
 moon test
 
 # 代码检查
@@ -1047,7 +1048,7 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 | **🔧 局部搜索** | 禁忌搜索、引导局部搜索、大洪水、变邻域、阈值接受 | 强化局部开发，避免陷入局部最优 |
 | **🧬 进化算法** | DE、GA、jDE、SHADE、LSHADE、JADE、SaDE、Memetic、CLONALG、OAIN、ICA、BBO、BSA、CHC、CC、MGA、CellGA、GOMEA、SPSO、OSA | 基于种群进化，鲁棒性好 |
 | **🐝 群体智能** | PSO、萤火虫、蚁群、蜂群、灰狼、鲸群、蝙蝠、和声、麻雀搜索、哈里斯鹰、GOA、SOA、CSO、GTO、SMA、AO、ChOA、DO、ZOA、CPSO、LPSO、QPSO、UPSO、ACOR、COOT、DOA、STOA、GKSO、FLA、HO、NMRA、FFO、EPO、CPO、MTBO、CryStAl、NOA、ESOA、MOA、AOS、MA、SSO、SLnO、FOA、SFO、NNA、PBO、FSS、CFO、CGO、CDO、ILS、SCE、GRASP、BO、FSA、SMO、HLO、FDA、CRO、AAA、VSA、VPL、WEO、SNS、TCO、RO、GbSA、BA、CO、CSS、MBA、PCA、IMO、EMA、WCO、AEFA、OIO、LAPO、FGBO、EA、LAHC、HuS、RRT、NRO、HTS、PGO、IWD、RFD、LSA、SS、OBA、APO、HBO、SAO、BRO、EFO、GBMO、DSA、GSK、ALNS、SGO、ASO、BCMO、MKE、RFO、SAR、ChSA、RDA、SqSA、Puma、StMO、SFOA、ABO、Gannet、Narwhal、Serval、ChSO、PR、CrSO、JS、WSA、SeHO、WBO、OWL、RRO、SaFO、GPC、SSD、FDO、CFA、OPA、APuf、WPA、Racc、Monkey、BSwA、TGA、PPA、HBMO、Crayfish、QSA、Starfish、TBO、Lyrebird、SEOA、GFO、DEO、ManSA、EWA、GrSA、FrOA、ChRO、SPBO、CLPSO、ExtO、SOMA、SDS、DHO、GWSO 等 | 基于群体行为，全局搜索能力强 |
-| **📐 确定性直接搜索** | Nelder-Mead、Hooke-Jeeves、Powell、Rosenbrock、CRS、DIRECT、BFGS、COBYLA、MADS、NEWUOA、MCS、PRAXIS、BOBYQA、GSS、Subplex、LBB、MTS、IFilt、CG、MDS、BB、Anderson | 无需梯度（或数值梯度近似），适合不可导函数 |
+| **📐 确定性直接搜索** | Nelder-Mead、Hooke-Jeeves、Powell、Rosenbrock、CRS、DIRECT、BFGS、COBYLA、MADS、NEWUOA、MCS、PRAXIS、BOBYQA、GSS、Subplex、LBB、MTS、IFilt、CG、MDS、BB、Anderson、RSM | 无需梯度（或数值梯度近似），适合不可导函数 |
 | **🧮 进化策略** | CMA-ES、ES、xNES、1+1ES、sepCMA | 协方差/步长自适应，适合病态问题 |
 | **📊 估计分布** | CEM、SFS、PBIL、UMDA、cGA、NS、TPE、EGO、GR | 基于概率分布/代理模型估计，适合连续优化 |
 | **⚛️ 物理启发** | GSA、MVO、EO、WDO、WCA、EM、WWO、TEO、RIME、BBBC、BH、CBO、HGSO | 基于物理规律，自适应搜索 |

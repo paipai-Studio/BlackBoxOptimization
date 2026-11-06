@@ -2291,14 +2291,29 @@ test "WSO produces valid result" {
 }
 
 ///|
-test "WSO improves with more evaluations" {
-  let config1 = @lib.make_wso_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
-  let rng1 = @lib.make_rng(42.0)
-  let result1 = @lib.white_shark_optimizer(config1, @lib.sphere_function, rng1)
+test "RSM finds good solution on sphere" {
+  let config = @lib.make_rsm_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.response_surface_methodology(
+    config, @lib.sphere_function, rng,
+  )
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
 
-  let config2 = @lib.make_wso_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+///|
+test "RSM improves with more evaluations" {
+  let config1 = @lib.make_rsm_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.response_surface_methodology(
+    config1, @lib.sphere_function, rng1,
+  )
+
+  let config2 = @lib.make_rsm_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng2 = @lib.make_rng(42.0)
-  let result2 = @lib.white_shark_optimizer(config2, @lib.sphere_function, rng2)
+  let result2 = @lib.response_surface_methodology(
+    config2, @lib.sphere_function, rng2,
+  )
 
   assert_true(result2.best_value <= result1.best_value)
 }

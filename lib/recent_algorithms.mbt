@@ -43510,3 +43510,469 @@ pub fn great_white_shark_optimizer(
     evaluations,
   }
 }
+
+// ===== RSM: response surface methodology (Box & Wilson 1951) =====
+
+///|
+pub struct RsmConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_rsm_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> RsmConfig {
+  RsmConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn rsm_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+fn rsm_features(
+  u : Array[Double],
+  dim : Int32,
+  pairs_i : Array[Int32],
+  pairs_j : Array[Int32],
+  out : Array[Double],
+) -> Unit {
+  out[0] = 1.0
+  for d in 0..<dim {
+    out[1 + d] = u[d]
+    out[1 + dim + d] = u[d] * u[d]
+  }
+  let base = 1 + dim + dim
+  let nc = pairs_i.length()
+  for k in 0..<nc {
+    out[base + k] = u[pairs_i[k]] * u[pairs_j[k]]
+  }
+}
+
+///|
+/// Response Surface Methodology (RSM, Box & Wilson 1951). A deterministic
+/// surrogate family whose mechanism is absent from every trust-region and
+/// differencing scheme in the library: around the current center a
+/// **central-composite-style design** is sampled (the center reuses its known
+/// value, the 2d axis points, and one point per coordinate pair), and a **full
+/// quadratic model including all C(d,2) cross terms** (1 + d + d + C(d,2)
+/// coefficients) is fitted by regularized least squares over the normalized
+/// design — unlike NEWUOA/BOBYQA which estimate diagonal curvature by
+/// per-coordinate differencing and never see cross coupling. The fitted
+/// symmetric Hessian (cross terms included) drives a **Newton direction** on
+/// the model (fallback to the model gradient when singular), followed by an
+/// adaptive line search (step doubling on improvement, halving on failure)
+/// inside the design radius; two consecutive fruitless rounds shrink the
+/// design and re-center on the best. The schedule depends only on evaluations
+/// already spent, so a larger budget is a strict continuation and the
+/// historical best is monotone. population_size is accepted for a uniform
+/// config interface but not used (single-trajectory method).
+pub fn response_surface_methodology(
+  config : RsmConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let per_restart = 500
+  let restart_max = 10
+  let inv2 = 0.7071067811865476
+
+  // cross-term pair list (i, j) with i < j
+  let pairs_i : Array[Int32] = []
+  let pairs_j : Array[Int32] = []
+  for i in 0..<dim {
+    let jstart = i + 1
+    for j in jstart..<dim {
+      pairs_i.push(i)
+      pairs_j.push(j)
+    }
+  }
+  let n_cross = pairs_i.length()
+  let n_feat = 1 + dim + dim + n_cross
+  let n_samples = 1 + 2 * dim + n_cross
+
+  let feat : Array[Double] = []
+  for _k in 0..<n_feat {
+    feat.push(0.0)
+  }
+  let uvec : Array[Double] = []
+  for _d in 0..<dim {
+    uvec.push(0.0)
+  }
+
+  let mut x : Array[Double] = []
+  for _d in 0..<dim {
+    x.push(bounds.min + RNG::next(current_rng) * span)
+  }
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut fx = evaluate(f, x)
+  evaluations = evaluations + 1
+  if fx < best_val {
+    best_val = fx
+    best_pos = []
+    for d in 0..<dim {
+      best_pos.push(x[d])
+    }
+  }
+
+  let mut restart = 0
+  while evaluations < max_evals {
+    restart = restart + 1
+    if restart > restart_max {
+      break
+    }
+    if restart > 1 {
+      // alternate restarts between uniform and best-neighborhood starts
+      x = []
+      for d in 0..<dim {
+        let v = if restart % 2 == 0 {
+          bounds.min + RNG::next(current_rng) * span
+        } else {
+          best_pos[d] + (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05
+        }
+        x.push(rsm_clip(v, bounds))
+      }
+      fx = evaluate(f, x)
+      evaluations = evaluations + 1
+      if fx < best_val {
+        best_val = fx
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(x[d])
+        }
+      }
+    }
+    let mut consumed = 0
+    let mut delta = span * 0.15
+    let mut no_gain = 0
+    while evaluations < max_evals && consumed < per_restart {
+      // --- central composite design: center row reuses fx, then 2d axis
+      // points and n_cross pair points are evaluated
+      let zmat : Array[Array[Double]] = []
+      let yvec : Array[Double] = []
+      for d in 0..<dim {
+        uvec[d] = 0.0
+      }
+      rsm_features(uvec, dim, pairs_i, pairs_j, feat)
+      let zc : Array[Double] = []
+      for k in 0..<n_feat {
+        zc.push(feat[k])
+      }
+      zmat.push(zc)
+      yvec.push(fx)
+      for d in 0..<dim {
+        let xo = x[d]
+        x[d] = rsm_clip(xo + delta, bounds)
+        let fp = evaluate(f, x)
+        x[d] = rsm_clip(xo - delta, bounds)
+        let fm = evaluate(f, x)
+        x[d] = xo
+        evaluations = evaluations + 2
+        consumed = consumed + 2
+        for dd in 0..<dim {
+          uvec[dd] = 0.0
+        }
+        uvec[d] = 1.0
+        rsm_features(uvec, dim, pairs_i, pairs_j, feat)
+        let zp : Array[Double] = []
+        for k in 0..<n_feat {
+          zp.push(feat[k])
+        }
+        zmat.push(zp)
+        yvec.push(fp)
+        uvec[d] = -1.0
+        rsm_features(uvec, dim, pairs_i, pairs_j, feat)
+        let zm : Array[Double] = []
+        for k in 0..<n_feat {
+          zm.push(feat[k])
+        }
+        zmat.push(zm)
+        yvec.push(fm)
+      }
+      let nc = pairs_i.length()
+      for k in 0..<nc {
+        let di = pairs_i[k]
+        let dj = pairs_j[k]
+        let xi = x[di]
+        let xj = x[dj]
+        x[di] = rsm_clip(xi + delta * inv2, bounds)
+        x[dj] = rsm_clip(xj + delta * inv2, bounds)
+        let fv = evaluate(f, x)
+        x[di] = xi
+        x[dj] = xj
+        evaluations = evaluations + 1
+        consumed = consumed + 1
+        for dd in 0..<dim {
+          uvec[dd] = 0.0
+        }
+        uvec[di] = inv2
+        uvec[dj] = inv2
+        rsm_features(uvec, dim, pairs_i, pairs_j, feat)
+        let zr : Array[Double] = []
+        for k2 in 0..<n_feat {
+          zr.push(feat[k2])
+        }
+        zmat.push(zr)
+        yvec.push(fv)
+      }
+      // --- regularized least squares: A = ZᵀZ + 1e-6 I, b = Zᵀy
+      let a : Array[Array[Double]] = []
+      let bvec : Array[Double] = []
+      for _i in 0..<n_feat {
+        let row : Array[Double] = []
+        for _j in 0..<n_feat {
+          row.push(0.0)
+        }
+        a.push(row)
+        bvec.push(0.0)
+      }
+      for k in 0..<n_samples {
+        let zk = zmat[k]
+        let yk = yvec[k]
+        for i in 0..<n_feat {
+          let zik = zk[i]
+          for j in 0..<n_feat {
+            a[i][j] = a[i][j] + zik * zk[j]
+          }
+          bvec[i] = bvec[i] + zik * yk
+        }
+      }
+      for i in 0..<n_feat {
+        a[i][i] = a[i][i] + 1.0e-6
+      }
+      // Gaussian elimination with partial pivoting (n_feat × n_feat)
+      let mut ok = true
+      for col in 0..<n_feat {
+        let mut piv = col
+        for rr in col..<n_feat {
+          let av = if a[rr][col] < 0.0 { -a[rr][col] } else { a[rr][col] }
+          let bv = if a[piv][col] < 0.0 { -a[piv][col] } else { a[piv][col] }
+          if av > bv {
+            piv = rr
+          }
+        }
+        let pv = if a[piv][col] < 0.0 { -a[piv][col] } else { a[piv][col] }
+        if pv < 1.0e-12 {
+          ok = false
+        } else {
+          if piv != col {
+            for j in 0..<n_feat {
+              let tmp = a[col][j]
+              a[col][j] = a[piv][j]
+              a[piv][j] = tmp
+            }
+            let tb = bvec[col]
+            bvec[col] = bvec[piv]
+            bvec[piv] = tb
+          }
+          let nxt = col + 1
+          for rr in nxt..<n_feat {
+            let facc = a[rr][col] / a[col][col]
+            for j in col..<n_feat {
+              a[rr][j] = a[rr][j] - facc * a[col][j]
+            }
+            bvec[rr] = bvec[rr] - facc * bvec[col]
+          }
+        }
+        if !ok {
+          break
+        }
+      }
+      let mut gained = false
+      if ok {
+        // back substitution for the model coefficients
+        let coef : Array[Double] = []
+        for _i in 0..<n_feat {
+          coef.push(0.0)
+        }
+        let mut ii = n_feat - 1
+        while ii >= 0 {
+          let mut s = bvec[ii]
+          let mut j = ii + 1
+          while j < n_feat {
+            s = s - a[ii][j] * coef[j]
+            j = j + 1
+          }
+          coef[ii] = s / a[ii][ii]
+          ii = ii - 1
+        }
+        // build the symmetric Hessian (cross terms included) and solve
+        // H·d = −g for the Newton direction on the model
+        let hmat : Array[Array[Double]] = []
+        let rhs : Array[Double] = []
+        for i in 0..<dim {
+          let row : Array[Double] = []
+          for _j in 0..<dim {
+            row.push(0.0)
+          }
+          hmat.push(row)
+          rhs.push(-coef[1 + i])
+        }
+        for i in 0..<dim {
+          hmat[i][i] = 2.0 * coef[1 + dim + i]
+        }
+        for k in 0..<nc {
+          let qi = pairs_i[k]
+          let qj = pairs_j[k]
+          let qv = coef[1 + dim + dim + k]
+          hmat[qi][qj] = hmat[qi][qj] + qv
+          hmat[qj][qi] = hmat[qj][qi] + qv
+        }
+        let mut ok2 = true
+        for col in 0..<dim {
+          let mut piv = col
+          for rr in col..<dim {
+            let av = if hmat[rr][col] < 0.0 {
+              -hmat[rr][col]
+            } else {
+              hmat[rr][col]
+            }
+            let bv = if hmat[piv][col] < 0.0 {
+              -hmat[piv][col]
+            } else {
+              hmat[piv][col]
+            }
+            if av > bv {
+              piv = rr
+            }
+          }
+          let pv = if hmat[piv][col] < 0.0 {
+            -hmat[piv][col]
+          } else {
+            hmat[piv][col]
+          }
+          if pv < 1.0e-12 {
+            ok2 = false
+          } else {
+            if piv != col {
+              for j in 0..<dim {
+                let tmp = hmat[col][j]
+                hmat[col][j] = hmat[piv][j]
+                hmat[piv][j] = tmp
+              }
+              let tb = rhs[col]
+              rhs[col] = rhs[piv]
+              rhs[piv] = tb
+            }
+            let nxt2 = col + 1
+            for rr in nxt2..<dim {
+              let facc = hmat[rr][col] / hmat[col][col]
+              for j in col..<dim {
+                hmat[rr][j] = hmat[rr][j] - facc * hmat[col][j]
+              }
+              rhs[rr] = rhs[rr] - facc * rhs[col]
+            }
+          }
+          if !ok2 {
+            break
+          }
+        }
+        if ok2 {
+          // Newton direction in normalized u space
+          let dir : Array[Double] = []
+          let mut dn2 = 0.0
+          for i in 0..<dim {
+            let dvi = -rhs[i]
+            dir.push(dvi)
+            dn2 = dn2 + dvi * dvi
+          }
+          // adaptive line search along the Newton direction
+          let mut t = 1.0
+          let mut tries = 0
+          let mut gained_here = false
+          while tries < 4 && evaluations < max_evals && consumed < per_restart {
+            let u2 : Array[Double] = []
+            let mut dn = 0.0
+            for i in 0..<dim {
+              let uv = dir[i] * t
+              u2.push(uv)
+              dn = dn + uv * uv
+            }
+            if dn > 1.0 {
+              let sc = 1.0 / dn.sqrt()
+              for i in 0..<dim {
+                u2[i] = u2[i] * sc
+              }
+            }
+            let xc : Array[Double] = []
+            for d in 0..<dim {
+              xc.push(rsm_clip(x[d] + u2[d] * delta, bounds))
+            }
+            let fc = evaluate(f, xc)
+            evaluations = evaluations + 1
+            consumed = consumed + 1
+            if fc < fx {
+              fx = fc
+              x = xc
+              gained_here = true
+              t = t * 2.0
+              if fx < best_val {
+                best_val = fx
+                best_pos = []
+                for d in 0..<dim {
+                  best_pos.push(x[d])
+                }
+              }
+            } else {
+              t = t * 0.5
+            }
+            tries = tries + 1
+          }
+          if gained_here {
+            gained = true
+          }
+        }
+      }
+      if gained {
+        no_gain = 0
+      } else {
+        no_gain = no_gain + 1
+        if no_gain >= 2 {
+          // two fruitless rounds: re-center on the best, shrink the design
+          x = []
+          for d in 0..<dim {
+            x.push(best_pos[d])
+          }
+          fx = best_val
+          delta = delta * 0.6
+          if delta < span * 0.02 {
+            delta = span * 0.02
+          }
+          no_gain = 0
+        }
+      }
+      if consumed >= per_restart {
+        break
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

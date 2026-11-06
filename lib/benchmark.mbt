@@ -2364,6 +2364,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       great_white_shark_optimizer(make_gwso_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "RSM",
+    run: (e, d, b, r, f) => {
+      response_surface_methodology(make_rsm_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
