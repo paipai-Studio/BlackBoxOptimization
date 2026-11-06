@@ -44256,7 +44256,7 @@ pub fn woodpecker_mating_algorithm(
         let u1 = RNG::next(current_rng)
         let u2 = RNG::next(current_rng)
         let z = box_muller(u1, u2)
-        cand.push(wma_clip(pop[i][d] + z * span * 0.03 * apf, bounds))
+        cand.push(wma_clip(pop[i][d] + z * span * 0.026 * apf, bounds))
       }
       let fv = evaluate(f, cand)
       evaluations = evaluations + 1
