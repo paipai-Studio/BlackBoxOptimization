@@ -2370,6 +2370,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       response_surface_methodology(make_rsm_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "PC",
+    run: (e, d, b, r, f) => {
+      probability_collectives(make_pc_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

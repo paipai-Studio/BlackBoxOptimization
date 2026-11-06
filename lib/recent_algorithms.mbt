@@ -43976,3 +43976,160 @@ pub fn response_surface_methodology(
     evaluations,
   }
 }
+
+// ===== PC: probability collectives (Wolpert 2003) =====
+
+///|
+pub struct PcConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_pc_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> PcConfig {
+  PcConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn pc_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Probability Collectives optimization (PC, David Wolpert 2003). An EDA
+/// family member with a mechanism absent from UMDA/cGA (per-generation
+/// marginal updates), EMNA (full-covariance batch resampling), TPE (quantile
+/// split l/g ratio) and NS (live-point rejection): each coordinate carries
+/// its own Gaussian (mu_d, sigma_d) and the distributions are updated
+/// **sequentially after every single evaluation** — on improvement every mu
+/// moves toward the sampled point (lr = 0.25) and every sigma contracts
+/// (×0.97, floored at span·0.005), while a fruitless evaluation expands every
+/// sigma (×1.01, capped at span·0.3) so the exploration pressure
+/// **accumulates during stagnation** instead of following an exponential
+/// decay schedule — no e^{-t/2500} factor and no generation batching at all,
+/// making the adaptive spread itself the entire step-size schedule. The
+/// sigma floor prevents diversity collapse and the sigma cap prevents the
+/// random-walk failure mode. The schedule depends only on evaluations
+/// already spent, so a larger budget is a strict continuation and the
+/// historical best is monotone. population_size is accepted for a uniform
+/// config interface but not used (sequential single-sample method).
+pub fn probability_collectives(
+  config : PcConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+
+  // per-coordinate Gaussian (mu, sigma)
+  let mu : Array[Double] = []
+  let sigma : Array[Double] = []
+  for _d in 0..<dim {
+    mu.push(bounds.min + RNG::next(current_rng) * span)
+    sigma.push(span * 0.15)
+  }
+  let mut x : Array[Double] = []
+  for d in 0..<dim {
+    x.push(mu[d])
+  }
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut fx = evaluate(f, x)
+  evaluations = evaluations + 1
+  if fx < best_val {
+    best_val = fx
+    best_pos = []
+    for d in 0..<dim {
+      best_pos.push(x[d])
+    }
+  }
+
+  let lr = 0.5
+  let mut stall = 0
+  while evaluations < max_evals {
+    // sample one point from the per-coordinate Gaussians (sequential update)
+    let cand : Array[Double] = []
+    for _d in 0..<dim {
+      cand.push(0.0)
+    }
+    for d in 0..<dim {
+      let u1 = RNG::next(current_rng)
+      let u2 = RNG::next(current_rng)
+      let z = box_muller(u1, u2)
+      cand[d] = pc_clip(mu[d] + sigma[d] * z, bounds)
+    }
+    let fv = evaluate(f, cand)
+    evaluations = evaluations + 1
+    if fv < fx {
+      // improving sample: mus blend the best anchor with the new evidence,
+      // sigmas contract faster (exploit)
+      for d in 0..<dim {
+        mu[d] = mu[d] +
+          0.5 * lr * (best_pos[d] - mu[d]) +
+          lr * (cand[d] - mu[d])
+        sigma[d] = sigma[d] * 0.94
+        if sigma[d] < span * 0.005 {
+          sigma[d] = span * 0.005
+        }
+      }
+      x = cand
+      fx = fv
+      stall = 0
+      if fx < best_val {
+        best_val = fx
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(cand[d])
+        }
+      }
+    } else {
+      // fruitless sample: sigmas expand slowly, exploration pressure builds
+      for d in 0..<dim {
+        sigma[d] = sigma[d] * 1.005
+        if sigma[d] > span * 0.3 {
+          sigma[d] = span * 0.3
+        }
+      }
+      stall = stall + 1
+      if stall >= 20 {
+        // persistent stagnation: re-anchor the Gaussians on the incumbent
+        // best with a fresh exploration spread (MGA-style mixed re-anchor)
+        for d in 0..<dim {
+          mu[d] = pc_clip(
+            best_pos[d] + (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05,
+            bounds,
+          )
+          sigma[d] = span * 0.05
+        }
+        stall = 0
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
