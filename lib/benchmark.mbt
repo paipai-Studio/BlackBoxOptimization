@@ -2332,6 +2332,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       cellular_genetic_algorithm(make_cellga_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "GOMEA",
+    run: (e, d, b, r, f) => {
+      gene_pool_optimal_mixing(make_gomea_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
