@@ -45384,3 +45384,168 @@ pub fn fitness_sharing(
     evaluations,
   }
 }
+
+// ===== Bandit: multi-armed bandit budget allocation =====
+
+///|
+pub struct BanditConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bandit_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BanditConfig {
+  BanditConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn bandit_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Multi-Armed Bandit Optimization (ε-greedy bandit budget allocation). The
+/// only algorithm in the library where **the evaluation budget itself is a
+/// competitively allocated resource**: the search space is sliced into
+/// independent starting points (6 arms here; population_size accepted but
+/// unused per the single-point registration convention), and evaluation
+/// blocks (100 evals each) are handed out by **ε-greedy arm selection** —
+/// 70% of blocks go to the arm whose current best value is best among the
+/// arms (exploit), 30% are given to a uniformly random arm (explore). Every
+/// other restart / multi-start method spends its budget on fixed, equal
+/// segments (BFGS/CG/DAnl constant-size restarts, MLSL's per-start
+/// allowance, PA's uniform population copy) — here **weak arms starve and
+/// promising arms feast**, so total budget concentrates on the best basins
+/// without any hand-tuned schedule. Inside its block an arm runs a
+/// single-point pattern descent: per-dimension Gaussian stride (adaptive —
+/// each success expands the arm's stride ×1.2 up to span·0.5, each failure
+/// contracts ×0.5 down to span·1e-4, mirroring MADS mesh growth/decay) plus
+/// a mild 0.25 pull toward the global best. crf = e^{-t/2500} decays the
+/// global stride scale; the historical best is tracked across all arms.
+/// Everything depends only on evaluations already spent (block boundaries
+/// are evaluation-counted, never max_evals-relative), so a larger budget is
+/// a strict continuation and the historical best is monotone.
+pub fn bandit_allocation_algorithm(
+  config : BanditConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let arms = 6
+  let block = 100
+  let eps = 0.3
+
+  // arm table: independent starting points competing for budget blocks
+  let pos : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let step : Array[Double] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _j in 0..<arms {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pos.push(ind)
+      fits.push(fv)
+      step.push(span * 0.15)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pos.push(ind)
+      fits.push(1.0e300)
+      step.push(span * 0.15)
+    }
+  }
+
+  while evaluations < max_evals {
+    let crf = @math.exp(-evaluations.to_double() / 2500.0)
+    // ε-greedy arm selection: exploit the current best arm most of the
+    // time, explore a uniformly random arm with probability ε
+    let mut best_a = 0
+    let mut bv = 1.0e300
+    for j in 0..<arms {
+      if fits[j] < bv {
+        bv = fits[j]
+        best_a = j
+      }
+    }
+    let u = RNG::next(current_rng)
+    let ra = (RNG::next(current_rng) * arms.to_double()).to_int()
+    let a = if u < eps { ra } else { best_a }
+    // spend one full block on the chosen arm: single-point pattern descent
+    let blk_end = evaluations + block
+    while evaluations < blk_end && evaluations < max_evals {
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let u1 = RNG::next(current_rng)
+        let u2 = RNG::next(current_rng)
+        let z = box_muller(u1, u2)
+        cand.push(
+          bandit_clip(
+            pos[a][d] +
+            0.25 * (best_pos[d] - pos[a][d]) +
+            z * span * step[a] * crf,
+            bounds,
+          ),
+        )
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < fits[a] {
+        pos[a] = cand
+        fits[a] = fv
+        // success expands the arm's stride (pattern-search growth)
+        let ns = step[a] * 1.2
+        step[a] = if ns > span * 0.5 { span * 0.5 } else { ns }
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(cand[d])
+          }
+        }
+      } else {
+        // failure contracts the arm's stride (pattern-search decay)
+        let ns = step[a] * 0.5
+        step[a] = if ns < span * 1.0e-4 { span * 1.0e-4 } else { ns }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

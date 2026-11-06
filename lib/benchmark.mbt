@@ -2414,6 +2414,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
     name: "FS",
     run: (e, d, b, r, f) => fitness_sharing(make_fs_config(e, d, b, 25), f, r),
   })
+  entries.push(AlgoEntry::{
+    name: "Bandit",
+    run: (e, d, b, r, f) => {
+      bandit_allocation_algorithm(make_bandit_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
