@@ -42467,3 +42467,224 @@ pub fn species_pso(
     evaluations,
   }
 }
+
+// ===== OSA: ostrich optimization algorithm (Deb et al. 2021) =====
+
+///|
+pub struct OsaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_osa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> OsaConfig {
+  OsaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn osa_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Ostrich Optimization Algorithm (OSA, Deb et al. 2021). The population is
+/// ranked every round and split into three sex/role groups with **entirely
+/// different behaviour families**: the two fittest birds sit on the nest
+/// (fine incubating steps around their own position), the next eight males
+/// either follow an elite-excited exploration or fight a rival — the loser
+/// is **pushed away from the winner** (anti-contraction, unique in the
+/// library) — and the remaining females either migrate toward a random male
+/// (mating migration across groups) or forage with plain random steps. Unlike
+/// ChSO (a rooster/hen/chick following chain) or TGA (top/middle/worst
+/// strategies), the roles here are sex-based and the male rivalry actively
+/// pushes losers outward to preserve diversity. The ostrich factor
+/// `osf = e^{-t/2500}` decays with evaluations already spent, so a larger
+/// budget is a strict continuation and the historical best is monotone.
+/// population_size is accepted for a uniform config interface but not used
+/// (the herd is fixed at 25).
+pub fn ostrich_optimization(
+  config : OsaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = 25
+  let elite_cnt = 2
+  let male_cnt = 6
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _j in 0..<pop_size {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pop.push(ind)
+      fits.push(fv)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pop.push(ind)
+      fits.push(1.0e300)
+    }
+  }
+
+  while evaluations < max_evals {
+    let osf = @math.exp(-evaluations.to_double() / 2500.0)
+    // rank individuals best-to-worst with an all-Int selection sort
+    let order : Array[Int32] = []
+    let used : Array[Bool] = []
+    for _k in 0..<pop_size {
+      order.push(0)
+      used.push(false)
+    }
+    for k in 0..<pop_size {
+      let mut bi = -1
+      for j in 0..<pop_size {
+        if !used[j] {
+          if bi < 0 || fits[j] < fits[bi] {
+            bi = j
+          }
+        }
+      }
+      used[bi] = true
+      order[k] = bi
+    }
+    // role assignment by rank: 0 elite (incubating), 1 male, 2 female
+    let role : Array[Int32] = []
+    for _k in 0..<pop_size {
+      role.push(2)
+    }
+    for k in 0..<pop_size {
+      let idx = order[k]
+      let r = if k < elite_cnt {
+        0
+      } else if k < elite_cnt + male_cnt {
+        1
+      } else {
+        2
+      }
+      role[idx] = r
+    }
+    let mut consumed = 0
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let ri = role[i]
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if ri == 0 {
+        // nest sitting: incubating fine steps around the elite's own position
+        for d in 0..<dim {
+          let v = pop[i][d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.01 * osf
+          cand.push(osa_clip(v, bounds))
+        }
+      } else if ri == 1 {
+        // male: elite-excited exploration, or rivalry where the loser flees
+        let e = order[(RNG::next(current_rng) * elite_cnt.to_double()).to_int() %
+          elite_cnt]
+        if r1 < 0.97 {
+          let pa = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+            pop_size
+          let qa = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+            pop_size
+          for d in 0..<dim {
+            let v = pop[i][d] +
+              1.05 * osf * (pop[e][d] - pop[i][d]) +
+              0.35 * (pop[pa][d] - pop[qa][d]) +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.09 * osf
+            cand.push(osa_clip(v, bounds))
+          }
+        } else {
+          let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+            pop_size
+          let jj = if j == i { (j + 1) % pop_size } else { j }
+          for d in 0..<dim {
+            let v = if fits[i] <= fits[jj] {
+              pop[i][d] +
+              0.6 * RNG::next(current_rng) * osf * (best_pos[d] - pop[i][d]) +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.07 * osf
+            } else {
+              pop[i][d] +
+              0.5 * RNG::next(current_rng) * osf * (pop[i][d] - pop[jj][d]) +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.14 * osf
+            }
+            cand.push(osa_clip(v, bounds))
+          }
+        }
+        // female: mating migration toward a random male (no plain foraging)
+      } else {
+        let m = order[elite_cnt +
+          (RNG::next(current_rng) * male_cnt.to_double()).to_int() % male_cnt]
+        let pa = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let qa = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        for d in 0..<dim {
+          let v = pop[i][d] +
+            1.10 * osf * (pop[m][d] - pop[i][d]) +
+            0.3 * (pop[pa][d] - pop[qa][d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.06 * osf
+          cand.push(osa_clip(v, bounds))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      consumed = consumed + 1
+      if fv < fits[i] {
+        fits[i] = fv
+        pop[i] = cand
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(cand[d])
+          }
+        }
+      }
+    }
+    if consumed == 0 {
+      break
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

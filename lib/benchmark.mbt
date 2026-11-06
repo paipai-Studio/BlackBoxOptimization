@@ -2342,6 +2342,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
     name: "SPSO",
     run: (e, d, b, r, f) => species_pso(make_spso_config(e, d, b, 25), f, r),
   })
+  entries.push(AlgoEntry::{
+    name: "OSA",
+    run: (e, d, b, r, f) => {
+      ostrich_optimization(make_osa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
