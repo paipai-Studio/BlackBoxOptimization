@@ -41328,3 +41328,293 @@ pub fn multi_directional_search(
     evaluations,
   }
 }
+
+// ===== CC: cooperative coevolution (Potter & De Jong 1994) =====
+
+///|
+pub struct CCConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_cc_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CCConfig {
+  CCConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn cc_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+fn cc_new_partition(
+  dim : Int32,
+  group_cnt : Int32,
+  base : Int32,
+  rem : Int32,
+  rng : RNG,
+) -> Array[Array[Int32]] {
+  let perm : Array[Int32] = []
+  for d in 0..<dim {
+    perm.push(d)
+  }
+  for k in 0..<dim {
+    let kk = dim - 1 - k
+    let j = (RNG::next(rng) * (kk + 1).to_double()).to_int() % (kk + 1)
+    let tmp = perm[kk]
+    perm[kk] = perm[j]
+    perm[j] = tmp
+  }
+  let groups : Array[Array[Int32]] = []
+  let mut cursor = 0
+  for gi in 0..<group_cnt {
+    let gsize = base + (if gi < rem { 1 } else { 0 })
+    let g : Array[Int32] = []
+    for _k in 0..<gsize {
+      g.push(perm[cursor])
+      cursor = cursor + 1
+    }
+    groups.push(g)
+  }
+  groups
+}
+
+///|
+/// Cooperative Coevolution (CC, Potter & De Jong 1994). The coordinates are
+/// randomly partitioned into species groups and each group evolves its own
+/// subpopulation **inside its subspace** while the remaining coordinates are
+/// held by a shared context assembled from every group's current champion.
+/// Candidates inside a group are differential moves toward the group best
+/// (per-coordinate jitter decays with the cooperative factor) and a candidate
+/// replaces its parent only when it improves under the current context. Every
+/// 8 rounds the partition is reshuffled so coordinates that became coupled
+/// can meet in one subspace and each subpopulation is re-evaluated. This
+/// divide-and-coevolve route differs from Subplex (deterministic subspace
+/// simplex over a fixed coordinate order) and from every single-population
+/// algorithm in the library. The schedule depends only on evaluations already
+/// spent, so a larger budget is a strict continuation and the historical best
+/// is monotone. population_size is accepted for a uniform config interface.
+pub fn cooperative_coevolution(
+  config : CCConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let group_cnt = if dim < 5 { dim } else { 5 }
+  let sub_pop = 8
+  let base = dim / group_cnt
+  let rem = dim % group_cnt
+  let reshuffle_every = 8
+
+  let mut group_dims = cc_new_partition(dim, group_cnt, base, rem, current_rng)
+
+  let context : Array[Double] = []
+  for _d in 0..<dim {
+    context.push(bounds.min + RNG::next(current_rng) * span)
+  }
+  let mut evaluations = 1
+  let mut best_pos : Array[Double] = []
+  for d in 0..<dim {
+    best_pos.push(context[d])
+  }
+  let mut best_val = evaluate(f, context)
+
+  let sub_pops : Array[Array[Array[Double]]] = []
+  let sub_fits : Array[Array[Double]] = []
+  let grp_best_f : Array[Double] = []
+  let grp_best_j : Array[Int32] = []
+  for gi in 0..<group_cnt {
+    let g = group_dims[gi]
+    let gsize = g.length()
+    let pop : Array[Array[Double]] = []
+    let fits : Array[Double] = []
+    for _j in 0..<sub_pop {
+      let ind : Array[Double] = []
+      for dd in 0..<gsize {
+        let nv = bounds.min + RNG::next(current_rng) * span
+        ind.push(nv)
+        context[g[dd]] = nv
+      }
+      let fv = evaluate(f, context)
+      evaluations = evaluations + 1
+      pop.push(ind)
+      fits.push(fv)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d2 in 0..<dim {
+          best_pos.push(context[d2])
+        }
+      }
+    }
+    let mut bf = fits[0]
+    let mut bj = 0
+    for j in 0..<sub_pop {
+      if fits[j] < bf {
+        bf = fits[j]
+        bj = j
+      }
+    }
+    grp_best_f.push(bf)
+    grp_best_j.push(bj)
+    sub_pops.push(pop)
+    sub_fits.push(fits)
+  }
+  for gi in 0..<group_cnt {
+    let g = group_dims[gi]
+    let champ = sub_pops[gi][grp_best_j[gi]]
+    for dd in 0..<g.length() {
+      context[g[dd]] = champ[dd]
+    }
+  }
+
+  let mut round = 0
+  while evaluations < max_evals {
+    round = round + 1
+    let ccf = @math.exp(-evaluations.to_double() / 2500.0)
+    for gi in 0..<group_cnt {
+      let g = group_dims[gi]
+      let champ = sub_pops[gi][grp_best_j[gi]]
+      for dd in 0..<g.length() {
+        context[g[dd]] = champ[dd]
+      }
+    }
+    for gi in 0..<group_cnt {
+      let g = group_dims[gi]
+      let gsize = g.length()
+      for j in 0..<sub_pop {
+        if evaluations >= max_evals {
+          break
+        }
+        let ia = (RNG::next(current_rng) * sub_pop.to_double()).to_int() %
+          sub_pop
+        let ib = (RNG::next(current_rng) * sub_pop.to_double()).to_int() %
+          sub_pop
+        let ic = (RNG::next(current_rng) * sub_pop.to_double()).to_int() %
+          sub_pop
+        let cand : Array[Double] = []
+        for dd in 0..<gsize {
+          let xa = sub_pops[gi][ia][dd]
+          let xb = sub_pops[gi][ib][dd]
+          let xc = sub_pops[gi][ic][dd]
+          let gb = sub_pops[gi][grp_best_j[gi]][dd]
+          let nv = xa +
+            0.5 * (xb - xc) +
+            0.35 * ccf * (gb - xa) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.08 * ccf
+          let cv = cc_clip(nv, bounds)
+          cand.push(cv)
+          context[g[dd]] = cv
+        }
+        let fv = evaluate(f, context)
+        evaluations = evaluations + 1
+        if fv < sub_fits[gi][j] {
+          sub_fits[gi][j] = fv
+          sub_pops[gi][j] = cand
+          if fv < grp_best_f[gi] {
+            grp_best_f[gi] = fv
+            grp_best_j[gi] = j
+          }
+          if fv < best_val {
+            best_val = fv
+            best_pos = []
+            for d2 in 0..<dim {
+              best_pos.push(context[d2])
+            }
+          }
+        } else {
+          for dd in 0..<gsize {
+            context[g[dd]] = sub_pops[gi][j][dd]
+          }
+        }
+      }
+    }
+    if round % reshuffle_every == 0 && evaluations < max_evals {
+      group_dims = cc_new_partition(dim, group_cnt, base, rem, current_rng)
+      for gi in 0..<group_cnt {
+        let g = group_dims[gi]
+        let gsize = g.length()
+        let pop : Array[Array[Double]] = []
+        let fits : Array[Double] = []
+        for j in 0..<sub_pop {
+          let ind : Array[Double] = []
+          for dd in 0..<gsize {
+            let dv = g[dd]
+            let v = if j == 0 {
+              best_pos[dv] +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05 * ccf
+            } else {
+              bounds.min + RNG::next(current_rng) * span
+            }
+            let cv = cc_clip(v, bounds)
+            ind.push(cv)
+            context[dv] = cv
+          }
+          if evaluations < max_evals {
+            let fv = evaluate(f, context)
+            evaluations = evaluations + 1
+            pop.push(ind)
+            fits.push(fv)
+            if fv < best_val {
+              best_val = fv
+              best_pos = []
+              for d2 in 0..<dim {
+                best_pos.push(context[d2])
+              }
+            }
+          } else {
+            pop.push(ind)
+            fits.push(1.0e300)
+          }
+        }
+        let mut bf = fits[0]
+        let mut bj = 0
+        for j in 0..<sub_pop {
+          if fits[j] < bf {
+            bf = fits[j]
+            bj = j
+          }
+        }
+        grp_best_f[gi] = bf
+        grp_best_j[gi] = bj
+        sub_pops[gi] = pop
+        sub_fits[gi] = fits
+      }
+      for gi in 0..<group_cnt {
+        let g = group_dims[gi]
+        let champ = sub_pops[gi][grp_best_j[gi]]
+        for dd in 0..<g.length() {
+          context[g[dd]] = champ[dd]
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

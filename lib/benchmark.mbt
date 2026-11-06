@@ -2314,6 +2314,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       multi_directional_search(make_mds_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "CC",
+    run: (e, d, b, r, f) => {
+      cooperative_coevolution(make_cc_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
