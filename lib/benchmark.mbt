@@ -2426,6 +2426,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       learning_automata_algorithm(make_la_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "RBR",
+    run: (e, d, b, r, f) => {
+      rank_based_replacement_algorithm(make_rbr_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
