@@ -46008,3 +46008,237 @@ pub fn rank_based_replacement_algorithm(
     evaluations,
   }
 }
+
+// ===== OGA: orthogonal genetic algorithm (2001) =====
+
+///|
+pub struct OgaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_oga_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> OgaConfig {
+  OgaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Sylvester construction of the L16(2^15) orthogonal array: the 16x16
+/// Hadamard matrix (entry i,j = (-1)^(popcount(i & j))) with the all-ones
+/// first column dropped. Every pair of columns is balanced and independent,
+/// so across the 16 rows each two-factor combination (1,1),(1,2),(2,1),(2,2)
+/// occurs exactly 4 times.
+fn oga_l16_rows() -> Array[Array[Int32]] {
+  let rows : Array[Array[Int32]] = []
+  for i in 0..<16 {
+    let row : Array[Int32] = []
+    for j in 1..<16 {
+      let mut bits = i & j
+      let mut par = 0
+      while bits > 0 {
+        par = par + bits % 2
+        bits = bits / 2
+      }
+      row.push(if par % 2 == 0 { 1 } else { 2 })
+    }
+    rows.push(row)
+  }
+  rows
+}
+
+///|
+fn oga_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Orthogonal Genetic Algorithm (Leung & Wang 2001), continuous variant.
+/// Both pillars of the original method are kept. (1) **Factor-level
+/// quantization**: the initial population is not random — every dimension is
+/// discretised into N evenly spaced levels and individual i takes level
+/// (i + d) mod N in dimension d, a latin-square cover that places every
+/// level of every factor exactly once. (2) **Orthogonal crossover**: each
+/// generation, pop_size/2 tournament parent pairs are recombined with the
+/// L16(2^15) array — in every dimension the child inherits parent 1 or
+/// parent 2 as dictated by the array row, so 16 carefully chosen factor
+/// combinations stand in for the 2^dim full factorial while balancing every
+/// two-factor interaction; the best of the 16 children survives. Children
+/// receive a small per-dimension Gaussian jitter (15% of dimensions, span *
+/// 0.10 * e^{-t/2500}) so the discrete recombination lattice cannot stall
+/// once the population collapses onto shared factor values. The pool is
+/// rebuilt each generation from the elite of old ∪ children. All randomness
+/// depends only on evaluations already spent, so a larger budget is a strict
+/// continuation and the historical best is monotone.
+pub fn orthogonal_genetic_algorithm(
+  config : OgaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = if config.population_size < 8 {
+    8
+  } else {
+    config.population_size
+  }
+  let l16 = oga_l16_rows()
+  let mut evaluations = 0
+
+  // factor-level quantized initialization: latin-square level cover
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for i in 0..<pop_size {
+    let x : Array[Double] = []
+    for d in 0..<dim {
+      let lvl = (i + d) % pop_size
+      let v = bounds.min + span * lvl.to_double() / (pop_size - 1).to_double()
+      x.push(oga_clip(v, bounds))
+    }
+    let fv = evaluate(f, x)
+    evaluations = evaluations + 1
+    pop.push(x)
+    fits.push(fv)
+    if fv < best_val {
+      best_val = fv
+      best_pos = []
+      for d in 0..<dim {
+        best_pos.push(x[d])
+      }
+    }
+  }
+
+  while evaluations < max_evals {
+    // a full orthogonal crossover costs 16 evaluations; if the budget cannot
+    // afford another pair, stop — otherwise the merge below would run with
+    // no children and evaluations would never advance (infinite loop)
+    if evaluations + 16 > max_evals {
+      break
+    }
+    let npairs = pop_size / 2
+    let children : Array[Array[Double]] = []
+    let child_fits : Array[Double] = []
+    for _p in 0..<npairs {
+      if evaluations + 16 > max_evals {
+        break
+      }
+      let i1 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let i2 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let i3 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let i4 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let p1 = if fits[i1] <= fits[i2] { pop[i1] } else { pop[i2] }
+      let p2 = if fits[i3] <= fits[i4] { pop[i3] } else { pop[i4] }
+      let sigma = span * 0.10 * @math.exp(-evaluations.to_double() / 2500.0)
+      let mut cbest_val = 1.0e300
+      let mut cbest : Array[Double] = []
+      for r in 0..<16 {
+        let row = l16[r]
+        let x : Array[Double] = []
+        for d in 0..<dim {
+          let mut src = row[d]
+          if d >= 15 {
+            src = if RNG::next(current_rng) < 0.5 { 1 } else { 2 }
+          }
+          let base = if src == 1 { p1[d] } else { p2[d] }
+          let mut v = base
+          if RNG::next(current_rng) < 0.15 {
+            let u1 = RNG::next(current_rng)
+            let u2 = RNG::next(current_rng)
+            let z = box_muller(u1, u2)
+            v = base + z * sigma
+          }
+          x.push(oga_clip(v, bounds))
+        }
+        let fv = evaluate(f, x)
+        evaluations = evaluations + 1
+        if fv < cbest_val {
+          cbest_val = fv
+          cbest = []
+          for d in 0..<dim {
+            cbest.push(x[d])
+          }
+        }
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(x[d])
+          }
+        }
+      }
+      children.push(cbest)
+      child_fits.push(cbest_val)
+    }
+    // rebuild the pool from the elite of old ∪ children
+    let total = pop.length() + children.length()
+    let all_fits : Array[Double] = []
+    for i in 0..<pop.length() {
+      all_fits.push(fits[i])
+    }
+    for i in 0..<children.length() {
+      all_fits.push(child_fits[i])
+    }
+    let order : Array[Int32] = []
+    for i in 0..<total {
+      order.push(i)
+    }
+    for a in 1..<total {
+      let key = order[a]
+      let kf = all_fits[key]
+      let mut b = a - 1
+      while b >= 0 && all_fits[order[b]] > kf {
+        order[b + 1] = order[b]
+        b = b - 1
+      }
+      order[b + 1] = key
+    }
+    let np : Array[Array[Double]] = []
+    let nf : Array[Double] = []
+    for i in 0..<pop_size {
+      let idx = order[i]
+      if idx < pop.length() {
+        np.push(pop[idx])
+      } else {
+        np.push(children[idx - pop.length()])
+      }
+      nf.push(all_fits[idx])
+    }
+    pop.clear()
+    fits.clear()
+    for i in 0..<pop_size {
+      pop.push(np[i])
+      fits.push(nf[i])
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

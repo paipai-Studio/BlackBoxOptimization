@@ -2432,6 +2432,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       rank_based_replacement_algorithm(make_rbr_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "OGA",
+    run: (e, d, b, r, f) => {
+      orthogonal_genetic_algorithm(make_oga_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
