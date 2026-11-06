@@ -45156,3 +45156,231 @@ pub fn population_based_training(
     evaluations,
   }
 }
+
+// ===== FS: fitness sharing (1987) =====
+
+///|
+pub struct FsConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_fs_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> FsConfig {
+  FsConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn fs_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Fitness Sharing (Goldberg & Richardson 1987). The only algorithm in the
+/// library whose **decision key is a density-adjusted fitness**: every
+/// generation each individual's raw fitness is inflated by its **niche
+/// count** `nc_i = Σ_j sh(d_ij)` — a triangular sharing kernel
+/// `sh(d) = 1 − d/σ_share` over the continuous pairwise Euclidean
+/// distances (σ_share = 0.12·span) — and the resulting *effective fitness*
+/// `eff_i = f_i · nc_i` (crowded or weak individuals rank worst under
+/// minimisation) **replaces the raw fitness as the ranking key** for the
+/// generation's three density-aware bands: the best-eff third exploits
+/// freely toward the incumbent best (uncrowded-and-fit), the middle third
+/// runs plain mutation search, and the worst-eff third is **density-evicted
+///** — it either flees its nearest neighbour (70%) or migrates to a random
+/// region (30%). Every other algorithm ranks/groups by raw fitness (TGA/
+/// ChSO/OSA rank bands, SPSO species radius, GOMEA statistical linkage, CC
+/// random grouping); WL penalises discrete histogram-bin visits, OAIN
+/// evicts+re-seeds within a distance threshold, Crowd replaces via nearest-
+/// neighbour competition — all alter *positions or membership*; here the
+/// **selection pressure itself is density-damped** while membership is
+/// never revoked. Improvement-only replacement on raw fitness; the
+/// historical best is tracked separately; shf = e^{-t/2500} decays strides.
+/// Everything depends only on evaluations already spent, so a larger budget
+/// is a strict continuation and the historical best is monotone.
+/// population_size is accepted for a uniform config interface but not used
+/// (the population is fixed at 25).
+pub fn fitness_sharing(
+  config : FsConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = 25
+  let sigma_share = span * 0.12
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _j in 0..<pop_size {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pop.push(ind)
+      fits.push(fv)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pop.push(ind)
+      fits.push(1.0e300)
+    }
+  }
+
+  while evaluations < max_evals {
+    let shf = @math.exp(-evaluations.to_double() / 2500.0)
+    // niche counts: continuous kernel sharing over the current population;
+    // each individual's nearest neighbour is recorded for the eviction band
+    let nc : Array[Double] = []
+    let nn : Array[Int32] = []
+    for _i in 0..<pop_size {
+      nc.push(0.0)
+      nn.push(-1)
+    }
+    for i in 0..<pop_size {
+      let mut d_min = 1.0e300
+      for j in 0..<pop_size {
+        let mut dsq = 0.0
+        for d in 0..<dim {
+          let diff = pop[i][d] - pop[j][d]
+          dsq = dsq + diff * diff
+        }
+        let dist = dsq.sqrt()
+        if dist < sigma_share {
+          nc[i] = nc[i] + (1.0 - dist / sigma_share)
+        }
+        if j != i && dist < d_min {
+          d_min = dist
+          nn[i] = j
+        }
+      }
+    }
+    // effective fitness: raw fitness inflated by the niche count — the
+    // density-adjusted key replaces raw fitness as the ranking criterion
+    let eff : Array[Double] = []
+    for i in 0..<pop_size {
+      eff.push(fits[i] * nc[i])
+    }
+    let order = sort_indices(eff)
+    let third = pop_size / 3
+
+    // three density-aware bands over the effective ranking
+    for k in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let i = order[k]
+      let cand : Array[Double] = []
+      if k < third {
+        // elite band (uncrowded and fit): exploit freely toward the best
+        let p = (RNG::next(current_rng) * pop_size.to_double()).to_int()
+        let q = (
+            (RNG::next(current_rng) * pop_size.to_double()).to_int() + i + 1
+          ) %
+          pop_size
+        for d in 0..<dim {
+          let r2 = RNG::next(current_rng)
+          let u1 = RNG::next(current_rng)
+          let u2 = RNG::next(current_rng)
+          let z = box_muller(u1, u2)
+          cand.push(
+            fs_clip(
+              pop[i][d] +
+              r2 * 0.9 * (best_pos[d] - pop[i][d]) +
+              0.45 * (pop[p][d] - pop[q][d]) +
+              z * span * 0.08 * shf,
+              bounds,
+            ),
+          )
+        }
+      } else if k < third * 2 {
+        // shared band (moderate crowding): plain mutation search
+        for d in 0..<dim {
+          let u1 = RNG::next(current_rng)
+          let u2 = RNG::next(current_rng)
+          let z = box_muller(u1, u2)
+          cand.push(fs_clip(pop[i][d] + z * span * 0.10 * shf * shf, bounds))
+        }
+      } else {
+        // crowded band (worst effective fitness): density eviction
+        let r1 = RNG::next(current_rng)
+        if r1 < 0.3 {
+          // migrate to a random region
+          for d in 0..<dim {
+            let u1 = RNG::next(current_rng)
+            let u2 = RNG::next(current_rng)
+            let z = box_muller(u1, u2)
+            cand.push(fs_clip(pop[i][d] + z * span * 0.25 * shf, bounds))
+          }
+        } else {
+          // flee the nearest neighbour
+          let nni = nn[i]
+          for d in 0..<dim {
+            let r2 = RNG::next(current_rng)
+            let u1 = RNG::next(current_rng)
+            let u2 = RNG::next(current_rng)
+            let z = box_muller(u1, u2)
+            cand.push(
+              fs_clip(
+                pop[i][d] +
+                r2 * 0.8 * (pop[i][d] - pop[nni][d]) +
+                z * span * 0.10 * shf,
+                bounds,
+              ),
+            )
+          }
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < fits[i] {
+        pop[i] = cand
+        fits[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(cand[d])
+          }
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

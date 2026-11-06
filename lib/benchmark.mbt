@@ -2410,6 +2410,10 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       population_based_training(make_pbt_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "FS",
+    run: (e, d, b, r, f) => fitness_sharing(make_fs_config(e, d, b, 25), f, r),
+  })
   entries
 }
 
