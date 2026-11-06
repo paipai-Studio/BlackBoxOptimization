@@ -2376,6 +2376,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       probability_collectives(make_pc_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "WMA",
+    run: (e, d, b, r, f) => {
+      woodpecker_mating_algorithm(make_wma_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

@@ -44133,3 +44133,223 @@ pub fn probability_collectives(
     evaluations,
   }
 }
+
+// ===== WMA: woodpecker mating algorithm (2023) =====
+
+///|
+pub struct WmaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_wma_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> WmaConfig {
+  WmaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn wma_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Woodpecker Mating Algorithm (WMA, 2023). Models the woodpecker life
+/// cycle with two mechanisms absent from the rest of the library:
+/// (1) **acoustic attenuation** — mating information travels as a drumming
+/// signal whose pull decays exponentially with the Euclidean distance to
+/// the drumming source (alpha = e^{-dist/λ}, λ = 0.6·span), so information
+/// sharing is *distance-gated* rather than uniform (PSO family) or
+/// role-migration (OSA): responders far from the drummer barely move while
+/// close ones snap in, and because λ is fixed the exploration→exploitation
+/// transition **emerges from population convergence itself** — early the
+/// flock is spread so alpha ≈ 0 and responders random-walk, late everyone
+/// is close so alpha → 1 and they march into the best; on top of that the
+/// sound pressure decays with the elapsed session (apf = e^{-t/1500})
+/// shrinking every stride, so the late game is a precision peck-down; (2) **per-individual tree switching** — each bird
+/// carries its own resource-exhaustion counter and re-settles on a random
+/// tree once it stalls 8 times, a *decentralised* diversity injection
+/// unlike the whole-flock restarts of MGA/CHC. Roles are fluid: every
+/// generation re-ranks the flock, the top half drums (fine local pecking
+/// around their own tree) and the bottom half responds to the drumming.
+/// Everything depends only on evaluations already spent, so a larger
+/// budget is a strict continuation and the historical best is monotone.
+/// population_size is accepted for a uniform config interface but not
+/// used (the flock is fixed at 25).
+pub fn woodpecker_mating_algorithm(
+  config : WmaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = 25
+  let drum_cnt = 12
+  let lambda = span * 0.6
+  let switch_stall = 8
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let stalls : Array[Int32] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _j in 0..<pop_size {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pop.push(ind)
+      fits.push(fv)
+      stalls.push(0)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pop.push(ind)
+      fits.push(1.0e300)
+      stalls.push(0)
+    }
+  }
+
+  while evaluations < max_evals {
+    // sound pressure decays as the drumming session wears on (energy
+    // budget dissipation); all strides shrink with it
+    let apf = @math.exp(-evaluations.to_double() / 1500.0)
+    // re-rank the flock every generation; roles are fluid
+    let order = sort_indices(fits)
+    // phase A: drummers (top half) peck — fine local drilling around
+    // their own tree
+    for k in 0..<drum_cnt {
+      if evaluations >= max_evals {
+        break
+      }
+      let i = order[k]
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let u1 = RNG::next(current_rng)
+        let u2 = RNG::next(current_rng)
+        let z = box_muller(u1, u2)
+        cand.push(wma_clip(pop[i][d] + z * span * 0.03 * apf, bounds))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < fits[i] {
+        pop[i] = cand
+        fits[i] = fv
+        stalls[i] = 0
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(cand[d])
+          }
+        }
+      } else {
+        stalls[i] = stalls[i] + 1
+      }
+    }
+    // phase B: responders (bottom half) hear the drumming with acoustic
+    // attenuation — the pull toward the source scales with
+    // e^{-dist/λ} and the flock's own convergence provides the annealing
+    for k in drum_cnt..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let i = order[k]
+      let mut dist = 0.0
+      for d in 0..<dim {
+        let diff = pop[i][d] - best_pos[d]
+        dist = dist + diff * diff
+      }
+      let alpha = @math.exp(-dist.sqrt() / lambda)
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let u1 = RNG::next(current_rng)
+        let u2 = RNG::next(current_rng)
+        let z = box_muller(u1, u2)
+        cand.push(
+          wma_clip(
+            pop[i][d] +
+            alpha * (best_pos[d] - pop[i][d]) +
+            z * span * 0.04 * apf,
+            bounds,
+          ),
+        )
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < fits[i] {
+        pop[i] = cand
+        fits[i] = fv
+        stalls[i] = 0
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(cand[d])
+          }
+        }
+      } else {
+        stalls[i] = stalls[i] + 1
+      }
+    }
+    // phase C: tree switching — each stale bird re-settles on a random
+    // tree (decentralised diversity injection, one eval per switch)
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      if stalls[i] >= switch_stall {
+        let fresh : Array[Double] = []
+        for _d in 0..<dim {
+          fresh.push(bounds.min + RNG::next(current_rng) * span)
+        }
+        let fv = evaluate(f, fresh)
+        evaluations = evaluations + 1
+        pop[i] = fresh
+        fits[i] = fv
+        stalls[i] = 0
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(fresh[d])
+          }
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

@@ -1,10 +1,10 @@
 # BlackBoxOptimization
 
-基于 MoonBit 实现的黑盒优化算法框架，支持 355 种经典优化算法，提供统一的接口和基准测试框架。
+基于 MoonBit 实现的黑盒优化算法框架，支持 356 种经典优化算法，提供统一的接口和基准测试框架。
 
 ## 算法分类
 
-本框架实现了 **355 种**黑盒优化算法，按设计灵感和机制分为以下类别：
+本框架实现了 **356 种**黑盒优化算法，按设计灵感和机制分为以下类别：
 
 ### 🔍 单点搜索算法
 最简单的优化策略，从单个初始解出发，通过迭代改进逐步逼近最优值。
@@ -83,6 +83,7 @@
 | 基因混合进化算法 | GOMEA | **链接模型学习**——每隔数代由种群内坐标间 Pearson 相关聚类出链接组（组大小≤3），分组是"学出来的依赖结构"而非随机；个体以锦标赛选 donor **移植一个链接基因块**（optimal mixing），结果**不劣化即接受**（greedy-mixing 语义，区别于全部算术交叉）；差分探索 + 衰减抖动维持多样性 (2011) |
 | 物种型粒子群优化算法 | SPSO | 每轮按适应度从优到劣扫描**动态成种**——未被任何既有种子支配半径（0.09·span）覆盖者即成为新种子，物种划分由排序与半径共同涌现；物种内成员朝各自种子收缩并叠加物种内差分踢，跨物种步与随机他种种子交换信息，全局收缩收尾；区别于全部预定义分组（角色/岛屿/网格/随机置换/统计相关） (2006) |
 | 鸵鸟优化算法 | OSA | 按适应度分为**三组性别角色**：最优 2 只精英**孵蛋守巢**（巢周精细精修）、次优 6 只雄鸟做**精英激励探索或对抗竞争**（败者被推离胜者以维持多样性——库内独有的反收缩语义）、其余雌鸟**交配迁移**朝随机雄鸟；性别分族行为区别于 ChSO 的公鸡/母鸡/小鸡跟随链与 TGA 的名次分组策略 (2021) |
+| 啄木鸟求偶算法 | WMA | **声强距离衰减吸引**——鼓点信号向源传播，吸引力按 exp(-dist/λ) 指数衰减（λ=0.6·span），信息共享是**距离门控**的而非均匀（PSO 族）或角色迁移（OSA 族）；探索→开发转换由**种群收敛自身涌现**（早期分散 α≈0 响应者随机游走，后期贴近 α→1 齐步进最优），声压随会话耗散（apf=e^{-t/1500}）收缩步幅；每只鸟独立资源耗尽计数器，停滞 8 次即**换树**重定居——个体级去中心化多样性注入区别于 MGA/CHC 的整群重启 (2023) |
 | 藤壶交配优化 | BMO | soft 双亲重组 / hard 与 best 交配 (2018) |
 | 模因算法 | Memetic | SBX-GA 主体 + Lamarckian 局部精修 (1989) |
 | 自适应差分进化 JADE | JADE | current-to-pbest + 外部档案 + Lehmer 自适应 (2009) |
@@ -98,7 +99,7 @@
 | ICA | `population_size`, `imperialist_count`, `assimilation_rate`, `revolution_rate` | 25, 3, 0.3, 0.3 |
 | BBO | `population_size`, `mutation_rate` | 25, 0.01 |
 | BSA | `population_size` | 25 |
-| CLONALG / OAIN / CA / CHIO / SaDE / CoDE / ODE / JADE / RGA / Memetic / MFA / BMO / CHC / CC / MGA / CellGA / GOMEA / SPSO / OSA | 仅需 `population_size` | 25 |
+| CLONALG / OAIN / CA / CHIO / SaDE / CoDE / ODE / JADE / RGA / Memetic / MFA / BMO / CHC / CC / MGA / CellGA / GOMEA / SPSO / OSA / WMA | 仅需 `population_size` | 25 |
 
 ### 🐝 群体智能算法
 本框架最大的算法类别，模拟自然界生物群体行为进行协同搜索。
@@ -588,7 +589,7 @@ moon run main
 ### 运行测试
 
 ```bash
-# 运行所有测试（731 个测试用例）
+# 运行所有测试（733 个测试用例）
 moon test
 
 # 代码检查
@@ -1047,7 +1048,7 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 |------|----------|------|
 | **🔍 单点搜索** | 随机搜索、爬山法、模拟退火、SPSA、盆地跳跃、BAS、PTO、DAnl、SQA、PA、Demon、WL、ASA、MLSL | 简单、易于实现，适合低维问题 |
 | **🔧 局部搜索** | 禁忌搜索、引导局部搜索、大洪水、变邻域、阈值接受 | 强化局部开发，避免陷入局部最优 |
-| **🧬 进化算法** | DE、GA、jDE、SHADE、LSHADE、JADE、SaDE、Memetic、CLONALG、OAIN、ICA、BBO、BSA、CHC、CC、MGA、CellGA、GOMEA、SPSO、OSA | 基于种群进化，鲁棒性好 |
+| **🧬 进化算法** | DE、GA、jDE、SHADE、LSHADE、JADE、SaDE、Memetic、CLONALG、OAIN、ICA、BBO、BSA、CHC、CC、MGA、CellGA、GOMEA、SPSO、OSA、WMA | 基于种群进化，鲁棒性好 |
 | **🐝 群体智能** | PSO、萤火虫、蚁群、蜂群、灰狼、鲸群、蝙蝠、和声、麻雀搜索、哈里斯鹰、GOA、SOA、CSO、GTO、SMA、AO、ChOA、DO、ZOA、CPSO、LPSO、QPSO、UPSO、ACOR、COOT、DOA、STOA、GKSO、FLA、HO、NMRA、FFO、EPO、CPO、MTBO、CryStAl、NOA、ESOA、MOA、AOS、MA、SSO、SLnO、FOA、SFO、NNA、PBO、FSS、CFO、CGO、CDO、ILS、SCE、GRASP、BO、FSA、SMO、HLO、FDA、CRO、AAA、VSA、VPL、WEO、SNS、TCO、RO、GbSA、BA、CO、CSS、MBA、PCA、IMO、EMA、WCO、AEFA、OIO、LAPO、FGBO、EA、LAHC、HuS、RRT、NRO、HTS、PGO、IWD、RFD、LSA、SS、OBA、APO、HBO、SAO、BRO、EFO、GBMO、DSA、GSK、ALNS、SGO、ASO、BCMO、MKE、RFO、SAR、ChSA、RDA、SqSA、Puma、StMO、SFOA、ABO、Gannet、Narwhal、Serval、ChSO、PR、CrSO、JS、WSA、SeHO、WBO、OWL、RRO、SaFO、GPC、SSD、FDO、CFA、OPA、APuf、WPA、Racc、Monkey、BSwA、TGA、PPA、HBMO、Crayfish、QSA、Starfish、TBO、Lyrebird、SEOA、GFO、DEO、ManSA、EWA、GrSA、FrOA、ChRO、SPBO、CLPSO、ExtO、SOMA、SDS、DHO、GWSO 等 | 基于群体行为，全局搜索能力强 |
 | **📐 确定性直接搜索** | Nelder-Mead、Hooke-Jeeves、Powell、Rosenbrock、CRS、DIRECT、BFGS、COBYLA、MADS、NEWUOA、MCS、PRAXIS、BOBYQA、GSS、Subplex、LBB、MTS、IFilt、CG、MDS、BB、Anderson、RSM | 无需梯度（或数值梯度近似），适合不可导函数 |
 | **🧮 进化策略** | CMA-ES、ES、xNES、1+1ES、sepCMA | 协方差/步长自适应，适合病态问题 |
