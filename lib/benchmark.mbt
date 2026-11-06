@@ -2392,6 +2392,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       )
     },
   })
+  entries.push(AlgoEntry::{
+    name: "PGSA",
+    run: (e, d, b, r, f) => {
+      plant_growth_simulation(make_pgsa_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

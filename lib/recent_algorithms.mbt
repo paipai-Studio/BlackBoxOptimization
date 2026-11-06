@@ -44618,3 +44618,184 @@ pub fn bivariate_marginal_distribution_algorithm(
     evaluations,
   }
 }
+
+// ===== PGSA: plant growth simulation algorithm (2005) =====
+
+///|
+pub struct PgsaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_pgsa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> PgsaConfig {
+  PgsaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn pgsa_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Plant Growth Simulation Algorithm (PGSA, Li Tong et al. 2005). Models
+/// the phototropic growth of a plant trunk: a **node pool** (capacity 40,
+/// 20 random trunk nodes seeded) grows one generation of buds at a time.
+/// Every node carries a **morphactin concentration** L = 1 / (1 + 10·
+/// (f − f_best)/(f_worst − f_best)) — the closer a node is to the optimum,
+/// the higher its concentration — and growth points are drawn from the pool
+/// by a concentration-weighted roulette. Each bud extends from its growth
+/// point with an independently sampled Gaussian step per dimension whose
+/// length decays linearly with the budget (span·0.12 → span·0.02). New buds
+/// join the pool **unconditionally** (growth, not replacement) and the pool
+/// is pruned back to capacity each generation by fitness (competitive
+/// exclusion). The combination of *probability-selected growth points*,
+/// *unconditional pool growth* and *capacity pruning* is absent from the
+/// rest of the library — PPA replaces parents with rank-scaled runners, NS
+/// replaces the worst live point only under a strict improvement threshold,
+/// and RRO's rank-weighted roulette merely picks a reference for an
+/// in-place move. The bud length depends only on evaluations already
+/// spent, so a larger budget is a strict continuation and the historical
+/// best is monotone. population_size is accepted for a uniform config
+/// interface but not used (the pool is fixed at 40).
+pub fn plant_growth_simulation(
+  config : PgsaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pool_cap = 40
+  let init_pool = 20
+  let buds_per_gen = 25
+
+  // node pool seeded with random trunk nodes
+  let pool : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _j in 0..<init_pool {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pool.push(ind)
+      fits.push(fv)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pool.push(ind)
+      fits.push(1.0e300)
+    }
+  }
+
+  while evaluations < max_evals {
+    // morphactin concentrations: the closer to the incumbent optimum, the
+    // higher the concentration (normalized by the pool's fitness range)
+    let mut f_worst = -1.0e300
+    for j in 0..<pool.length() {
+      if fits[j] > f_worst {
+        f_worst = fits[j]
+      }
+    }
+    let f_range = f_worst - best_val
+    let weights : Array[Double] = []
+    let mut w_total = 0.0
+    for j in 0..<pool.length() {
+      let frac = (fits[j] - best_val) / (f_range + 1.0e-9)
+      let conc = 1.0 / (1.0 + 10.0 * frac)
+      weights.push(conc)
+      w_total = w_total + conc
+    }
+    // bud length decays linearly with the spent budget
+    let progress = evaluations.to_double() / max_evals.to_double()
+    let branch = span * (0.12 - 0.10 * progress)
+
+    // one generation of buds, each drawn by concentration-weighted roulette
+    let mut buds = 0
+    while buds < buds_per_gen && evaluations < max_evals {
+      let u = RNG::next(current_rng) * w_total
+      let mut acc = 0.0
+      let mut pick = weights.length() - 1
+      let mut chosen = false
+      for j in 0..<weights.length() {
+        acc = acc + weights[j]
+        if chosen == false && acc >= u {
+          pick = j
+          chosen = true
+        }
+      }
+      let bud : Array[Double] = []
+      for d in 0..<dim {
+        let u1 = RNG::next(current_rng)
+        let u2 = RNG::next(current_rng)
+        let z = box_muller(u1, u2)
+        bud.push(pgsa_clip(pool[pick][d] + z * branch, bounds))
+      }
+      let fv = evaluate(f, bud)
+      evaluations = evaluations + 1
+      buds = buds + 1
+      pool.push(bud)
+      fits.push(fv)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(bud[d])
+        }
+      }
+    }
+    // competitive exclusion: prune the pool back to capacity by fitness
+    if pool.length() > pool_cap {
+      let order = sort_indices(fits)
+      let kept_pool : Array[Array[Double]] = []
+      let kept_fits : Array[Double] = []
+      for k in 0..<pool_cap {
+        let idx = order[k]
+        kept_pool.push(pool[idx])
+        kept_fits.push(fits[idx])
+      }
+      pool.clear()
+      fits.clear()
+      for k in 0..<pool_cap {
+        pool.push(kept_pool[k])
+        fits.push(kept_fits[k])
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
