@@ -2420,6 +2420,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       bandit_allocation_algorithm(make_bandit_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "LA",
+    run: (e, d, b, r, f) => {
+      learning_automata_algorithm(make_la_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

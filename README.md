@@ -1,10 +1,10 @@
 # BlackBoxOptimization
 
-基于 MoonBit 实现的黑盒优化算法框架，支持 362 种经典优化算法，提供统一的接口和基准测试框架。
+基于 MoonBit 实现的黑盒优化算法框架，支持 363 种经典优化算法，提供统一的接口和基准测试框架。
 
 ## 算法分类
 
-本框架实现了 **362 种**黑盒优化算法，按设计灵感和机制分为以下类别：
+本框架实现了 **363 种**黑盒优化算法，按设计灵感和机制分为以下类别：
 
 ### 🔍 单点搜索算法
 最简单的优化策略，从单个初始解出发，通过迭代改进逐步逼近最优值。
@@ -87,6 +87,7 @@
 | 拥挤遗传算法 | Crowd | **相似度驱动的最近邻竞争替换**——子代与种群中欧氏距离最近的个体竞争、仅当更优才替换它（crowding selection），替换决策由**空间相似度**而非适应度排名/阈值/池容量驱动——区别于 TGA 的排名分组替代、NS 的最差淘汰、OAIN 的距离阈值淘汰重播种、BRO 的伤害计数重生、PGSA 的容量淘汰；子代由 50% 逐维高斯变异（crf 衰减步长）+ 50% BLX 式内插外推交叉（w~U(-0.25,1.25)）产生，因子代总在亲代附近、被替换者通常也是附近个体，**多个盆地得以共存**（niching 性质由替换规则隐式涌现，无显式多样性机制）；忠实 De Jong 原版**无全局最优拉力**，收敛由局部竞争间接驱动 (1975) |
 | 种群训练算法 | PBT | **算法自身参数作为进化对象**（库内首个）——每个体携带私有超参数对（变异步长 step∈[0.02,0.30]·span 与朝最优拉力 pull∈[0.1,1.5]，均匀随机种子），搜索在双循环间交替：常规步（每个体用**自身**超参数移动：拉力加权向最优漂移 + 步长缩放高斯抖动，改进才替换）+ 周期性 **exploit-explore 循环**（每 8 代、位置冻结仅动超参数）：exploit——中位数以下的个体复制随机中位数以上个体的超参数对（劣配置死亡、优配置传播），explore——全体超参数扰动（步长对数空间 ×exp(N(0,0.3))、拉力加性 ±0.1）后截断——区别于全部固定更新规则/标量自适应（1+1ES 的 1/5 法则、jDE 的个体 F/CR、ALNS 的算子权重竞争、DEO 的半径自适应），**配置本身就是染色体**、更新规则随种群共同进化 (2017) |
 | 适应度共享算法 | FS | **密度分摊的有效适应度作为决策键**（库内唯一）——每代计算全部个体对的连续三角核密度计数（niche count，σ_share=0.12·span），原始适应度乘以 niche count 得**有效适应度**后按其排序分组：最优 1/3（不拥挤且适应度好）向最优自由精修、中间 1/3 常规变异搜索、最差 1/3（拥挤或适应度差）被**密度驱逐**（70% 远离最近邻 / 30% 随机区域迁移）——区别于全部按原始适应度排序/分组的算法（TGA/ChSO/OSA 名次分组、SPSO 成种半径、GOMEA 统计相关、CC 随机置换），也区别于 WL 的离散直方图箱计数（FS 为连续个体间核密度）、OAIN 的阈值淘汰重播种与 Crowd 的最近邻竞争替换（二者改变位置/成员，FS 改变**选择压力本身**而成员永不撤销） (1987) |
+| 学习自动机优化算法 | LA | **个体级动作概率向量的环境反馈强化**（库内唯一）——每个体携带逐维三元动作（−/停/＋）概率表 pp[i][d]（正步概率，种子 0.5）与 pz[i][d]（停步概率，种子 0.2），自动机移动按概率**逐维独立采样**动作后，按整次移动成败以**线性奖励-惩罚方案**（L_RP，lr=0.08）强化实际采样的动作概率——「哪些维度值得动」是学出来的个体级选择性状态，区别于 Starfish 的随机维度选择、PC 的连续高斯分布（μ/σ）、cGA 的全局单概率向量、PBT 的可复制超参数与 SEOA 的标量情绪；另含精细抖动（laf² 尺度多样性维持）与向最优收缩（0.4 拉力） (1970s) |
 | 藤壶交配优化 | BMO | soft 双亲重组 / hard 与 best 交配 (2018) |
 | 模因算法 | Memetic | SBX-GA 主体 + Lamarckian 局部精修 (1989) |
 | 自适应差分进化 JADE | JADE | current-to-pbest + 外部档案 + Lehmer 自适应 (2009) |
@@ -102,7 +103,7 @@
 | ICA | `population_size`, `imperialist_count`, `assimilation_rate`, `revolution_rate` | 25, 3, 0.3, 0.3 |
 | BBO | `population_size`, `mutation_rate` | 25, 0.01 |
 | BSA | `population_size` | 25 |
-| CLONALG / OAIN / CA / CHIO / SaDE / CoDE / ODE / JADE / RGA / Memetic / MFA / BMO / CHC / CC / MGA / CellGA / GOMEA / SPSO / OSA / WMA / Crowd / PBT / FS | 仅需 `population_size` | 25 |
+| CLONALG / OAIN / CA / CHIO / SaDE / CoDE / ODE / JADE / RGA / Memetic / MFA / BMO / CHC / CC / MGA / CellGA / GOMEA / SPSO / OSA / WMA / Crowd / PBT / FS / LA | 仅需 `population_size` | 25 |
 
 ### 🐝 群体智能算法
 本框架最大的算法类别，模拟自然界生物群体行为进行协同搜索。
@@ -595,7 +596,7 @@ moon run main
 ### 运行测试
 
 ```bash
-# 运行所有测试（745 个测试用例）
+# 运行所有测试（747 个测试用例）
 moon test
 
 # 代码检查
@@ -1054,7 +1055,7 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 |------|----------|------|
 | **🔍 单点搜索** | 随机搜索、爬山法、模拟退火、SPSA、盆地跳跃、BAS、PTO、DAnl、SQA、PA、Demon、WL、ASA、MLSL | 简单、易于实现，适合低维问题 |
 | **🔧 局部搜索** | 禁忌搜索、引导局部搜索、大洪水、变邻域、阈值接受 | 强化局部开发，避免陷入局部最优 |
-| **🧬 进化算法** | DE、GA、jDE、SHADE、LSHADE、JADE、SaDE、Memetic、CLONALG、OAIN、ICA、BBO、BSA、CHC、CC、MGA、CellGA、GOMEA、SPSO、OSA、WMA、Crowd、PBT、FS | 基于种群进化，鲁棒性好 |
+| **🧬 进化算法** | DE、GA、jDE、SHADE、LSHADE、JADE、SaDE、Memetic、CLONALG、OAIN、ICA、BBO、BSA、CHC、CC、MGA、CellGA、GOMEA、SPSO、OSA、WMA、Crowd、PBT、FS、LA | 基于种群进化，鲁棒性好 |
 | **🐝 群体智能** | PSO、萤火虫、蚁群、蜂群、灰狼、鲸群、蝙蝠、和声、麻雀搜索、哈里斯鹰、GOA、SOA、CSO、GTO、SMA、AO、ChOA、DO、ZOA、CPSO、LPSO、QPSO、UPSO、ACOR、COOT、DOA、STOA、GKSO、FLA、HO、NMRA、FFO、EPO、CPO、MTBO、CryStAl、NOA、ESOA、MOA、AOS、MA、SSO、SLnO、FOA、SFO、NNA、PBO、FSS、CFO、CGO、CDO、ILS、SCE、GRASP、BO、FSA、SMO、HLO、FDA、CRO、AAA、VSA、VPL、WEO、SNS、TCO、RO、GbSA、BA、CO、CSS、MBA、PCA、IMO、EMA、WCO、AEFA、OIO、LAPO、FGBO、EA、LAHC、HuS、RRT、NRO、HTS、PGO、IWD、RFD、LSA、SS、OBA、APO、HBO、SAO、BRO、EFO、GBMO、DSA、GSK、ALNS、SGO、ASO、BCMO、MKE、RFO、SAR、ChSA、RDA、SqSA、Puma、StMO、SFOA、ABO、Gannet、Narwhal、Serval、ChSO、PR、CrSO、JS、WSA、SeHO、WBO、OWL、RRO、SaFO、GPC、SSD、FDO、CFA、OPA、APuf、WPA、Racc、Monkey、BSwA、TGA、PPA、HBMO、Crayfish、QSA、Starfish、TBO、Lyrebird、SEOA、GFO、DEO、ManSA、EWA、GrSA、FrOA、ChRO、SPBO、CLPSO、ExtO、SOMA、SDS、DHO、GWSO、PGSA 等 | 基于群体行为，全局搜索能力强 |
 | **📐 确定性直接搜索** | Nelder-Mead、Hooke-Jeeves、Powell、Rosenbrock、CRS、DIRECT、BFGS、COBYLA、MADS、NEWUOA、MCS、PRAXIS、BOBYQA、GSS、Subplex、LBB、MTS、IFilt、CG、MDS、BB、Anderson、RSM、Bandit | 无需梯度（或数值梯度近似），适合不可导函数 |
 | **🧮 进化策略** | CMA-ES、ES、xNES、1+1ES、sepCMA | 协方差/步长自适应，适合病态问题 |

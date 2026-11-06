@@ -45549,3 +45549,250 @@ pub fn bandit_allocation_algorithm(
     evaluations,
   }
 }
+
+// ===== LA: learning automata optimization =====
+
+///|
+pub struct LaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_la_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> LaConfig {
+  LaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn la_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Learning Automata Optimization (LA, Thathachar & Sastry, 1970s~2004).
+/// The only algorithm in the library whose per-individual state is an
+/// **action-probability vector reinforced by environmental feedback** —
+/// three discrete actions per dimension (step −, hold still, step +) with
+/// *learned* probabilities instead of continuous Gaussian sampling. Every
+/// individual carries two probability tables: `pp[i][d]` (probability of
+/// stepping positive along dimension d, seeded 0.5) and `pz[i][d]`
+/// (probability of holding dimension d still, seeded 0.2 — the remainder is
+/// the negative-step probability). Each automaton move samples one of the
+/// three actions per dimension independently, then applies the **linear
+/// reward-penalty scheme**: the sampled action's probability moves a small
+/// step lr=0.08 toward 1 when the overall move improved the mover and
+/// toward 0 when it failed — so "which dimensions are worth moving" is a
+/// *learned* per-individual selective state, unlike Starfish's random
+/// dimension choice, PC's continuous Gaussian (μ/σ), cGA's single global
+/// probability vector, PBT's replicated hyperparameters, and SEOA's scalar
+/// emotion. Two additional behaviors share the budget: fine jitter
+/// (span·0.05·laf², diversity — the MKE lesson) and contraction toward the
+/// incumbent best (0.4 pull + jitter). Improvement-only replacement on raw
+/// fitness; the historical best is tracked separately; laf = e^{-t/2500}
+/// decays strides. Everything depends only on evaluations already spent, so
+/// a larger budget is a strict continuation and the historical best is
+/// monotone. population_size is accepted for a uniform config interface but
+/// not used (the population is fixed at 25).
+pub fn learning_automata_algorithm(
+  config : LaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = 25
+  let lr = 0.08
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let pp : Array[Array[Double]] = []
+  let pz : Array[Array[Double]] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _j in 0..<pop_size {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    let a_pp : Array[Double] = []
+    let a_pz : Array[Double] = []
+    for _d in 0..<dim {
+      a_pp.push(0.5)
+      a_pz.push(0.2)
+    }
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pop.push(ind)
+      fits.push(fv)
+      pp.push(a_pp)
+      pz.push(a_pz)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pop.push(ind)
+      fits.push(1.0e300)
+      pp.push(a_pp)
+      pz.push(a_pz)
+    }
+  }
+
+  while evaluations < max_evals {
+    let laf = @math.exp(-evaluations.to_double() / 2500.0)
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.55 {
+        // automaton move: sample the three-action distribution per
+        // dimension independently, remember the sampled actions
+        let dirs : Array[Int32] = []
+        for d in 0..<dim {
+          let u = RNG::next(current_rng)
+          let dir = if u < pz[i][d] {
+            0
+          } else if u < pz[i][d] + pp[i][d] {
+            1
+          } else {
+            -1
+          }
+          dirs.push(dir)
+          cand.push(
+            la_clip(pop[i][d] + dir.to_double() * span * 0.10 * laf, bounds),
+          )
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        if fv < fits[i] {
+          pop[i] = cand
+          fits[i] = fv
+          if fv < best_val {
+            best_val = fv
+            best_pos = []
+            for d in 0..<dim {
+              best_pos.push(cand[d])
+            }
+          }
+        }
+        // linear reward-penalty on the actually sampled actions
+        let reward = if fv < fits[i] { 1.0 } else { 0.0 }
+        for d in 0..<dim {
+          let dir = dirs[d]
+          if dir == 1 {
+            let np = pp[i][d] + lr * (reward - pp[i][d])
+            pp[i][d] = if np < 0.05 {
+              0.05
+            } else if np > 0.90 {
+              0.90
+            } else {
+              np
+            }
+          } else if dir == 0 {
+            let np = pz[i][d] + lr * (reward - pz[i][d])
+            pz[i][d] = if np < 0.02 {
+              0.02
+            } else if np > 0.30 {
+              0.30
+            } else {
+              np
+            }
+          } else {
+            let np = pp[i][d] -
+              lr * reward * pp[i][d] * 0.5 +
+              lr * (1.0 - reward) * (1.0 - pp[i][d]) * 0.25
+            pp[i][d] = if np < 0.05 {
+              0.05
+            } else if np > 0.90 {
+              0.90
+            } else {
+              np
+            }
+          }
+        }
+      } else if r1 < 0.80 {
+        // fine jitter: plain diversity maintenance
+        for d in 0..<dim {
+          let u1 = RNG::next(current_rng)
+          let u2 = RNG::next(current_rng)
+          let z = box_muller(u1, u2)
+          cand.push(la_clip(pop[i][d] + z * span * 0.05 * laf * laf, bounds))
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        if fv < fits[i] {
+          pop[i] = cand
+          fits[i] = fv
+          if fv < best_val {
+            best_val = fv
+            best_pos = []
+            for d in 0..<dim {
+              best_pos.push(cand[d])
+            }
+          }
+        }
+      } else {
+        // contract toward the incumbent best
+        for d in 0..<dim {
+          let u1 = RNG::next(current_rng)
+          let u2 = RNG::next(current_rng)
+          let z = box_muller(u1, u2)
+          cand.push(
+            la_clip(
+              pop[i][d] +
+              0.4 * (best_pos[d] - pop[i][d]) +
+              z * span * 0.06 * laf,
+              bounds,
+            ),
+          )
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        if fv < fits[i] {
+          pop[i] = cand
+          fits[i] = fv
+          if fv < best_val {
+            best_val = fv
+            best_pos = []
+            for d in 0..<dim {
+              best_pos.push(cand[d])
+            }
+          }
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
