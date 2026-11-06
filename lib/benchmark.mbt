@@ -2348,6 +2348,10 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       ostrich_optimization(make_osa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "BB",
+    run: (e, d, b, r, f) => barzilai_borwein(make_bb_config(e, d, b, 25), f, r),
+  })
   entries
 }
 

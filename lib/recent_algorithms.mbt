@@ -42688,3 +42688,308 @@ pub fn ostrich_optimization(
     evaluations,
   }
 }
+
+// ===== BB: Barzilai-Borwein gradient method (Barzilai & Borwein 1988) =====
+
+///|
+pub struct BbConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bb_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BbConfig {
+  BbConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn bb_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Barzilai-Borwein gradient method (BB, Barzilai & Borwein 1988). A
+/// deterministic first-order method whose step size is estimated from the
+/// **last pair of points alone**: with s = x_{k+1} − x_k and y = g_{k+1} − g_k
+/// the two secant estimates are alpha_BB1 = sᵀs / (sᵀy) and alpha_BB2 =
+/// sᵀy / (yᵀy), used **alternately** (Raydan 1997) and clipped to the span.
+/// Acceptance follows the **non-monotone Grippo-Lampariello-Lucidi rule** —
+/// f(x_new) ≤ max over the last M=10 function values − 1e-4·‖g‖² — so the
+/// trajectory is allowed to temporarily worsen in order to escape shallow
+/// traps, unlike the monotone Armijo line searches of BFGS/CG and unlike
+/// trust-region schemes (COBYLA/NEWUOA) or multi-scale smoothing (IFilt).
+/// There is no matrix, no moment accumulator, no conjugate direction and no
+/// trust radius: a single scalar step per iteration is the whole mechanism.
+/// Failures backtrack alpha by halves (6 tries); persistent stall escapes
+/// toward the best neighborhood, and the budget is organized as fixed-length
+/// per-restart segments so a larger budget is a strict continuation and the
+/// historical best is monotone. population_size is accepted for a uniform
+/// config interface but not used (single-trajectory method).
+pub fn barzilai_borwein(
+  config : BbConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let per_restart = 200
+  let restart_max = 25
+  let grad_h = span * 1.0e-4
+  let mem_len = 10
+
+  let mut x : Array[Double] = []
+  for _d in 0..<dim {
+    x.push(bounds.min + RNG::next(current_rng) * span)
+  }
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut fx = evaluate(f, x)
+  evaluations = evaluations + 1
+  if fx < best_val {
+    best_val = fx
+    best_pos = []
+    for d in 0..<dim {
+      best_pos.push(x[d])
+    }
+  }
+
+  // non-monotone memory: the last mem_len function values
+  let mem : Array[Double] = []
+  for _k in 0..<mem_len {
+    mem.push(1.0e300)
+  }
+  let mut mem_slot = 0
+  mem[mem_slot] = fx
+  mem_slot = (mem_slot + 1) % mem_len
+
+  // pending secant pair from the previous accepted step
+  let s_pend : Array[Double] = []
+  let g_prev : Array[Double] = []
+  let y_hat : Array[Double] = []
+  for _d in 0..<dim {
+    s_pend.push(0.0)
+    g_prev.push(0.0)
+    y_hat.push(0.0)
+  }
+  let mut have_pend = false
+  let mut have_sy = false
+
+  let mut restart = 0
+  while evaluations < max_evals {
+    restart = restart + 1
+    if restart > restart_max {
+      break
+    }
+    if restart > 1 {
+      // alternate restarts between uniform and best-neighborhood starts
+      x = []
+      for d in 0..<dim {
+        let v = if restart % 2 == 0 {
+          bounds.min + RNG::next(current_rng) * span
+        } else {
+          best_pos[d] + (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05
+        }
+        x.push(bb_clip(v, bounds))
+      }
+      fx = evaluate(f, x)
+      evaluations = evaluations + 1
+      if fx < best_val {
+        best_val = fx
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(x[d])
+        }
+      }
+      mem[mem_slot] = fx
+      mem_slot = (mem_slot + 1) % mem_len
+      have_pend = false
+      have_sy = false
+    }
+    let mut consumed = 0
+    let mut stall = 0
+    while evaluations < max_evals && consumed < per_restart {
+      // gradient at the current point by forward differences
+      let g : Array[Double] = []
+      let mut gsq = 0.0
+      for d in 0..<dim {
+        let xv = x[d] + grad_h
+        let xo = x[d]
+        x[d] = if xv > bounds.max { bounds.max } else { xv }
+        let fp = evaluate(f, x)
+        x[d] = xo
+        evaluations = evaluations + 1
+        consumed = consumed + 1
+        let gd = (fp - fx) / grad_h
+        g.push(gd)
+        gsq = gsq + gd * gd
+      }
+      if gsq < 1.0e-20 {
+        // flat region: informed escape toward the best
+        x = []
+        for d in 0..<dim {
+          let v = best_pos[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05
+          x.push(bb_clip(v, bounds))
+        }
+        fx = evaluate(f, x)
+        evaluations = evaluations + 1
+        consumed = consumed + 1
+        if fx < best_val {
+          best_val = fx
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(x[d])
+          }
+        }
+        mem[mem_slot] = fx
+        mem_slot = (mem_slot + 1) % mem_len
+        have_pend = false
+        have_sy = false
+        stall = 0
+      } else {
+        // finalize the secant pair from the previous accepted step
+        if have_pend {
+          let mut sy = 0.0
+          for d in 0..<dim {
+            let yd = g[d] - g_prev[d]
+            y_hat[d] = yd
+            sy = sy + s_pend[d] * yd
+          }
+          have_sy = sy > 1.0e-20
+        } else {
+          have_sy = false
+        }
+        // Barzilai-Borwein alpha (alternating BB1/BB2), clipped to the span
+        let mut alpha = span * 0.1
+        if have_sy {
+          let mut ss = 0.0
+          let mut sy = 0.0
+          let mut yy = 0.0
+          for d in 0..<dim {
+            ss = ss + s_pend[d] * s_pend[d]
+            sy = sy + s_pend[d] * y_hat[d]
+            yy = yy + y_hat[d] * y_hat[d]
+          }
+          if sy > 1.0e-20 {
+            let a1 = ss / sy
+            let a2 = sy / yy
+            alpha = if evaluations % 2 == 0 { a1 } else { a2 }
+            if alpha < span * 1.0e-8 {
+              alpha = span * 1.0e-8
+            }
+            if alpha > span {
+              alpha = span
+            }
+          } else {
+            alpha = span * 0.1
+          }
+        }
+        // non-monotone acceptance threshold over the last mem_len values
+        let mut maxf = fx
+        for k in 0..<mem_len {
+          if mem[k] > maxf {
+            maxf = mem[k]
+          }
+        }
+        let threshold = maxf - 6.0e-5 * gsq
+        // backtracking trial
+        let mut accepted = false
+        let mut a_try = alpha
+        let mut trial_x : Array[Double] = []
+        let mut trial_f = 1.0e300
+        let mut trials = 0
+        while trials < 6 {
+          trial_x = []
+          for d in 0..<dim {
+            trial_x.push(bb_clip(x[d] - a_try * g[d], bounds))
+          }
+          trial_f = evaluate(f, trial_x)
+          evaluations = evaluations + 1
+          consumed = consumed + 1
+          if trial_f <= threshold {
+            accepted = true
+            break
+          }
+          a_try = a_try * 0.5
+          trials = trials + 1
+        }
+        if accepted {
+          // stash the displacement as the pending secant pair
+          for d in 0..<dim {
+            s_pend[d] = trial_x[d] - x[d]
+            g_prev[d] = g[d]
+          }
+          have_pend = true
+          x = trial_x
+          fx = trial_f
+          stall = 0
+          if fx < best_val {
+            best_val = fx
+            best_pos = []
+            for d in 0..<dim {
+              best_pos.push(x[d])
+            }
+          }
+          mem[mem_slot] = fx
+          mem_slot = (mem_slot + 1) % mem_len
+        } else {
+          // persistent stall: informed escape toward the best
+          stall = stall + 1
+          if stall >= 2 {
+            x = []
+            for d in 0..<dim {
+              let v = best_pos[d] +
+                (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05
+              x.push(bb_clip(v, bounds))
+            }
+            fx = evaluate(f, x)
+            evaluations = evaluations + 1
+            consumed = consumed + 1
+            if fx < best_val {
+              best_val = fx
+              best_pos = []
+              for d in 0..<dim {
+                best_pos.push(x[d])
+              }
+            }
+            mem[mem_slot] = fx
+            mem_slot = (mem_slot + 1) % mem_len
+            have_pend = false
+            have_sy = false
+            stall = 0
+          }
+        }
+      }
+      if consumed >= per_restart {
+        break
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
