@@ -42244,3 +42244,226 @@ pub fn gene_pool_optimal_mixing(
     evaluations,
   }
 }
+
+// ===== SPSO: species-based particle swarm optimizer (Parrott & Li 2006) =====
+
+///|
+pub struct SpsoConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_spso_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SpsoConfig {
+  SpsoConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn spso_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Species-based Particle Swarm Optimizer (SPSO, Parrott & Li 2006). The
+/// swarm is **dynamically partitioned into species** every round: scanning
+/// individuals from best to worst, anyone falling inside the dominance
+/// radius of an already established species seed joins that species,
+/// otherwise it becomes a new seed — the partition emerges from the fitness
+/// ranking and the radius itself, unlike every pre-defined grouping in the
+/// library (ChSO roles, Narwhal islands, CellGA grid, CC random partition,
+/// GOMEA learned linkage). Inside a species members move toward their seed
+/// with intra-species differential kicks; a cross-species step exchanges
+/// information between species seeds; a global contraction targets the
+/// incumbent best. The species factor `spf = e^{-t/2500}` decays with
+/// evaluations already spent, so a larger budget is a strict continuation
+/// and the historical best is monotone. population_size is accepted for a
+/// uniform config interface but not used (the pool is fixed at 25).
+pub fn species_pso(
+  config : SpsoConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = 25
+  let sr2 = span * 0.09 * (span * 0.09)
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _j in 0..<pop_size {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pop.push(ind)
+      fits.push(fv)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pop.push(ind)
+      fits.push(1.0e300)
+    }
+  }
+
+  while evaluations < max_evals {
+    let spf = @math.exp(-evaluations.to_double() / 2500.0)
+    // rank individuals best-to-worst with an all-Int selection sort
+    let order : Array[Int32] = []
+    let used : Array[Bool] = []
+    for _k in 0..<pop_size {
+      order.push(0)
+      used.push(false)
+    }
+    for k in 0..<pop_size {
+      let mut bi = -1
+      for j in 0..<pop_size {
+        if !used[j] {
+          if bi < 0 || fits[j] < fits[bi] {
+            bi = j
+          }
+        }
+      }
+      used[bi] = true
+      order[k] = bi
+    }
+    // species forming: best-to-worst scan over the dominance radius
+    let species_of : Array[Int32] = []
+    let seed_of : Array[Int32] = []
+    let members : Array[Array[Int32]] = []
+    for _k in 0..<pop_size {
+      species_of.push(-1)
+    }
+    for k in 0..<pop_size {
+      let idx = order[k]
+      let mut si = -1
+      for s in 0..<seed_of.length() {
+        let sd = seed_of[s]
+        let mut dsq = 0.0
+        for d in 0..<dim {
+          let dv = pop[idx][d] - pop[sd][d]
+          dsq = dsq + dv * dv
+        }
+        if dsq < sr2 {
+          si = s
+          break
+        }
+      }
+      if si < 0 {
+        seed_of.push(idx)
+        let m : Array[Int32] = []
+        m.push(idx)
+        members.push(m)
+        species_of[idx] = seed_of.length() - 1
+      } else {
+        species_of[idx] = si
+        members[si].push(idx)
+      }
+    }
+    let mut consumed = 0
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let si = species_of[i]
+      let sd = seed_of[si]
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.40 {
+        // species-follow: move toward the species seed with intra-species kicks
+        let m = members[si]
+        let ml = m.length()
+        let p = m[(RNG::next(current_rng) * ml.to_double()).to_int() % ml]
+        let q = m[(RNG::next(current_rng) * ml.to_double()).to_int() % ml]
+        for d in 0..<dim {
+          let v = pop[i][d] +
+            0.7 * spf * (pop[sd][d] - pop[i][d]) +
+            0.45 * (pop[p][d] - pop[q][d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10 * spf
+          cand.push(spso_clip(v, bounds))
+        }
+      } else if r1 < 0.80 {
+        // cross-species: exchange information with another species' seed
+        let mut oi = (RNG::next(current_rng) * seed_of.length().to_double()).to_int() %
+          seed_of.length()
+        if oi == si {
+          oi = (oi + 1) % seed_of.length()
+        }
+        let osd = seed_of[oi]
+        let p = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let q = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        for d in 0..<dim {
+          let v = pop[i][d] +
+            0.5 * spf * (pop[osd][d] - pop[i][d]) +
+            0.4 * (pop[p][d] - pop[q][d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.09 * spf
+          cand.push(spso_clip(v, bounds))
+        }
+      } else {
+        // global contraction
+        for d in 0..<dim {
+          let r2 = RNG::next(current_rng)
+          let v = best_pos[d] +
+            r2 * (pop[i][d] - best_pos[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.09 * spf
+          cand.push(spso_clip(v, bounds))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      consumed = consumed + 1
+      if fv < fits[i] {
+        fits[i] = fv
+        pop[i] = cand
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(cand[d])
+          }
+        }
+      }
+    }
+    if consumed == 0 {
+      break
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

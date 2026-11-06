@@ -2338,6 +2338,10 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       gene_pool_optimal_mixing(make_gomea_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "SPSO",
+    run: (e, d, b, r, f) => species_pso(make_spso_config(e, d, b, 25), f, r),
+  })
   entries
 }
 
