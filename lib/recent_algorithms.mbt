@@ -42993,3 +42993,354 @@ pub fn barzilai_borwein(
     evaluations,
   }
 }
+
+// ===== Anderson: Anderson acceleration (Anderson 1965) =====
+
+///|
+pub struct AndersonConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_anderson_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> AndersonConfig {
+  AndersonConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn anderson_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Anderson acceleration (Anderson 1965, SIAM; the fixed-point acceleration
+/// behind scipy.optimize.anderson). A deterministic first-order method built
+/// on a **residual least-squares mixing** mechanism never used in this
+/// library: every iteration produces a point x_k and the residual of its
+/// gradient-descent map r_k = G(x_k) − x_k with G(x) = x − α∇f(x); the last
+/// m pairs (x_k, r_k) are kept in a ring window, and every few iterations an
+/// augmented least-squares system min ‖Σ c_i r_i‖² s.t. Σ c_i = 1 is solved
+/// by Gaussian elimination on the regularized Gram matrix so the accelerated
+/// candidate is the linear combination Σ c_i (x_k + r_k). This multi-point
+/// residual mixing is distinct from BFGS (curvature matrix), CG (conjugate
+/// directions), BB (scalar secant step) and Adam (moments). The better of the
+/// base step and the accelerated step advances only when it strictly
+/// improves; the basic step size is a fixed span·0.05 (no secant estimate, no
+/// non-monotone memory). Stall escapes toward the best neighborhood, and the
+/// budget is organized as fixed-length per-restart segments so a larger
+/// budget is a strict continuation and the historical best is monotone.
+/// population_size is accepted for a uniform config interface but not used
+/// (single-trajectory method).
+pub fn anderson_acceleration(
+  config : AndersonConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let per_restart = 500
+  let restart_max = 10
+  let grad_h = span * 1.0e-4
+  let window = 6
+  let mix_every = 5
+
+  let mut x : Array[Double] = []
+  for _d in 0..<dim {
+    x.push(bounds.min + RNG::next(current_rng) * span)
+  }
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut fx = evaluate(f, x)
+  evaluations = evaluations + 1
+  if fx < best_val {
+    best_val = fx
+    best_pos = []
+    for d in 0..<dim {
+      best_pos.push(x[d])
+    }
+  }
+
+  // ring window of the last (x_k, r_k) pairs for residual mixing
+  let x_hist : Array[Array[Double]] = []
+  let r_hist : Array[Array[Double]] = []
+  for _k in 0..<window {
+    let zx : Array[Double] = []
+    let zr : Array[Double] = []
+    for _d in 0..<dim {
+      zx.push(0.0)
+      zr.push(0.0)
+    }
+    x_hist.push(zx)
+    r_hist.push(zr)
+  }
+  let mut hist_n = 0
+  let mut hist_slot = 0
+
+  let mut restart = 0
+  while evaluations < max_evals {
+    restart = restart + 1
+    if restart > restart_max {
+      break
+    }
+    if restart > 1 {
+      // alternate restarts between uniform and best-neighborhood starts
+      x = []
+      for d in 0..<dim {
+        let v = if restart % 2 == 0 {
+          bounds.min + RNG::next(current_rng) * span
+        } else {
+          best_pos[d] + (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05
+        }
+        x.push(anderson_clip(v, bounds))
+      }
+      fx = evaluate(f, x)
+      evaluations = evaluations + 1
+      if fx < best_val {
+        best_val = fx
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(x[d])
+        }
+      }
+      hist_n = 0
+      hist_slot = 0
+    }
+    let mut consumed = 0
+    let mut iter_in_seg = 0
+    let mut stall = 0
+    while evaluations < max_evals && consumed < per_restart {
+      // gradient at the current point by forward differences
+      let g : Array[Double] = []
+      let mut gsq = 0.0
+      for d in 0..<dim {
+        let xv = x[d] + grad_h
+        let xo = x[d]
+        x[d] = if xv > bounds.max { bounds.max } else { xv }
+        let fp = evaluate(f, x)
+        x[d] = xo
+        evaluations = evaluations + 1
+        consumed = consumed + 1
+        let gd = (fp - fx) / grad_h
+        g.push(gd)
+        gsq = gsq + gd * gd
+      }
+      // residual of the gradient-descent map and the base step
+      let a_base = span * 0.05
+      let r : Array[Double] = []
+      let base_x : Array[Double] = []
+      for d in 0..<dim {
+        r.push(-a_base * g[d])
+        base_x.push(anderson_clip(x[d] - a_base * g[d], bounds))
+      }
+      let base_f = evaluate(f, base_x)
+      evaluations = evaluations + 1
+      consumed = consumed + 1
+      // push the current pair into the ring window
+      for d in 0..<dim {
+        x_hist[hist_slot][d] = x[d]
+        r_hist[hist_slot][d] = r[d]
+      }
+      if hist_n < window {
+        hist_n = hist_n + 1
+      }
+      hist_slot = (hist_slot + 1) % window
+      // Anderson mixing step every few iterations
+      let mut cand_x : Array[Double] = base_x
+      let mut cand_f = base_f
+      if hist_n >= 2 && iter_in_seg % mix_every == mix_every - 1 {
+        let m = hist_n
+        let size = m + 1
+        let mat : Array[Array[Double]] = []
+        for _i in 0..<size {
+          let row : Array[Double] = []
+          for _j in 0..<size {
+            row.push(0.0)
+          }
+          mat.push(row)
+        }
+        for i in 0..<m {
+          for j in 0..<m {
+            let mut dot = 0.0
+            for d2 in 0..<dim {
+              dot = dot + r_hist[i][d2] * r_hist[j][d2]
+            }
+            mat[i][j] = dot
+          }
+          mat[i][m] = 1.0
+          mat[m][i] = 1.0
+          mat[i][i] = mat[i][i] + 1.0e-10
+        }
+        let bvec : Array[Double] = []
+        for _i in 0..<size {
+          bvec.push(0.0)
+        }
+        bvec[m] = 1.0
+        // Gaussian elimination with partial pivoting
+        let mut ok = true
+        for col in 0..<size {
+          let mut piv = col
+          for rr in col..<size {
+            let av = if mat[rr][col] < 0.0 {
+              -mat[rr][col]
+            } else {
+              mat[rr][col]
+            }
+            let bv = if mat[piv][col] < 0.0 {
+              -mat[piv][col]
+            } else {
+              mat[piv][col]
+            }
+            if av > bv {
+              piv = rr
+            }
+          }
+          let pv = if mat[piv][col] < 0.0 {
+            -mat[piv][col]
+          } else {
+            mat[piv][col]
+          }
+          if pv < 1.0e-14 {
+            ok = false
+          } else {
+            if piv != col {
+              for j in 0..<size {
+                let tmp = mat[col][j]
+                mat[col][j] = mat[piv][j]
+                mat[piv][j] = tmp
+              }
+              let tb = bvec[col]
+              bvec[col] = bvec[piv]
+              bvec[piv] = tb
+            }
+            let nxt = col + 1
+            for rr in nxt..<size {
+              let facc = mat[rr][col] / mat[col][col]
+              for j in col..<size {
+                mat[rr][j] = mat[rr][j] - facc * mat[col][j]
+              }
+              bvec[rr] = bvec[rr] - facc * bvec[col]
+            }
+          }
+          if !ok {
+            break
+          }
+        }
+        if ok {
+          // back substitution
+          let sol : Array[Double] = []
+          for _i in 0..<size {
+            sol.push(0.0)
+          }
+          let mut ii = size - 1
+          while ii >= 0 {
+            let mut s = bvec[ii]
+            let mut j = ii + 1
+            while j < size {
+              s = s - mat[ii][j] * sol[j]
+              j = j + 1
+            }
+            sol[ii] = s / mat[ii][ii]
+            ii = ii - 1
+          }
+          let acc_x : Array[Double] = []
+          for d3 in 0..<dim {
+            let mut v = 0.0
+            for i in 0..<m {
+              v = v + sol[i] * (x_hist[i][d3] + r_hist[i][d3])
+            }
+            acc_x.push(anderson_clip(v, bounds))
+          }
+          // trust-region projection: unbounded mixing coefficients can throw
+          // the accelerated point far away on noisy multimodal terrain
+          let tr2 = span * 0.3 * (span * 0.3)
+          let mut dd = 0.0
+          for d4 in 0..<dim {
+            let dv = acc_x[d4] - x[d4]
+            dd = dd + dv * dv
+          }
+          if dd > tr2 {
+            let sc = span * 0.3 / dd.sqrt()
+            for d5 in 0..<dim {
+              acc_x[d5] = x[d5] + (acc_x[d5] - x[d5]) * sc
+            }
+          }
+          let acc_f = evaluate(f, acc_x)
+          evaluations = evaluations + 1
+          consumed = consumed + 1
+          if acc_f < cand_f {
+            cand_x = acc_x
+            cand_f = acc_f
+          }
+        }
+      }
+      // strict-improvement acceptance
+      if cand_f < fx {
+        x = cand_x
+        fx = cand_f
+        stall = 0
+        if fx < best_val {
+          best_val = fx
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(x[d])
+          }
+        }
+      } else {
+        stall = stall + 1
+        if stall >= 4 {
+          // informed escape toward the best neighborhood
+          x = []
+          for d in 0..<dim {
+            let v = best_pos[d] +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05
+            x.push(anderson_clip(v, bounds))
+          }
+          fx = evaluate(f, x)
+          evaluations = evaluations + 1
+          consumed = consumed + 1
+          if fx < best_val {
+            best_val = fx
+            best_pos = []
+            for d in 0..<dim {
+              best_pos.push(x[d])
+            }
+          }
+          hist_n = 0
+          hist_slot = 0
+          stall = 0
+        }
+      }
+      iter_in_seg = iter_in_seg + 1
+      if consumed >= per_restart {
+        break
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
