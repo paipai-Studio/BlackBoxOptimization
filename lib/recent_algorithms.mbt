@@ -44799,3 +44799,168 @@ pub fn plant_growth_simulation(
     evaluations,
   }
 }
+
+// ===== Crowd: crowding genetic algorithm (1975) =====
+
+///|
+pub struct CrowdConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_crowd_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CrowdConfig {
+  CrowdConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn crowd_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Crowding Genetic Algorithm (De Jong 1975). The only algorithm in the
+/// library whose replacement decision is driven by **spatial similarity**
+/// instead of fitness: every offspring competes with the population member
+/// that is **nearest to it in Euclidean distance** and replaces it only if
+/// better (crowding selection). All other replacement mechanisms are
+/// fitness-driven — TGA replaces by rank group, NS evicts the worst point,
+/// OAIN re-seeds within a distance threshold, BRO respawns on accumulated
+/// damage, PGSA prunes by pool capacity — while here the *spatial niche*
+/// of the offspring decides its competitor. Because offspring are generated
+/// near their parents (50% Gaussian mutation with crf-decaying stride, 50%
+/// per-dimension BLX-style interpolation with a random mate), the victim is
+/// usually the parent itself, so subpopulations persist around separate
+/// basins and the population keeps covering multiple niches — the
+/// de-Jong-style niching property, maintained implicitly by the replacement
+/// rule with **no explicit diversity mechanism at all**. Faithful to the
+/// original: there is **no pull toward the global best**; convergence is
+/// driven purely by local competition (fitter subpopulations out-breed the
+/// weaker ones over time). Historical best tracked separately; crf =
+/// e^{-t/2500} decays the mutation stride. Everything depends only on
+/// evaluations already spent, so a larger budget is a strict continuation
+/// and the historical best is monotone. population_size is accepted for a
+/// uniform config interface but not used (the population is fixed at 25).
+pub fn crowding_genetic_algorithm(
+  config : CrowdConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = 25
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _j in 0..<pop_size {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pop.push(ind)
+      fits.push(fv)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pop.push(ind)
+      fits.push(1.0e300)
+    }
+  }
+
+  while evaluations < max_evals {
+    let crf = @math.exp(-evaluations.to_double() / 2500.0)
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.5 {
+        // mutation offspring: an independent Gaussian jitter per dimension
+        for d in 0..<dim {
+          let u1 = RNG::next(current_rng)
+          let u2 = RNG::next(current_rng)
+          let z = box_muller(u1, u2)
+          cand.push(crowd_clip(pop[i][d] + z * span * 0.11 * crf, bounds))
+        }
+      } else {
+        // crossover offspring: BLX-style interpolation with a random mate
+        // (w ~ U(-0.25, 1.25), mostly inside but occasionally extrapolating
+        // beyond the parents to keep exploration; j != i by the offset trick)
+        let j = (
+            (RNG::next(current_rng) * pop_size.to_double()).to_int() + i + 1
+          ) %
+          pop_size
+        for d in 0..<dim {
+          let w = RNG::next(current_rng) * 1.5 - 0.25
+          cand.push(crowd_clip(pop[i][d] + w * (pop[j][d] - pop[i][d]), bounds))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      // crowding selection: the offspring's competitor is the population
+      // member nearest to it in Euclidean distance (spatial similarity)
+      let mut nn = 0
+      let mut nn_d2 = 1.0e300
+      for k in 0..<pop_size {
+        let mut dsq = 0.0
+        for d in 0..<dim {
+          let diff = cand[d] - pop[k][d]
+          dsq = dsq + diff * diff
+        }
+        if dsq < nn_d2 {
+          nn_d2 = dsq
+          nn = k
+        }
+      }
+      if fv < fits[nn] {
+        pop[nn] = cand
+        fits[nn] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(cand[d])
+          }
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

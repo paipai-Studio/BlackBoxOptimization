@@ -2398,6 +2398,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       plant_growth_simulation(make_pgsa_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "Crowd",
+    run: (e, d, b, r, f) => {
+      crowding_genetic_algorithm(make_crowd_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 
