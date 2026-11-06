@@ -44353,3 +44353,268 @@ pub fn woodpecker_mating_algorithm(
     evaluations,
   }
 }
+
+// ===== BMDA: bivariate marginal distribution algorithm (1997) =====
+
+///|
+pub struct BmdaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bmda_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BmdaConfig {
+  BmdaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn bmda_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Bivariate Marginal Distribution Algorithm (BMDA, Pelikan 1997). An EDA
+/// family member with a **sparse pairwise dependency structure** absent from
+/// the rest of the library: the per-dimension Gaussian edges (mu_d, sigma_d)
+/// are re-estimated batch-wise from a rolling buffer of the 12 most recent
+/// *accepted* samples, and every coordinate pair's Pearson correlation is
+/// tracked with an exponential moving average (rho <- 0.7 rho + 0.3 rho_new)
+/// so dependency estimates **accumulate across generations** instead of being
+/// re-derived from a single small sample. Pairs whose smoothed |rho| exceeds
+/// 0.45 are treated as **coupled variables and sampled from their joint
+/// bivariate normal** (z_b = rho z_a + sqrt(1-rho^2) z_b'), each dimension
+/// coupling with at most one partner (greedy pairing), while the remaining
+/// dimensions are sampled independently — a *sparse* pairwise model sitting
+/// between UMDA/PBIL (pure per-dimension marginals) and EMNA (full dense
+/// covariance), and a *distribution-sampling* treatment of dependencies
+/// rather than GOMEA's gene-block transplantation (recombination) or PC's
+/// sequential single-sample updates. Improvements replace the incumbent
+/// (elitist), the spread re-estimates are smoothed (sigma <- 0.8 sigma +
+/// 0.2 sample_sd, floored at span*0.008) so a lucky window cannot collapse
+/// them, and 15 stagnant generations trigger a 50/50 re-anchor — either on
+/// the incumbent best's neighbourhood or a full-space uniform one — keeping
+/// large-range functions from freezing (MGA/CHC mixed-restart lesson).
+/// Everything depends only on evaluations already
+/// spent, so a larger budget is a strict continuation and the historical
+/// best is monotone. population_size is accepted for a uniform config
+/// interface but not used (the flock is fixed at 25).
+pub fn bivariate_marginal_distribution_algorithm(
+  config : BmdaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let buffer_cap = 12
+  let rho_thresh = 0.45
+  let sigma_floor = span * 0.008
+
+  // per-dimension Gaussian edges
+  let mu : Array[Double] = []
+  let sigma : Array[Double] = []
+  for _d in 0..<dim {
+    mu.push(bounds.min + RNG::next(current_rng) * span)
+    sigma.push(span * 0.15)
+  }
+  // smoothed pairwise correlation matrix (upper triangle used)
+  let rho : Array[Array[Double]] = []
+  for _i in 0..<dim {
+    let row : Array[Double] = []
+    for _j in 0..<dim {
+      row.push(0.0)
+    }
+    rho.push(row)
+  }
+
+  // rolling buffer of recently accepted samples driving the re-estimates
+  let recent : Array[Array[Double]] = []
+
+  let mut x : Array[Double] = []
+  for d in 0..<dim {
+    x.push(mu[d])
+  }
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut fx = evaluate(f, x)
+  evaluations = evaluations + 1
+  best_val = fx
+  for d in 0..<dim {
+    best_pos.push(x[d])
+  }
+  let mut stall = 0
+
+  while evaluations < max_evals {
+    // independent standard normals for every dimension
+    let z : Array[Double] = []
+    for _d in 0..<dim {
+      let u1 = RNG::next(current_rng)
+      let u2 = RNG::next(current_rng)
+      z.push(box_muller(u1, u2))
+    }
+    // greedy pairing: each dimension couples with at most one partner whose
+    // smoothed correlation is significant
+    let used : Array[Bool] = []
+    for _d in 0..<dim {
+      used.push(false)
+    }
+    for i in 0..<dim {
+      if used[i] {
+        // already coupled as the junior partner of an earlier dimension
+      } else {
+        let j0 = i + 1
+        let mut bj = -1
+        let mut brho = 0.0
+        for j in j0..<dim {
+          if used[j] {
+            // taken
+          } else {
+            let r = rho[i][j]
+            let ar = if r < 0.0 { -r } else { r }
+            if ar > brho {
+              brho = ar
+              bj = j
+            }
+          }
+        }
+        if bj >= 0 && brho > rho_thresh {
+          used[i] = true
+          used[bj] = true
+          // joint bivariate normal sampling for the coupled pair
+          let u1 = RNG::next(current_rng)
+          let u2 = RNG::next(current_rng)
+          let z2p = box_muller(u1, u2)
+          let rc = rho[i][bj]
+          z[bj] = rc * z[i] + (1.0 - rc * rc).sqrt() * z2p
+        }
+      }
+    }
+    let cand : Array[Double] = []
+    for d in 0..<dim {
+      cand.push(bmda_clip(mu[d] + sigma[d] * z[d], bounds))
+    }
+    let fv = evaluate(f, cand)
+    evaluations = evaluations + 1
+    if fv < fx {
+      x = cand
+      fx = fv
+      stall = 0
+      recent.push(cand)
+      if recent.length() >= buffer_cap {
+        // batch re-estimate the marginals and refresh the smoothed pairwise
+        // correlations from the rolling buffer of accepted samples
+        let n = recent.length()
+        let nd = n.to_double()
+        for d in 0..<dim {
+          let mut s = 0.0
+          for k in 0..<n {
+            s = s + recent[k][d]
+          }
+          mu[d] = s / nd
+          let mut sv = 0.0
+          for k in 0..<n {
+            let diff = recent[k][d] - mu[d]
+            sv = sv + diff * diff
+          }
+          let sd = (sv / (nd - 1.0)).sqrt()
+          // smooth the spread so a lucky 12-sample window cannot collapse it
+          let raw = 0.8 * sigma[d] + 0.2 * sd
+          sigma[d] = if raw < sigma_floor { sigma_floor } else { raw }
+        }
+        for i in 0..<dim {
+          let i1 = i + 1
+          for j in i1..<dim {
+            let mut mi = 0.0
+            let mut mj = 0.0
+            for k in 0..<n {
+              mi = mi + recent[k][i]
+              mj = mj + recent[k][j]
+            }
+            mi = mi / nd
+            mj = mj / nd
+            let mut cij = 0.0
+            let mut vi = 0.0
+            let mut vj = 0.0
+            for k in 0..<n {
+              let di = recent[k][i] - mi
+              let dj = recent[k][j] - mj
+              cij = cij + di * dj
+              vi = vi + di * di
+              vj = vj + dj * dj
+            }
+            let mut corr = 0.0
+            if vi > 1.0e-12 && vj > 1.0e-12 {
+              corr = cij / (vi * vj).sqrt()
+              if corr > 1.0 {
+                corr = 1.0
+              }
+              if corr < -1.0 {
+                corr = -1.0
+              }
+            }
+            rho[i][j] = 0.7 * rho[i][j] + 0.3 * corr
+          }
+        }
+        recent.clear()
+      }
+      if fx < best_val {
+        best_val = fx
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(cand[d])
+        }
+      }
+    } else {
+      stall = stall + 1
+      if stall >= 15 {
+        // persistent stagnation: re-anchor the marginals in one of two ways
+        // (50/50 event-level choice) — a best-neighbourhood re-anchor for
+        // exploitation or a full-space re-anchor for large-range exploration;
+        // the mixed restart differs from PC's purely best-neighbourhood
+        // re-anchor and keeps large-range functions from freezing
+        let pick = RNG::next(current_rng)
+        if pick < 0.5 {
+          for d in 0..<dim {
+            mu[d] = bmda_clip(
+              best_pos[d] + (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10,
+              bounds,
+            )
+            sigma[d] = span * 0.06
+          }
+        } else {
+          for d in 0..<dim {
+            mu[d] = bounds.min + RNG::next(current_rng) * span
+            sigma[d] = span * 0.20
+          }
+        }
+        stall = 0
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

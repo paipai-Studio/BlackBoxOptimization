@@ -2382,6 +2382,16 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       woodpecker_mating_algorithm(make_wma_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "BMDA",
+    run: (e, d, b, r, f) => {
+      bivariate_marginal_distribution_algorithm(
+        make_bmda_config(e, d, b, 25),
+        f,
+        r,
+      )
+    },
+  })
   entries
 }
 
