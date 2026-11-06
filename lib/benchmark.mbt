@@ -2326,6 +2326,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       micro_genetic_algorithm(make_mga_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "CellGA",
+    run: (e, d, b, r, f) => {
+      cellular_genetic_algorithm(make_cellga_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

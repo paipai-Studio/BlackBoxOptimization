@@ -41801,3 +41801,172 @@ pub fn micro_genetic_algorithm(
     evaluations,
   }
 }
+
+// ===== CellGA: cellular genetic algorithm (Alba & Dorronsoro 2002) =====
+
+///|
+pub struct CellGAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_cellga_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CellGAConfig {
+  CellGAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn cellga_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Cellular Genetic Algorithm (CellGA, Alba & Dorronsoro 2002). The
+/// population is laid out on a 5x5 **toroidal grid** and each individual
+/// interacts only with its **von Neumann spatial neighbours** (up/down/left/
+/// right with wrap-around): the parent to follow is the best individual
+/// inside that local neighbourhood, so good solutions spread across the grid
+/// as a wavefront instead of dominating the whole population at once. This
+/// spatial-neighborhood interaction is the defining route, distinct from HBO
+/// (heap rank order), Narwhal (island migration), ChSO (fitness role
+/// grouping), CrSO (a continuous euclidean radius) and QSA (a linear queue).
+/// Behaviours per individual: follow the neighbourhood best with a
+/// differential kick, a cgf^2-scale local jitter, or a global contraction
+/// toward the incumbent best; a candidate replaces its grid cell only when
+/// it improves. The schedule depends only on evaluations already spent, so a
+/// larger budget is a strict continuation and the historical best is
+/// monotone. population_size is accepted for a uniform config interface but
+/// not used (the grid is fixed at 5x5).
+pub fn cellular_genetic_algorithm(
+  config : CellGAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = 25
+  let side = 5
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _j in 0..<pop_size {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pop.push(ind)
+      fits.push(fv)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pop.push(ind)
+      fits.push(1.0e300)
+    }
+  }
+
+  while evaluations < max_evals {
+    let cgf = @math.exp(-evaluations.to_double() / 2500.0)
+    let mut consumed = 0
+    for j in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let row = j / side
+      let col = j % side
+      let up = (row + side - 1) % side * side + col
+      let down = (row + 1) % side * side + col
+      let left = row * side + (col + side - 1) % side
+      let right = row * side + (col + 1) % side
+      let nbs = [up, down, left, right]
+      let mut nb = nbs[0]
+      for k in 0..<4 {
+        if fits[nbs[k]] < fits[nb] {
+          nb = nbs[k]
+        }
+      }
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.34 {
+        let p = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let q = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        for d in 0..<dim {
+          let v = pop[j][d] +
+            0.75 * cgf * (pop[nb][d] - pop[j][d]) +
+            0.50 * (pop[p][d] - pop[q][d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10 * cgf
+          cand.push(cellga_clip(v, bounds))
+        }
+      } else if r1 < 0.74 {
+        for d in 0..<dim {
+          let v = pop[j][d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.20 * cgf * cgf
+          cand.push(cellga_clip(v, bounds))
+        }
+      } else {
+        for d in 0..<dim {
+          let r2 = RNG::next(current_rng)
+          let v = best_pos[d] +
+            r2 * (pop[j][d] - best_pos[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05 * cgf
+          cand.push(cellga_clip(v, bounds))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      consumed = consumed + 1
+      if fv < fits[j] {
+        fits[j] = fv
+        pop[j] = cand
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(cand[d])
+          }
+        }
+      }
+    }
+    if consumed == 0 {
+      break
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
