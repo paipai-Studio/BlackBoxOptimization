@@ -1,6 +1,6 @@
 name = "IvanAXu/BlackBoxOptimization"
 
-version = "0.1.5"
+version = "0.1.6"
 
 readme = "README.md"
 
@@ -19,4 +19,4 @@ keywords = [
 
 preferred_target = "wasm-gc"
 
-description = "A black-box optimization framework in MoonBit with 75+ metaheuristic algorithms"
+description = "A black-box optimization framework in MoonBit with 367 metaheuristic algorithms"

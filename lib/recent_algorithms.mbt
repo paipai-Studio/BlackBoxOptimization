@@ -41328,3 +41328,5333 @@ pub fn multi_directional_search(
     evaluations,
   }
 }
+
+// ===== CC: cooperative coevolution (Potter & De Jong 1994) =====
+
+///|
+pub struct CCConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_cc_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CCConfig {
+  CCConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn cc_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+fn cc_new_partition(
+  dim : Int32,
+  group_cnt : Int32,
+  base : Int32,
+  rem : Int32,
+  rng : RNG,
+) -> Array[Array[Int32]] {
+  let perm : Array[Int32] = []
+  for d in 0..<dim {
+    perm.push(d)
+  }
+  for k in 0..<dim {
+    let kk = dim - 1 - k
+    let j = (RNG::next(rng) * (kk + 1).to_double()).to_int() % (kk + 1)
+    let tmp = perm[kk]
+    perm[kk] = perm[j]
+    perm[j] = tmp
+  }
+  let groups : Array[Array[Int32]] = []
+  let mut cursor = 0
+  for gi in 0..<group_cnt {
+    let gsize = base + (if gi < rem { 1 } else { 0 })
+    let g : Array[Int32] = []
+    for _k in 0..<gsize {
+      g.push(perm[cursor])
+      cursor = cursor + 1
+    }
+    groups.push(g)
+  }
+  groups
+}
+
+///|
+/// Cooperative Coevolution (CC, Potter & De Jong 1994). The coordinates are
+/// randomly partitioned into species groups and each group evolves its own
+/// subpopulation **inside its subspace** while the remaining coordinates are
+/// held by a shared context assembled from every group's current champion.
+/// Candidates inside a group are differential moves toward the group best
+/// (per-coordinate jitter decays with the cooperative factor) and a candidate
+/// replaces its parent only when it improves under the current context. Every
+/// 8 rounds the partition is reshuffled so coordinates that became coupled
+/// can meet in one subspace and each subpopulation is re-evaluated. This
+/// divide-and-coevolve route differs from Subplex (deterministic subspace
+/// simplex over a fixed coordinate order) and from every single-population
+/// algorithm in the library. The schedule depends only on evaluations already
+/// spent, so a larger budget is a strict continuation and the historical best
+/// is monotone. population_size is accepted for a uniform config interface.
+pub fn cooperative_coevolution(
+  config : CCConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let group_cnt = if dim < 5 { dim } else { 5 }
+  let sub_pop = 8
+  let base = dim / group_cnt
+  let rem = dim % group_cnt
+  let reshuffle_every = 8
+
+  let mut group_dims = cc_new_partition(dim, group_cnt, base, rem, current_rng)
+
+  let context : Array[Double] = []
+  for _d in 0..<dim {
+    context.push(bounds.min + RNG::next(current_rng) * span)
+  }
+  let mut evaluations = 1
+  let mut best_pos : Array[Double] = []
+  for d in 0..<dim {
+    best_pos.push(context[d])
+  }
+  let mut best_val = evaluate(f, context)
+
+  let sub_pops : Array[Array[Array[Double]]] = []
+  let sub_fits : Array[Array[Double]] = []
+  let grp_best_f : Array[Double] = []
+  let grp_best_j : Array[Int32] = []
+  for gi in 0..<group_cnt {
+    let g = group_dims[gi]
+    let gsize = g.length()
+    let pop : Array[Array[Double]] = []
+    let fits : Array[Double] = []
+    for _j in 0..<sub_pop {
+      let ind : Array[Double] = []
+      for dd in 0..<gsize {
+        let nv = bounds.min + RNG::next(current_rng) * span
+        ind.push(nv)
+        context[g[dd]] = nv
+      }
+      let fv = evaluate(f, context)
+      evaluations = evaluations + 1
+      pop.push(ind)
+      fits.push(fv)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d2 in 0..<dim {
+          best_pos.push(context[d2])
+        }
+      }
+    }
+    let mut bf = fits[0]
+    let mut bj = 0
+    for j in 0..<sub_pop {
+      if fits[j] < bf {
+        bf = fits[j]
+        bj = j
+      }
+    }
+    grp_best_f.push(bf)
+    grp_best_j.push(bj)
+    sub_pops.push(pop)
+    sub_fits.push(fits)
+  }
+  for gi in 0..<group_cnt {
+    let g = group_dims[gi]
+    let champ = sub_pops[gi][grp_best_j[gi]]
+    for dd in 0..<g.length() {
+      context[g[dd]] = champ[dd]
+    }
+  }
+
+  let mut round = 0
+  while evaluations < max_evals {
+    round = round + 1
+    let ccf = @math.exp(-evaluations.to_double() / 2500.0)
+    for gi in 0..<group_cnt {
+      let g = group_dims[gi]
+      let champ = sub_pops[gi][grp_best_j[gi]]
+      for dd in 0..<g.length() {
+        context[g[dd]] = champ[dd]
+      }
+    }
+    for gi in 0..<group_cnt {
+      let g = group_dims[gi]
+      let gsize = g.length()
+      for j in 0..<sub_pop {
+        if evaluations >= max_evals {
+          break
+        }
+        let ia = (RNG::next(current_rng) * sub_pop.to_double()).to_int() %
+          sub_pop
+        let ib = (RNG::next(current_rng) * sub_pop.to_double()).to_int() %
+          sub_pop
+        let ic = (RNG::next(current_rng) * sub_pop.to_double()).to_int() %
+          sub_pop
+        let cand : Array[Double] = []
+        for dd in 0..<gsize {
+          let xa = sub_pops[gi][ia][dd]
+          let xb = sub_pops[gi][ib][dd]
+          let xc = sub_pops[gi][ic][dd]
+          let gb = sub_pops[gi][grp_best_j[gi]][dd]
+          let nv = xa +
+            0.5 * (xb - xc) +
+            0.35 * ccf * (gb - xa) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.08 * ccf
+          let cv = cc_clip(nv, bounds)
+          cand.push(cv)
+          context[g[dd]] = cv
+        }
+        let fv = evaluate(f, context)
+        evaluations = evaluations + 1
+        if fv < sub_fits[gi][j] {
+          sub_fits[gi][j] = fv
+          sub_pops[gi][j] = cand
+          if fv < grp_best_f[gi] {
+            grp_best_f[gi] = fv
+            grp_best_j[gi] = j
+          }
+          if fv < best_val {
+            best_val = fv
+            best_pos = []
+            for d2 in 0..<dim {
+              best_pos.push(context[d2])
+            }
+          }
+        } else {
+          for dd in 0..<gsize {
+            context[g[dd]] = sub_pops[gi][j][dd]
+          }
+        }
+      }
+    }
+    if round % reshuffle_every == 0 && evaluations < max_evals {
+      group_dims = cc_new_partition(dim, group_cnt, base, rem, current_rng)
+      for gi in 0..<group_cnt {
+        let g = group_dims[gi]
+        let gsize = g.length()
+        let pop : Array[Array[Double]] = []
+        let fits : Array[Double] = []
+        for j in 0..<sub_pop {
+          let ind : Array[Double] = []
+          for dd in 0..<gsize {
+            let dv = g[dd]
+            let v = if j == 0 {
+              best_pos[dv] +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05 * ccf
+            } else {
+              bounds.min + RNG::next(current_rng) * span
+            }
+            let cv = cc_clip(v, bounds)
+            ind.push(cv)
+            context[dv] = cv
+          }
+          if evaluations < max_evals {
+            let fv = evaluate(f, context)
+            evaluations = evaluations + 1
+            pop.push(ind)
+            fits.push(fv)
+            if fv < best_val {
+              best_val = fv
+              best_pos = []
+              for d2 in 0..<dim {
+                best_pos.push(context[d2])
+              }
+            }
+          } else {
+            pop.push(ind)
+            fits.push(1.0e300)
+          }
+        }
+        let mut bf = fits[0]
+        let mut bj = 0
+        for j in 0..<sub_pop {
+          if fits[j] < bf {
+            bf = fits[j]
+            bj = j
+          }
+        }
+        grp_best_f[gi] = bf
+        grp_best_j[gi] = bj
+        sub_pops[gi] = pop
+        sub_fits[gi] = fits
+      }
+      for gi in 0..<group_cnt {
+        let g = group_dims[gi]
+        let champ = sub_pops[gi][grp_best_j[gi]]
+        for dd in 0..<g.length() {
+          context[g[dd]] = champ[dd]
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== MGA: micro-genetic algorithm (Krishnakumar 1989) =====
+
+///|
+pub struct MGAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_mga_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> MGAConfig {
+  MGAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn mga_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Micro-Genetic Algorithm (MGA, Krishnakumar 1989). A deliberately tiny
+/// population of five individuals is evolved with keep-best BLX crossover
+/// (interpolation dominant, mild extrapolation) plus per-coordinate mutation
+/// scaled by the decay factor, and the moment the tiny population stalls for
+/// a fixed number of consecutive generations the whole group is restarted:
+/// only the incumbent best survives, the remaining four are re-sampled
+/// uniformly. This population-level stall-restart with a micro population is
+/// the defining route, distinct from CHC (a full population with a
+/// diversity-triggered cataclysm that re-samples around the best), BRO
+/// (per-individual damage counters) and GA (a fixed full population). The
+/// schedule depends only on evaluations already spent, so a larger budget is
+/// a strict continuation and the historical best is monotone.
+/// population_size is accepted for a uniform config interface but not used.
+pub fn micro_genetic_algorithm(
+  config : MGAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let micro_pop = 5
+  let stall_limit = 20
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _j in 0..<micro_pop {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pop.push(ind)
+      fits.push(fv)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pop.push(ind)
+      fits.push(1.0e300)
+    }
+  }
+
+  let mut stall = 0
+  while evaluations < max_evals {
+    let mf = @math.exp(-evaluations.to_double() / 2500.0)
+    let mut bi = 0
+    for j in 0..<micro_pop {
+      if fits[j] < fits[bi] {
+        bi = j
+      }
+    }
+    let ia = (RNG::next(current_rng) * micro_pop.to_double()).to_int() %
+      micro_pop
+    let ib = (RNG::next(current_rng) * micro_pop.to_double()).to_int() %
+      micro_pop
+    let q2 = if fits[ia] <= fits[ib] { ia } else { ib }
+    let child : Array[Double] = []
+    for d in 0..<dim {
+      let r = 2.5 * RNG::next(current_rng) - 0.25
+      let mut v = pop[bi][d] + r * (pop[q2][d] - pop[bi][d])
+      if RNG::next(current_rng) < 0.25 {
+        v = v + (2.0 * RNG::next(current_rng) - 1.0) * span * 0.08 * mf
+      }
+      child.push(mga_clip(v, bounds))
+    }
+    let mut tj = (RNG::next(current_rng) * micro_pop.to_double()).to_int() %
+      micro_pop
+    if tj == bi {
+      tj = (tj + 1) % micro_pop
+    }
+    let fv = evaluate(f, child)
+    evaluations = evaluations + 1
+    if fv < fits[tj] {
+      fits[tj] = fv
+      pop[tj] = child
+      stall = 0
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(child[d])
+        }
+      }
+    } else {
+      stall = stall + 1
+    }
+    if stall >= stall_limit && evaluations < max_evals {
+      let mut bi2 = 0
+      for j in 0..<micro_pop {
+        if fits[j] < fits[bi2] {
+          bi2 = j
+        }
+      }
+      for j in 0..<micro_pop {
+        if j != bi2 {
+          if evaluations >= max_evals {
+            break
+          }
+          let ind : Array[Double] = []
+          for d in 0..<dim {
+            // restart mix: half of the re-sampled individuals land near the
+            // incumbent best so the discovered basin is not thrown away on
+            // every stall (the uniform half keeps global coverage)
+            let v = if RNG::next(current_rng) < 0.5 {
+              best_pos[d] +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.15 * mf
+            } else {
+              bounds.min + RNG::next(current_rng) * span
+            }
+            ind.push(mga_clip(v, bounds))
+          }
+          let fv = evaluate(f, ind)
+          evaluations = evaluations + 1
+          pop[j] = ind
+          fits[j] = fv
+          if fv < best_val {
+            best_val = fv
+            best_pos = []
+            for d in 0..<dim {
+              best_pos.push(ind[d])
+            }
+          }
+        }
+      }
+      stall = 0
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== CellGA: cellular genetic algorithm (Alba & Dorronsoro 2002) =====
+
+///|
+pub struct CellGAConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_cellga_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CellGAConfig {
+  CellGAConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn cellga_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Cellular Genetic Algorithm (CellGA, Alba & Dorronsoro 2002). The
+/// population is laid out on a 5x5 **toroidal grid** and each individual
+/// interacts only with its **von Neumann spatial neighbours** (up/down/left/
+/// right with wrap-around): the parent to follow is the best individual
+/// inside that local neighbourhood, so good solutions spread across the grid
+/// as a wavefront instead of dominating the whole population at once. This
+/// spatial-neighborhood interaction is the defining route, distinct from HBO
+/// (heap rank order), Narwhal (island migration), ChSO (fitness role
+/// grouping), CrSO (a continuous euclidean radius) and QSA (a linear queue).
+/// Behaviours per individual: follow the neighbourhood best with a
+/// differential kick, a cgf^2-scale local jitter, or a global contraction
+/// toward the incumbent best; a candidate replaces its grid cell only when
+/// it improves. The schedule depends only on evaluations already spent, so a
+/// larger budget is a strict continuation and the historical best is
+/// monotone. population_size is accepted for a uniform config interface but
+/// not used (the grid is fixed at 5x5).
+pub fn cellular_genetic_algorithm(
+  config : CellGAConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = 25
+  let side = 5
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _j in 0..<pop_size {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pop.push(ind)
+      fits.push(fv)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pop.push(ind)
+      fits.push(1.0e300)
+    }
+  }
+
+  while evaluations < max_evals {
+    let cgf = @math.exp(-evaluations.to_double() / 2500.0)
+    let mut consumed = 0
+    for j in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let row = j / side
+      let col = j % side
+      let up = (row + side - 1) % side * side + col
+      let down = (row + 1) % side * side + col
+      let left = row * side + (col + side - 1) % side
+      let right = row * side + (col + 1) % side
+      let nbs = [up, down, left, right]
+      let mut nb = nbs[0]
+      for k in 0..<4 {
+        if fits[nbs[k]] < fits[nb] {
+          nb = nbs[k]
+        }
+      }
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.34 {
+        let p = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let q = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        for d in 0..<dim {
+          let v = pop[j][d] +
+            0.75 * cgf * (pop[nb][d] - pop[j][d]) +
+            0.50 * (pop[p][d] - pop[q][d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10 * cgf
+          cand.push(cellga_clip(v, bounds))
+        }
+      } else if r1 < 0.74 {
+        for d in 0..<dim {
+          let v = pop[j][d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.20 * cgf * cgf
+          cand.push(cellga_clip(v, bounds))
+        }
+      } else {
+        for d in 0..<dim {
+          let r2 = RNG::next(current_rng)
+          let v = best_pos[d] +
+            r2 * (pop[j][d] - best_pos[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05 * cgf
+          cand.push(cellga_clip(v, bounds))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      consumed = consumed + 1
+      if fv < fits[j] {
+        fits[j] = fv
+        pop[j] = cand
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(cand[d])
+          }
+        }
+      }
+    }
+    if consumed == 0 {
+      break
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== GOMEA: gene-pool optimal mixing evolutionary algorithm (Thierens & Bosman 2011) =====
+
+///|
+pub struct GomeaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_gomea_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> GomeaConfig {
+  GomeaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn gomea_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Gene-pool Optimal Mixing Evolutionary Algorithm (GOMEA, Thierens & Bosman
+/// 2011). A **linkage model** is learned from the population itself: every
+/// few generations the absolute Pearson correlation between each pair of
+/// coordinates is measured over the current population and strongly
+/// correlated coordinates are merged into linkage groups (union-find with a
+/// group-size cap) — the partition is **learned from observed inter-variable
+/// dependencies**, never random. Individuals then mix genes: with high
+/// probability a linked block is copied from a tournament-selected donor into
+/// the individual's genome and the result is accepted whenever it **does not
+/// worsen** (GOMEA's greedy-mixing acceptance); otherwise a differential
+/// exploration step or a decaying jitter keeps diversity alive. Learned
+/// linkage distinguishes this route from CC (random coordinate partitioning
+/// with subpopulations), from BBO (migration curves) and from Memetic (local
+/// refinement), and the block-copy-with-acceptance semantics differ from
+/// every arithmetic-crossover algorithm in the library. The schedule depends
+/// only on evaluations already spent, so a larger budget is a strict
+/// continuation and the historical best is monotone. population_size is
+/// accepted for a uniform config interface but not used (the pool is fixed
+/// at 25).
+pub fn gene_pool_optimal_mixing(
+  config : GomeaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = 25
+  let rebuild_every = 5
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _j in 0..<pop_size {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pop.push(ind)
+      fits.push(fv)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pop.push(ind)
+      fits.push(1.0e300)
+    }
+  }
+
+  // initial linkage model: singleton groups
+  let mut groups : Array[Array[Int32]] = []
+  for d in 0..<dim {
+    let g : Array[Int32] = []
+    g.push(d)
+    groups.push(g)
+  }
+
+  let mut round = 0
+  while evaluations < max_evals {
+    round = round + 1
+    let gf = @math.exp(-evaluations.to_double() / 2500.0)
+    // rebuild the linkage model periodically from observed correlations
+    if round % rebuild_every == 1 {
+      let mean : Array[Double] = []
+      let std : Array[Double] = []
+      for d in 0..<dim {
+        let mut s = 0.0
+        for j in 0..<pop_size {
+          s = s + pop[j][d]
+        }
+        let m = s / pop_size.to_double()
+        let mut sq = 0.0
+        for j in 0..<pop_size {
+          let dv = pop[j][d] - m
+          sq = sq + dv * dv
+        }
+        mean.push(m)
+        std.push(sq.sqrt())
+      }
+      let parent : Array[Int32] = []
+      for d in 0..<dim {
+        parent.push(d)
+      }
+      for d1 in 0..<dim {
+        for d2 in (d1 + 1)..<dim {
+          let mut cv = 0.0
+          for j in 0..<pop_size {
+            cv = cv + (pop[j][d1] - mean[d1]) * (pop[j][d2] - mean[d2])
+          }
+          let corr = if std[d1] < 1.0e-12 || std[d2] < 1.0e-12 {
+            0.0
+          } else {
+            cv / pop_size.to_double() / (std[d1] * std[d2])
+          }
+          if corr > 0.6 || corr < -0.6 {
+            let mut r1 = d1
+            while parent[r1] != r1 {
+              r1 = parent[r1]
+            }
+            let mut r2 = d2
+            while parent[r2] != r2 {
+              r2 = parent[r2]
+            }
+            if r1 != r2 {
+              let mut c1 = 0
+              let mut c2 = 0
+              for d in 0..<dim {
+                let mut x = d
+                while parent[x] != x {
+                  x = parent[x]
+                }
+                if x == r1 {
+                  c1 = c1 + 1
+                }
+                if x == r2 {
+                  c2 = c2 + 1
+                }
+              }
+              if c1 + c2 <= 3 {
+                if c1 <= c2 {
+                  parent[r1] = r2
+                } else {
+                  parent[r2] = r1
+                }
+              }
+            }
+          }
+        }
+      }
+      let roots : Array[Int32] = []
+      let sets : Array[Array[Int32]] = []
+      for d in 0..<dim {
+        let mut r = d
+        while parent[r] != r {
+          r = parent[r]
+        }
+        let mut idx = -1
+        for k in 0..<roots.length() {
+          if roots[k] == r {
+            idx = k
+          }
+        }
+        if idx < 0 {
+          roots.push(r)
+          let g : Array[Int32] = []
+          g.push(d)
+          sets.push(g)
+        } else {
+          sets[idx].push(d)
+        }
+      }
+      groups = sets
+    }
+    let mut consumed = 0
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.60 {
+        // optimal mixing: copy a learned linkage block from a donor
+        let a = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let b = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let mut donor = if fits[a] <= fits[b] { a } else { b }
+        if donor == i {
+          donor = (donor + 1) % pop_size
+        }
+        let gi = (RNG::next(current_rng) * groups.length().to_double()).to_int() %
+          groups.length()
+        let g = groups[gi]
+        for d in 0..<dim {
+          cand.push(pop[i][d])
+        }
+        for k in 0..<g.length() {
+          cand[g[k]] = pop[donor][g[k]]
+        }
+      } else if r1 < 0.85 {
+        // differential exploration
+        let p = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let q = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        for d in 0..<dim {
+          let v = pop[i][d] +
+            0.6 * (pop[p][d] - pop[q][d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10 * gf
+          cand.push(gomea_clip(v, bounds))
+        }
+      } else {
+        // decaying jitter keeps diversity alive
+        for d in 0..<dim {
+          let v = pop[i][d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.06 * gf * gf
+          cand.push(gomea_clip(v, bounds))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      consumed = consumed + 1
+      let accept = if r1 < 0.60 { fv <= fits[i] } else { fv < fits[i] }
+      if accept {
+        fits[i] = fv
+        pop[i] = cand
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(cand[d])
+          }
+        }
+      }
+    }
+    if consumed == 0 {
+      break
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== SPSO: species-based particle swarm optimizer (Parrott & Li 2006) =====
+
+///|
+pub struct SpsoConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_spso_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> SpsoConfig {
+  SpsoConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn spso_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Species-based Particle Swarm Optimizer (SPSO, Parrott & Li 2006). The
+/// swarm is **dynamically partitioned into species** every round: scanning
+/// individuals from best to worst, anyone falling inside the dominance
+/// radius of an already established species seed joins that species,
+/// otherwise it becomes a new seed — the partition emerges from the fitness
+/// ranking and the radius itself, unlike every pre-defined grouping in the
+/// library (ChSO roles, Narwhal islands, CellGA grid, CC random partition,
+/// GOMEA learned linkage). Inside a species members move toward their seed
+/// with intra-species differential kicks; a cross-species step exchanges
+/// information between species seeds; a global contraction targets the
+/// incumbent best. The species factor `spf = e^{-t/2500}` decays with
+/// evaluations already spent, so a larger budget is a strict continuation
+/// and the historical best is monotone. population_size is accepted for a
+/// uniform config interface but not used (the pool is fixed at 25).
+pub fn species_pso(
+  config : SpsoConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = 25
+  let sr2 = span * 0.09 * (span * 0.09)
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _j in 0..<pop_size {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pop.push(ind)
+      fits.push(fv)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pop.push(ind)
+      fits.push(1.0e300)
+    }
+  }
+
+  while evaluations < max_evals {
+    let spf = @math.exp(-evaluations.to_double() / 2500.0)
+    // rank individuals best-to-worst with an all-Int selection sort
+    let order : Array[Int32] = []
+    let used : Array[Bool] = []
+    for _k in 0..<pop_size {
+      order.push(0)
+      used.push(false)
+    }
+    for k in 0..<pop_size {
+      let mut bi = -1
+      for j in 0..<pop_size {
+        if !used[j] {
+          if bi < 0 || fits[j] < fits[bi] {
+            bi = j
+          }
+        }
+      }
+      used[bi] = true
+      order[k] = bi
+    }
+    // species forming: best-to-worst scan over the dominance radius
+    let species_of : Array[Int32] = []
+    let seed_of : Array[Int32] = []
+    let members : Array[Array[Int32]] = []
+    for _k in 0..<pop_size {
+      species_of.push(-1)
+    }
+    for k in 0..<pop_size {
+      let idx = order[k]
+      let mut si = -1
+      for s in 0..<seed_of.length() {
+        let sd = seed_of[s]
+        let mut dsq = 0.0
+        for d in 0..<dim {
+          let dv = pop[idx][d] - pop[sd][d]
+          dsq = dsq + dv * dv
+        }
+        if dsq < sr2 {
+          si = s
+          break
+        }
+      }
+      if si < 0 {
+        seed_of.push(idx)
+        let m : Array[Int32] = []
+        m.push(idx)
+        members.push(m)
+        species_of[idx] = seed_of.length() - 1
+      } else {
+        species_of[idx] = si
+        members[si].push(idx)
+      }
+    }
+    let mut consumed = 0
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let si = species_of[i]
+      let sd = seed_of[si]
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.40 {
+        // species-follow: move toward the species seed with intra-species kicks
+        let m = members[si]
+        let ml = m.length()
+        let p = m[(RNG::next(current_rng) * ml.to_double()).to_int() % ml]
+        let q = m[(RNG::next(current_rng) * ml.to_double()).to_int() % ml]
+        for d in 0..<dim {
+          let v = pop[i][d] +
+            0.7 * spf * (pop[sd][d] - pop[i][d]) +
+            0.45 * (pop[p][d] - pop[q][d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10 * spf
+          cand.push(spso_clip(v, bounds))
+        }
+      } else if r1 < 0.80 {
+        // cross-species: exchange information with another species' seed
+        let mut oi = (RNG::next(current_rng) * seed_of.length().to_double()).to_int() %
+          seed_of.length()
+        if oi == si {
+          oi = (oi + 1) % seed_of.length()
+        }
+        let osd = seed_of[oi]
+        let p = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let q = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        for d in 0..<dim {
+          let v = pop[i][d] +
+            0.5 * spf * (pop[osd][d] - pop[i][d]) +
+            0.4 * (pop[p][d] - pop[q][d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.09 * spf
+          cand.push(spso_clip(v, bounds))
+        }
+      } else {
+        // global contraction
+        for d in 0..<dim {
+          let r2 = RNG::next(current_rng)
+          let v = best_pos[d] +
+            r2 * (pop[i][d] - best_pos[d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.09 * spf
+          cand.push(spso_clip(v, bounds))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      consumed = consumed + 1
+      if fv < fits[i] {
+        fits[i] = fv
+        pop[i] = cand
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(cand[d])
+          }
+        }
+      }
+    }
+    if consumed == 0 {
+      break
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== OSA: ostrich optimization algorithm (Deb et al. 2021) =====
+
+///|
+pub struct OsaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_osa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> OsaConfig {
+  OsaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn osa_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Ostrich Optimization Algorithm (OSA, Deb et al. 2021). The population is
+/// ranked every round and split into three sex/role groups with **entirely
+/// different behaviour families**: the two fittest birds sit on the nest
+/// (fine incubating steps around their own position), the next eight males
+/// either follow an elite-excited exploration or fight a rival — the loser
+/// is **pushed away from the winner** (anti-contraction, unique in the
+/// library) — and the remaining females either migrate toward a random male
+/// (mating migration across groups) or forage with plain random steps. Unlike
+/// ChSO (a rooster/hen/chick following chain) or TGA (top/middle/worst
+/// strategies), the roles here are sex-based and the male rivalry actively
+/// pushes losers outward to preserve diversity. The ostrich factor
+/// `osf = e^{-t/2500}` decays with evaluations already spent, so a larger
+/// budget is a strict continuation and the historical best is monotone.
+/// population_size is accepted for a uniform config interface but not used
+/// (the herd is fixed at 25).
+pub fn ostrich_optimization(
+  config : OsaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = 25
+  let elite_cnt = 2
+  let male_cnt = 6
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _j in 0..<pop_size {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pop.push(ind)
+      fits.push(fv)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pop.push(ind)
+      fits.push(1.0e300)
+    }
+  }
+
+  while evaluations < max_evals {
+    let osf = @math.exp(-evaluations.to_double() / 2500.0)
+    // rank individuals best-to-worst with an all-Int selection sort
+    let order : Array[Int32] = []
+    let used : Array[Bool] = []
+    for _k in 0..<pop_size {
+      order.push(0)
+      used.push(false)
+    }
+    for k in 0..<pop_size {
+      let mut bi = -1
+      for j in 0..<pop_size {
+        if !used[j] {
+          if bi < 0 || fits[j] < fits[bi] {
+            bi = j
+          }
+        }
+      }
+      used[bi] = true
+      order[k] = bi
+    }
+    // role assignment by rank: 0 elite (incubating), 1 male, 2 female
+    let role : Array[Int32] = []
+    for _k in 0..<pop_size {
+      role.push(2)
+    }
+    for k in 0..<pop_size {
+      let idx = order[k]
+      let r = if k < elite_cnt {
+        0
+      } else if k < elite_cnt + male_cnt {
+        1
+      } else {
+        2
+      }
+      role[idx] = r
+    }
+    let mut consumed = 0
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let ri = role[i]
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if ri == 0 {
+        // nest sitting: incubating fine steps around the elite's own position
+        for d in 0..<dim {
+          let v = pop[i][d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.01 * osf
+          cand.push(osa_clip(v, bounds))
+        }
+      } else if ri == 1 {
+        // male: elite-excited exploration, or rivalry where the loser flees
+        let e = order[(RNG::next(current_rng) * elite_cnt.to_double()).to_int() %
+          elite_cnt]
+        if r1 < 0.97 {
+          let pa = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+            pop_size
+          let qa = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+            pop_size
+          for d in 0..<dim {
+            let v = pop[i][d] +
+              1.05 * osf * (pop[e][d] - pop[i][d]) +
+              0.35 * (pop[pa][d] - pop[qa][d]) +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.09 * osf
+            cand.push(osa_clip(v, bounds))
+          }
+        } else {
+          let j = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+            pop_size
+          let jj = if j == i { (j + 1) % pop_size } else { j }
+          for d in 0..<dim {
+            let v = if fits[i] <= fits[jj] {
+              pop[i][d] +
+              0.6 * RNG::next(current_rng) * osf * (best_pos[d] - pop[i][d]) +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.07 * osf
+            } else {
+              pop[i][d] +
+              0.5 * RNG::next(current_rng) * osf * (pop[i][d] - pop[jj][d]) +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.14 * osf
+            }
+            cand.push(osa_clip(v, bounds))
+          }
+        }
+        // female: mating migration toward a random male (no plain foraging)
+      } else {
+        let m = order[elite_cnt +
+          (RNG::next(current_rng) * male_cnt.to_double()).to_int() % male_cnt]
+        let pa = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let qa = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        for d in 0..<dim {
+          let v = pop[i][d] +
+            1.10 * osf * (pop[m][d] - pop[i][d]) +
+            0.3 * (pop[pa][d] - pop[qa][d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.06 * osf
+          cand.push(osa_clip(v, bounds))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      consumed = consumed + 1
+      if fv < fits[i] {
+        fits[i] = fv
+        pop[i] = cand
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(cand[d])
+          }
+        }
+      }
+    }
+    if consumed == 0 {
+      break
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== BB: Barzilai-Borwein gradient method (Barzilai & Borwein 1988) =====
+
+///|
+pub struct BbConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bb_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BbConfig {
+  BbConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn bb_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Barzilai-Borwein gradient method (BB, Barzilai & Borwein 1988). A
+/// deterministic first-order method whose step size is estimated from the
+/// **last pair of points alone**: with s = x_{k+1} − x_k and y = g_{k+1} − g_k
+/// the two secant estimates are alpha_BB1 = sᵀs / (sᵀy) and alpha_BB2 =
+/// sᵀy / (yᵀy), used **alternately** (Raydan 1997) and clipped to the span.
+/// Acceptance follows the **non-monotone Grippo-Lampariello-Lucidi rule** —
+/// f(x_new) ≤ max over the last M=10 function values − 1e-4·‖g‖² — so the
+/// trajectory is allowed to temporarily worsen in order to escape shallow
+/// traps, unlike the monotone Armijo line searches of BFGS/CG and unlike
+/// trust-region schemes (COBYLA/NEWUOA) or multi-scale smoothing (IFilt).
+/// There is no matrix, no moment accumulator, no conjugate direction and no
+/// trust radius: a single scalar step per iteration is the whole mechanism.
+/// Failures backtrack alpha by halves (6 tries); persistent stall escapes
+/// toward the best neighborhood, and the budget is organized as fixed-length
+/// per-restart segments so a larger budget is a strict continuation and the
+/// historical best is monotone. population_size is accepted for a uniform
+/// config interface but not used (single-trajectory method).
+pub fn barzilai_borwein(
+  config : BbConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let per_restart = 200
+  let restart_max = 25
+  let grad_h = span * 1.0e-4
+  let mem_len = 10
+
+  let mut x : Array[Double] = []
+  for _d in 0..<dim {
+    x.push(bounds.min + RNG::next(current_rng) * span)
+  }
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut fx = evaluate(f, x)
+  evaluations = evaluations + 1
+  if fx < best_val {
+    best_val = fx
+    best_pos = []
+    for d in 0..<dim {
+      best_pos.push(x[d])
+    }
+  }
+
+  // non-monotone memory: the last mem_len function values
+  let mem : Array[Double] = []
+  for _k in 0..<mem_len {
+    mem.push(1.0e300)
+  }
+  let mut mem_slot = 0
+  mem[mem_slot] = fx
+  mem_slot = (mem_slot + 1) % mem_len
+
+  // pending secant pair from the previous accepted step
+  let s_pend : Array[Double] = []
+  let g_prev : Array[Double] = []
+  let y_hat : Array[Double] = []
+  for _d in 0..<dim {
+    s_pend.push(0.0)
+    g_prev.push(0.0)
+    y_hat.push(0.0)
+  }
+  let mut have_pend = false
+  let mut have_sy = false
+
+  let mut restart = 0
+  while evaluations < max_evals {
+    restart = restart + 1
+    if restart > restart_max {
+      break
+    }
+    if restart > 1 {
+      // alternate restarts between uniform and best-neighborhood starts
+      x = []
+      for d in 0..<dim {
+        let v = if restart % 2 == 0 {
+          bounds.min + RNG::next(current_rng) * span
+        } else {
+          best_pos[d] + (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05
+        }
+        x.push(bb_clip(v, bounds))
+      }
+      fx = evaluate(f, x)
+      evaluations = evaluations + 1
+      if fx < best_val {
+        best_val = fx
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(x[d])
+        }
+      }
+      mem[mem_slot] = fx
+      mem_slot = (mem_slot + 1) % mem_len
+      have_pend = false
+      have_sy = false
+    }
+    let mut consumed = 0
+    let mut stall = 0
+    while evaluations < max_evals && consumed < per_restart {
+      // gradient at the current point by forward differences
+      let g : Array[Double] = []
+      let mut gsq = 0.0
+      for d in 0..<dim {
+        let xv = x[d] + grad_h
+        let xo = x[d]
+        x[d] = if xv > bounds.max { bounds.max } else { xv }
+        let fp = evaluate(f, x)
+        x[d] = xo
+        evaluations = evaluations + 1
+        consumed = consumed + 1
+        let gd = (fp - fx) / grad_h
+        g.push(gd)
+        gsq = gsq + gd * gd
+      }
+      if gsq < 1.0e-20 {
+        // flat region: informed escape toward the best
+        x = []
+        for d in 0..<dim {
+          let v = best_pos[d] +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05
+          x.push(bb_clip(v, bounds))
+        }
+        fx = evaluate(f, x)
+        evaluations = evaluations + 1
+        consumed = consumed + 1
+        if fx < best_val {
+          best_val = fx
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(x[d])
+          }
+        }
+        mem[mem_slot] = fx
+        mem_slot = (mem_slot + 1) % mem_len
+        have_pend = false
+        have_sy = false
+        stall = 0
+      } else {
+        // finalize the secant pair from the previous accepted step
+        if have_pend {
+          let mut sy = 0.0
+          for d in 0..<dim {
+            let yd = g[d] - g_prev[d]
+            y_hat[d] = yd
+            sy = sy + s_pend[d] * yd
+          }
+          have_sy = sy > 1.0e-20
+        } else {
+          have_sy = false
+        }
+        // Barzilai-Borwein alpha (alternating BB1/BB2), clipped to the span
+        let mut alpha = span * 0.1
+        if have_sy {
+          let mut ss = 0.0
+          let mut sy = 0.0
+          let mut yy = 0.0
+          for d in 0..<dim {
+            ss = ss + s_pend[d] * s_pend[d]
+            sy = sy + s_pend[d] * y_hat[d]
+            yy = yy + y_hat[d] * y_hat[d]
+          }
+          if sy > 1.0e-20 {
+            let a1 = ss / sy
+            let a2 = sy / yy
+            alpha = if evaluations % 2 == 0 { a1 } else { a2 }
+            if alpha < span * 1.0e-8 {
+              alpha = span * 1.0e-8
+            }
+            if alpha > span {
+              alpha = span
+            }
+          } else {
+            alpha = span * 0.1
+          }
+        }
+        // non-monotone acceptance threshold over the last mem_len values
+        let mut maxf = fx
+        for k in 0..<mem_len {
+          if mem[k] > maxf {
+            maxf = mem[k]
+          }
+        }
+        let threshold = maxf - 6.0e-5 * gsq
+        // backtracking trial
+        let mut accepted = false
+        let mut a_try = alpha
+        let mut trial_x : Array[Double] = []
+        let mut trial_f = 1.0e300
+        let mut trials = 0
+        while trials < 6 {
+          trial_x = []
+          for d in 0..<dim {
+            trial_x.push(bb_clip(x[d] - a_try * g[d], bounds))
+          }
+          trial_f = evaluate(f, trial_x)
+          evaluations = evaluations + 1
+          consumed = consumed + 1
+          if trial_f <= threshold {
+            accepted = true
+            break
+          }
+          a_try = a_try * 0.5
+          trials = trials + 1
+        }
+        if accepted {
+          // stash the displacement as the pending secant pair
+          for d in 0..<dim {
+            s_pend[d] = trial_x[d] - x[d]
+            g_prev[d] = g[d]
+          }
+          have_pend = true
+          x = trial_x
+          fx = trial_f
+          stall = 0
+          if fx < best_val {
+            best_val = fx
+            best_pos = []
+            for d in 0..<dim {
+              best_pos.push(x[d])
+            }
+          }
+          mem[mem_slot] = fx
+          mem_slot = (mem_slot + 1) % mem_len
+        } else {
+          // persistent stall: informed escape toward the best
+          stall = stall + 1
+          if stall >= 2 {
+            x = []
+            for d in 0..<dim {
+              let v = best_pos[d] +
+                (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05
+              x.push(bb_clip(v, bounds))
+            }
+            fx = evaluate(f, x)
+            evaluations = evaluations + 1
+            consumed = consumed + 1
+            if fx < best_val {
+              best_val = fx
+              best_pos = []
+              for d in 0..<dim {
+                best_pos.push(x[d])
+              }
+            }
+            mem[mem_slot] = fx
+            mem_slot = (mem_slot + 1) % mem_len
+            have_pend = false
+            have_sy = false
+            stall = 0
+          }
+        }
+      }
+      if consumed >= per_restart {
+        break
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== Anderson: Anderson acceleration (Anderson 1965) =====
+
+///|
+pub struct AndersonConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_anderson_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> AndersonConfig {
+  AndersonConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn anderson_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Anderson acceleration (Anderson 1965, SIAM; the fixed-point acceleration
+/// behind scipy.optimize.anderson). A deterministic first-order method built
+/// on a **residual least-squares mixing** mechanism never used in this
+/// library: every iteration produces a point x_k and the residual of its
+/// gradient-descent map r_k = G(x_k) − x_k with G(x) = x − α∇f(x); the last
+/// m pairs (x_k, r_k) are kept in a ring window, and every few iterations an
+/// augmented least-squares system min ‖Σ c_i r_i‖² s.t. Σ c_i = 1 is solved
+/// by Gaussian elimination on the regularized Gram matrix so the accelerated
+/// candidate is the linear combination Σ c_i (x_k + r_k). This multi-point
+/// residual mixing is distinct from BFGS (curvature matrix), CG (conjugate
+/// directions), BB (scalar secant step) and Adam (moments). The better of the
+/// base step and the accelerated step advances only when it strictly
+/// improves; the basic step size is a fixed span·0.05 (no secant estimate, no
+/// non-monotone memory). Stall escapes toward the best neighborhood, and the
+/// budget is organized as fixed-length per-restart segments so a larger
+/// budget is a strict continuation and the historical best is monotone.
+/// population_size is accepted for a uniform config interface but not used
+/// (single-trajectory method).
+pub fn anderson_acceleration(
+  config : AndersonConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let per_restart = 500
+  let restart_max = 10
+  let grad_h = span * 1.0e-4
+  let window = 6
+  let mix_every = 5
+
+  let mut x : Array[Double] = []
+  for _d in 0..<dim {
+    x.push(bounds.min + RNG::next(current_rng) * span)
+  }
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut fx = evaluate(f, x)
+  evaluations = evaluations + 1
+  if fx < best_val {
+    best_val = fx
+    best_pos = []
+    for d in 0..<dim {
+      best_pos.push(x[d])
+    }
+  }
+
+  // ring window of the last (x_k, r_k) pairs for residual mixing
+  let x_hist : Array[Array[Double]] = []
+  let r_hist : Array[Array[Double]] = []
+  for _k in 0..<window {
+    let zx : Array[Double] = []
+    let zr : Array[Double] = []
+    for _d in 0..<dim {
+      zx.push(0.0)
+      zr.push(0.0)
+    }
+    x_hist.push(zx)
+    r_hist.push(zr)
+  }
+  let mut hist_n = 0
+  let mut hist_slot = 0
+
+  let mut restart = 0
+  while evaluations < max_evals {
+    restart = restart + 1
+    if restart > restart_max {
+      break
+    }
+    if restart > 1 {
+      // alternate restarts between uniform and best-neighborhood starts
+      x = []
+      for d in 0..<dim {
+        let v = if restart % 2 == 0 {
+          bounds.min + RNG::next(current_rng) * span
+        } else {
+          best_pos[d] + (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05
+        }
+        x.push(anderson_clip(v, bounds))
+      }
+      fx = evaluate(f, x)
+      evaluations = evaluations + 1
+      if fx < best_val {
+        best_val = fx
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(x[d])
+        }
+      }
+      hist_n = 0
+      hist_slot = 0
+    }
+    let mut consumed = 0
+    let mut iter_in_seg = 0
+    let mut stall = 0
+    while evaluations < max_evals && consumed < per_restart {
+      // gradient at the current point by forward differences
+      let g : Array[Double] = []
+      let mut gsq = 0.0
+      for d in 0..<dim {
+        let xv = x[d] + grad_h
+        let xo = x[d]
+        x[d] = if xv > bounds.max { bounds.max } else { xv }
+        let fp = evaluate(f, x)
+        x[d] = xo
+        evaluations = evaluations + 1
+        consumed = consumed + 1
+        let gd = (fp - fx) / grad_h
+        g.push(gd)
+        gsq = gsq + gd * gd
+      }
+      // residual of the gradient-descent map and the base step
+      let a_base = span * 0.05
+      let r : Array[Double] = []
+      let base_x : Array[Double] = []
+      for d in 0..<dim {
+        r.push(-a_base * g[d])
+        base_x.push(anderson_clip(x[d] - a_base * g[d], bounds))
+      }
+      let base_f = evaluate(f, base_x)
+      evaluations = evaluations + 1
+      consumed = consumed + 1
+      // push the current pair into the ring window
+      for d in 0..<dim {
+        x_hist[hist_slot][d] = x[d]
+        r_hist[hist_slot][d] = r[d]
+      }
+      if hist_n < window {
+        hist_n = hist_n + 1
+      }
+      hist_slot = (hist_slot + 1) % window
+      // Anderson mixing step every few iterations
+      let mut cand_x : Array[Double] = base_x
+      let mut cand_f = base_f
+      if hist_n >= 2 && iter_in_seg % mix_every == mix_every - 1 {
+        let m = hist_n
+        let size = m + 1
+        let mat : Array[Array[Double]] = []
+        for _i in 0..<size {
+          let row : Array[Double] = []
+          for _j in 0..<size {
+            row.push(0.0)
+          }
+          mat.push(row)
+        }
+        for i in 0..<m {
+          for j in 0..<m {
+            let mut dot = 0.0
+            for d2 in 0..<dim {
+              dot = dot + r_hist[i][d2] * r_hist[j][d2]
+            }
+            mat[i][j] = dot
+          }
+          mat[i][m] = 1.0
+          mat[m][i] = 1.0
+          mat[i][i] = mat[i][i] + 1.0e-10
+        }
+        let bvec : Array[Double] = []
+        for _i in 0..<size {
+          bvec.push(0.0)
+        }
+        bvec[m] = 1.0
+        // Gaussian elimination with partial pivoting
+        let mut ok = true
+        for col in 0..<size {
+          let mut piv = col
+          for rr in col..<size {
+            let av = if mat[rr][col] < 0.0 {
+              -mat[rr][col]
+            } else {
+              mat[rr][col]
+            }
+            let bv = if mat[piv][col] < 0.0 {
+              -mat[piv][col]
+            } else {
+              mat[piv][col]
+            }
+            if av > bv {
+              piv = rr
+            }
+          }
+          let pv = if mat[piv][col] < 0.0 {
+            -mat[piv][col]
+          } else {
+            mat[piv][col]
+          }
+          if pv < 1.0e-14 {
+            ok = false
+          } else {
+            if piv != col {
+              for j in 0..<size {
+                let tmp = mat[col][j]
+                mat[col][j] = mat[piv][j]
+                mat[piv][j] = tmp
+              }
+              let tb = bvec[col]
+              bvec[col] = bvec[piv]
+              bvec[piv] = tb
+            }
+            let nxt = col + 1
+            for rr in nxt..<size {
+              let facc = mat[rr][col] / mat[col][col]
+              for j in col..<size {
+                mat[rr][j] = mat[rr][j] - facc * mat[col][j]
+              }
+              bvec[rr] = bvec[rr] - facc * bvec[col]
+            }
+          }
+          if !ok {
+            break
+          }
+        }
+        if ok {
+          // back substitution
+          let sol : Array[Double] = []
+          for _i in 0..<size {
+            sol.push(0.0)
+          }
+          let mut ii = size - 1
+          while ii >= 0 {
+            let mut s = bvec[ii]
+            let mut j = ii + 1
+            while j < size {
+              s = s - mat[ii][j] * sol[j]
+              j = j + 1
+            }
+            sol[ii] = s / mat[ii][ii]
+            ii = ii - 1
+          }
+          let acc_x : Array[Double] = []
+          for d3 in 0..<dim {
+            let mut v = 0.0
+            for i in 0..<m {
+              v = v + sol[i] * (x_hist[i][d3] + r_hist[i][d3])
+            }
+            acc_x.push(anderson_clip(v, bounds))
+          }
+          // trust-region projection: unbounded mixing coefficients can throw
+          // the accelerated point far away on noisy multimodal terrain
+          let tr2 = span * 0.3 * (span * 0.3)
+          let mut dd = 0.0
+          for d4 in 0..<dim {
+            let dv = acc_x[d4] - x[d4]
+            dd = dd + dv * dv
+          }
+          if dd > tr2 {
+            let sc = span * 0.3 / dd.sqrt()
+            for d5 in 0..<dim {
+              acc_x[d5] = x[d5] + (acc_x[d5] - x[d5]) * sc
+            }
+          }
+          let acc_f = evaluate(f, acc_x)
+          evaluations = evaluations + 1
+          consumed = consumed + 1
+          if acc_f < cand_f {
+            cand_x = acc_x
+            cand_f = acc_f
+          }
+        }
+      }
+      // strict-improvement acceptance
+      if cand_f < fx {
+        x = cand_x
+        fx = cand_f
+        stall = 0
+        if fx < best_val {
+          best_val = fx
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(x[d])
+          }
+        }
+      } else {
+        stall = stall + 1
+        if stall >= 4 {
+          // informed escape toward the best neighborhood
+          x = []
+          for d in 0..<dim {
+            let v = best_pos[d] +
+              (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05
+            x.push(anderson_clip(v, bounds))
+          }
+          fx = evaluate(f, x)
+          evaluations = evaluations + 1
+          consumed = consumed + 1
+          if fx < best_val {
+            best_val = fx
+            best_pos = []
+            for d in 0..<dim {
+              best_pos.push(x[d])
+            }
+          }
+          hist_n = 0
+          hist_slot = 0
+          stall = 0
+        }
+      }
+      iter_in_seg = iter_in_seg + 1
+      if consumed >= per_restart {
+        break
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== GWSO: great white shark optimizer (Mallick et al. 2022) =====
+
+///|
+pub struct GwsoConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_gwso_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> GwsoConfig {
+  GwsoConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn gwso_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Great White Shark Optimizer (GWSO, Mallick et al. 2022). A swarm method
+/// whose defining feature is a **sine-phase-modulated wave envelope**: every
+/// shark carries a persistent phase `phase_i ∈ [0, 2π]` and the wave-motion
+/// step is scaled by `|sin(2π·t/500 + phase_i)|` with a fixed 500-evaluation
+/// period — the envelope oscillates per shark with individual phase offsets,
+/// so at any moment some sharks ride wave crests (large exploratory steps)
+/// while others ride troughs (fine refinement), a spatial-temporal division
+/// of labor that no linear / exponential / power-law / heavy-tailed step
+/// schedule in the library provides. Behaviors: blood-scent tracking (toward
+/// the best with differential kicks), wave motion (envelope-scaled
+/// oscillation), and deep cruising (random walk with a weak pull toward the
+/// best). The schedule depends only on evaluations already spent, so a
+/// larger budget is a strict continuation and the historical best is
+/// monotone.
+pub fn great_white_shark_optimizer(
+  config : GwsoConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = 25
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let phase : Array[Double] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _j in 0..<pop_size {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    phase.push(RNG::next(current_rng) * TWO_PI)
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pop.push(ind)
+      fits.push(fv)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pop.push(ind)
+      fits.push(1.0e300)
+    }
+  }
+
+  while evaluations < max_evals {
+    let gsf = @math.exp(-evaluations.to_double() / 2500.0)
+    let wave_t = evaluations.to_double() / 500.0
+    let mut consumed = 0
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let ph = phase[i]
+      let raw = @math.sin(TWO_PI * wave_t + ph)
+      let wave = raw.abs()
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.44 {
+        // blood-scent tracking: toward the best with differential kicks
+        let p = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let q = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        for d in 0..<dim {
+          let v = pop[i][d] +
+            0.8 * gsf * (best_pos[d] - pop[i][d]) +
+            0.4 * (pop[p][d] - pop[q][d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10 * gsf
+          cand.push(gwso_clip(v, bounds))
+        }
+      } else if r1 < 0.74 {
+        // wave motion: sine-envelope scaled oscillation (per-shark phase)
+        let p = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let q = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        for d in 0..<dim {
+          let v = pop[i][d] +
+            wave * 0.6 * (pop[p][d] - pop[q][d]) +
+            wave * (2.0 * RNG::next(current_rng) - 1.0) * span * 0.16 * gsf
+          cand.push(gwso_clip(v, bounds))
+        }
+      } else {
+        // deep cruising: random walk with a weak pull toward the best
+        for d in 0..<dim {
+          let v = pop[i][d] +
+            0.3 * gsf * (best_pos[d] - pop[i][d]) +
+            (2.0 * RNG::next(current_rng) - 1.0) * span * 0.15 * gsf * wave
+          cand.push(gwso_clip(v, bounds))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      consumed = consumed + 1
+      if fv < fits[i] {
+        fits[i] = fv
+        pop[i] = cand
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(cand[d])
+          }
+        }
+      }
+    }
+    if consumed == 0 {
+      break
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== RSM: response surface methodology (Box & Wilson 1951) =====
+
+///|
+pub struct RsmConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_rsm_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> RsmConfig {
+  RsmConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn rsm_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+fn rsm_features(
+  u : Array[Double],
+  dim : Int32,
+  pairs_i : Array[Int32],
+  pairs_j : Array[Int32],
+  out : Array[Double],
+) -> Unit {
+  out[0] = 1.0
+  for d in 0..<dim {
+    out[1 + d] = u[d]
+    out[1 + dim + d] = u[d] * u[d]
+  }
+  let base = 1 + dim + dim
+  let nc = pairs_i.length()
+  for k in 0..<nc {
+    out[base + k] = u[pairs_i[k]] * u[pairs_j[k]]
+  }
+}
+
+///|
+/// Response Surface Methodology (RSM, Box & Wilson 1951). A deterministic
+/// surrogate family whose mechanism is absent from every trust-region and
+/// differencing scheme in the library: around the current center a
+/// **central-composite-style design** is sampled (the center reuses its known
+/// value, the 2d axis points, and one point per coordinate pair), and a **full
+/// quadratic model including all C(d,2) cross terms** (1 + d + d + C(d,2)
+/// coefficients) is fitted by regularized least squares over the normalized
+/// design — unlike NEWUOA/BOBYQA which estimate diagonal curvature by
+/// per-coordinate differencing and never see cross coupling. The fitted
+/// symmetric Hessian (cross terms included) drives a **Newton direction** on
+/// the model (fallback to the model gradient when singular), followed by an
+/// adaptive line search (step doubling on improvement, halving on failure)
+/// inside the design radius; two consecutive fruitless rounds shrink the
+/// design and re-center on the best. The schedule depends only on evaluations
+/// already spent, so a larger budget is a strict continuation and the
+/// historical best is monotone. population_size is accepted for a uniform
+/// config interface but not used (single-trajectory method).
+pub fn response_surface_methodology(
+  config : RsmConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let per_restart = 500
+  let restart_max = 10
+  let inv2 = 0.7071067811865476
+
+  // cross-term pair list (i, j) with i < j
+  let pairs_i : Array[Int32] = []
+  let pairs_j : Array[Int32] = []
+  for i in 0..<dim {
+    let jstart = i + 1
+    for j in jstart..<dim {
+      pairs_i.push(i)
+      pairs_j.push(j)
+    }
+  }
+  let n_cross = pairs_i.length()
+  let n_feat = 1 + dim + dim + n_cross
+  let n_samples = 1 + 2 * dim + n_cross
+
+  let feat : Array[Double] = []
+  for _k in 0..<n_feat {
+    feat.push(0.0)
+  }
+  let uvec : Array[Double] = []
+  for _d in 0..<dim {
+    uvec.push(0.0)
+  }
+
+  let mut x : Array[Double] = []
+  for _d in 0..<dim {
+    x.push(bounds.min + RNG::next(current_rng) * span)
+  }
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut fx = evaluate(f, x)
+  evaluations = evaluations + 1
+  if fx < best_val {
+    best_val = fx
+    best_pos = []
+    for d in 0..<dim {
+      best_pos.push(x[d])
+    }
+  }
+
+  let mut restart = 0
+  while evaluations < max_evals {
+    restart = restart + 1
+    if restart > restart_max {
+      break
+    }
+    if restart > 1 {
+      // alternate restarts between uniform and best-neighborhood starts
+      x = []
+      for d in 0..<dim {
+        let v = if restart % 2 == 0 {
+          bounds.min + RNG::next(current_rng) * span
+        } else {
+          best_pos[d] + (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05
+        }
+        x.push(rsm_clip(v, bounds))
+      }
+      fx = evaluate(f, x)
+      evaluations = evaluations + 1
+      if fx < best_val {
+        best_val = fx
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(x[d])
+        }
+      }
+    }
+    let mut consumed = 0
+    let mut delta = span * 0.15
+    let mut no_gain = 0
+    while evaluations < max_evals && consumed < per_restart {
+      // --- central composite design: center row reuses fx, then 2d axis
+      // points and n_cross pair points are evaluated
+      let zmat : Array[Array[Double]] = []
+      let yvec : Array[Double] = []
+      for d in 0..<dim {
+        uvec[d] = 0.0
+      }
+      rsm_features(uvec, dim, pairs_i, pairs_j, feat)
+      let zc : Array[Double] = []
+      for k in 0..<n_feat {
+        zc.push(feat[k])
+      }
+      zmat.push(zc)
+      yvec.push(fx)
+      for d in 0..<dim {
+        let xo = x[d]
+        x[d] = rsm_clip(xo + delta, bounds)
+        let fp = evaluate(f, x)
+        x[d] = rsm_clip(xo - delta, bounds)
+        let fm = evaluate(f, x)
+        x[d] = xo
+        evaluations = evaluations + 2
+        consumed = consumed + 2
+        for dd in 0..<dim {
+          uvec[dd] = 0.0
+        }
+        uvec[d] = 1.0
+        rsm_features(uvec, dim, pairs_i, pairs_j, feat)
+        let zp : Array[Double] = []
+        for k in 0..<n_feat {
+          zp.push(feat[k])
+        }
+        zmat.push(zp)
+        yvec.push(fp)
+        uvec[d] = -1.0
+        rsm_features(uvec, dim, pairs_i, pairs_j, feat)
+        let zm : Array[Double] = []
+        for k in 0..<n_feat {
+          zm.push(feat[k])
+        }
+        zmat.push(zm)
+        yvec.push(fm)
+      }
+      let nc = pairs_i.length()
+      for k in 0..<nc {
+        let di = pairs_i[k]
+        let dj = pairs_j[k]
+        let xi = x[di]
+        let xj = x[dj]
+        x[di] = rsm_clip(xi + delta * inv2, bounds)
+        x[dj] = rsm_clip(xj + delta * inv2, bounds)
+        let fv = evaluate(f, x)
+        x[di] = xi
+        x[dj] = xj
+        evaluations = evaluations + 1
+        consumed = consumed + 1
+        for dd in 0..<dim {
+          uvec[dd] = 0.0
+        }
+        uvec[di] = inv2
+        uvec[dj] = inv2
+        rsm_features(uvec, dim, pairs_i, pairs_j, feat)
+        let zr : Array[Double] = []
+        for k2 in 0..<n_feat {
+          zr.push(feat[k2])
+        }
+        zmat.push(zr)
+        yvec.push(fv)
+      }
+      // --- regularized least squares: A = ZᵀZ + 1e-6 I, b = Zᵀy
+      let a : Array[Array[Double]] = []
+      let bvec : Array[Double] = []
+      for _i in 0..<n_feat {
+        let row : Array[Double] = []
+        for _j in 0..<n_feat {
+          row.push(0.0)
+        }
+        a.push(row)
+        bvec.push(0.0)
+      }
+      for k in 0..<n_samples {
+        let zk = zmat[k]
+        let yk = yvec[k]
+        for i in 0..<n_feat {
+          let zik = zk[i]
+          for j in 0..<n_feat {
+            a[i][j] = a[i][j] + zik * zk[j]
+          }
+          bvec[i] = bvec[i] + zik * yk
+        }
+      }
+      for i in 0..<n_feat {
+        a[i][i] = a[i][i] + 1.0e-6
+      }
+      // Gaussian elimination with partial pivoting (n_feat × n_feat)
+      let mut ok = true
+      for col in 0..<n_feat {
+        let mut piv = col
+        for rr in col..<n_feat {
+          let av = if a[rr][col] < 0.0 { -a[rr][col] } else { a[rr][col] }
+          let bv = if a[piv][col] < 0.0 { -a[piv][col] } else { a[piv][col] }
+          if av > bv {
+            piv = rr
+          }
+        }
+        let pv = if a[piv][col] < 0.0 { -a[piv][col] } else { a[piv][col] }
+        if pv < 1.0e-12 {
+          ok = false
+        } else {
+          if piv != col {
+            for j in 0..<n_feat {
+              let tmp = a[col][j]
+              a[col][j] = a[piv][j]
+              a[piv][j] = tmp
+            }
+            let tb = bvec[col]
+            bvec[col] = bvec[piv]
+            bvec[piv] = tb
+          }
+          let nxt = col + 1
+          for rr in nxt..<n_feat {
+            let facc = a[rr][col] / a[col][col]
+            for j in col..<n_feat {
+              a[rr][j] = a[rr][j] - facc * a[col][j]
+            }
+            bvec[rr] = bvec[rr] - facc * bvec[col]
+          }
+        }
+        if !ok {
+          break
+        }
+      }
+      let mut gained = false
+      if ok {
+        // back substitution for the model coefficients
+        let coef : Array[Double] = []
+        for _i in 0..<n_feat {
+          coef.push(0.0)
+        }
+        let mut ii = n_feat - 1
+        while ii >= 0 {
+          let mut s = bvec[ii]
+          let mut j = ii + 1
+          while j < n_feat {
+            s = s - a[ii][j] * coef[j]
+            j = j + 1
+          }
+          coef[ii] = s / a[ii][ii]
+          ii = ii - 1
+        }
+        // build the symmetric Hessian (cross terms included) and solve
+        // H·d = −g for the Newton direction on the model
+        let hmat : Array[Array[Double]] = []
+        let rhs : Array[Double] = []
+        for i in 0..<dim {
+          let row : Array[Double] = []
+          for _j in 0..<dim {
+            row.push(0.0)
+          }
+          hmat.push(row)
+          rhs.push(-coef[1 + i])
+        }
+        for i in 0..<dim {
+          hmat[i][i] = 2.0 * coef[1 + dim + i]
+        }
+        for k in 0..<nc {
+          let qi = pairs_i[k]
+          let qj = pairs_j[k]
+          let qv = coef[1 + dim + dim + k]
+          hmat[qi][qj] = hmat[qi][qj] + qv
+          hmat[qj][qi] = hmat[qj][qi] + qv
+        }
+        let mut ok2 = true
+        for col in 0..<dim {
+          let mut piv = col
+          for rr in col..<dim {
+            let av = if hmat[rr][col] < 0.0 {
+              -hmat[rr][col]
+            } else {
+              hmat[rr][col]
+            }
+            let bv = if hmat[piv][col] < 0.0 {
+              -hmat[piv][col]
+            } else {
+              hmat[piv][col]
+            }
+            if av > bv {
+              piv = rr
+            }
+          }
+          let pv = if hmat[piv][col] < 0.0 {
+            -hmat[piv][col]
+          } else {
+            hmat[piv][col]
+          }
+          if pv < 1.0e-12 {
+            ok2 = false
+          } else {
+            if piv != col {
+              for j in 0..<dim {
+                let tmp = hmat[col][j]
+                hmat[col][j] = hmat[piv][j]
+                hmat[piv][j] = tmp
+              }
+              let tb = rhs[col]
+              rhs[col] = rhs[piv]
+              rhs[piv] = tb
+            }
+            let nxt2 = col + 1
+            for rr in nxt2..<dim {
+              let facc = hmat[rr][col] / hmat[col][col]
+              for j in col..<dim {
+                hmat[rr][j] = hmat[rr][j] - facc * hmat[col][j]
+              }
+              rhs[rr] = rhs[rr] - facc * rhs[col]
+            }
+          }
+          if !ok2 {
+            break
+          }
+        }
+        if ok2 {
+          // Newton direction in normalized u space
+          let dir : Array[Double] = []
+          let mut dn2 = 0.0
+          for i in 0..<dim {
+            let dvi = -rhs[i]
+            dir.push(dvi)
+            dn2 = dn2 + dvi * dvi
+          }
+          // adaptive line search along the Newton direction
+          let mut t = 1.0
+          let mut tries = 0
+          let mut gained_here = false
+          while tries < 4 && evaluations < max_evals && consumed < per_restart {
+            let u2 : Array[Double] = []
+            let mut dn = 0.0
+            for i in 0..<dim {
+              let uv = dir[i] * t
+              u2.push(uv)
+              dn = dn + uv * uv
+            }
+            if dn > 1.0 {
+              let sc = 1.0 / dn.sqrt()
+              for i in 0..<dim {
+                u2[i] = u2[i] * sc
+              }
+            }
+            let xc : Array[Double] = []
+            for d in 0..<dim {
+              xc.push(rsm_clip(x[d] + u2[d] * delta, bounds))
+            }
+            let fc = evaluate(f, xc)
+            evaluations = evaluations + 1
+            consumed = consumed + 1
+            if fc < fx {
+              fx = fc
+              x = xc
+              gained_here = true
+              t = t * 2.0
+              if fx < best_val {
+                best_val = fx
+                best_pos = []
+                for d in 0..<dim {
+                  best_pos.push(x[d])
+                }
+              }
+            } else {
+              t = t * 0.5
+            }
+            tries = tries + 1
+          }
+          if gained_here {
+            gained = true
+          }
+        }
+      }
+      if gained {
+        no_gain = 0
+      } else {
+        no_gain = no_gain + 1
+        if no_gain >= 2 {
+          // two fruitless rounds: re-center on the best, shrink the design
+          x = []
+          for d in 0..<dim {
+            x.push(best_pos[d])
+          }
+          fx = best_val
+          delta = delta * 0.6
+          if delta < span * 0.02 {
+            delta = span * 0.02
+          }
+          no_gain = 0
+        }
+      }
+      if consumed >= per_restart {
+        break
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== PC: probability collectives (Wolpert 2003) =====
+
+///|
+pub struct PcConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_pc_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> PcConfig {
+  PcConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn pc_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Probability Collectives optimization (PC, David Wolpert 2003). An EDA
+/// family member with a mechanism absent from UMDA/cGA (per-generation
+/// marginal updates), EMNA (full-covariance batch resampling), TPE (quantile
+/// split l/g ratio) and NS (live-point rejection): each coordinate carries
+/// its own Gaussian (mu_d, sigma_d) and the distributions are updated
+/// **sequentially after every single evaluation** — on improvement every mu
+/// moves toward the sampled point (lr = 0.25) and every sigma contracts
+/// (×0.97, floored at span·0.005), while a fruitless evaluation expands every
+/// sigma (×1.01, capped at span·0.3) so the exploration pressure
+/// **accumulates during stagnation** instead of following an exponential
+/// decay schedule — no e^{-t/2500} factor and no generation batching at all,
+/// making the adaptive spread itself the entire step-size schedule. The
+/// sigma floor prevents diversity collapse and the sigma cap prevents the
+/// random-walk failure mode. The schedule depends only on evaluations
+/// already spent, so a larger budget is a strict continuation and the
+/// historical best is monotone. population_size is accepted for a uniform
+/// config interface but not used (sequential single-sample method).
+pub fn probability_collectives(
+  config : PcConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+
+  // per-coordinate Gaussian (mu, sigma)
+  let mu : Array[Double] = []
+  let sigma : Array[Double] = []
+  for _d in 0..<dim {
+    mu.push(bounds.min + RNG::next(current_rng) * span)
+    sigma.push(span * 0.15)
+  }
+  let mut x : Array[Double] = []
+  for d in 0..<dim {
+    x.push(mu[d])
+  }
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut fx = evaluate(f, x)
+  evaluations = evaluations + 1
+  if fx < best_val {
+    best_val = fx
+    best_pos = []
+    for d in 0..<dim {
+      best_pos.push(x[d])
+    }
+  }
+
+  let lr = 0.5
+  let mut stall = 0
+  while evaluations < max_evals {
+    // sample one point from the per-coordinate Gaussians (sequential update)
+    let cand : Array[Double] = []
+    for _d in 0..<dim {
+      cand.push(0.0)
+    }
+    for d in 0..<dim {
+      let u1 = RNG::next(current_rng)
+      let u2 = RNG::next(current_rng)
+      let z = box_muller(u1, u2)
+      cand[d] = pc_clip(mu[d] + sigma[d] * z, bounds)
+    }
+    let fv = evaluate(f, cand)
+    evaluations = evaluations + 1
+    if fv < fx {
+      // improving sample: mus blend the best anchor with the new evidence,
+      // sigmas contract faster (exploit)
+      for d in 0..<dim {
+        mu[d] = mu[d] +
+          0.5 * lr * (best_pos[d] - mu[d]) +
+          lr * (cand[d] - mu[d])
+        sigma[d] = sigma[d] * 0.94
+        if sigma[d] < span * 0.005 {
+          sigma[d] = span * 0.005
+        }
+      }
+      x = cand
+      fx = fv
+      stall = 0
+      if fx < best_val {
+        best_val = fx
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(cand[d])
+        }
+      }
+    } else {
+      // fruitless sample: sigmas expand slowly, exploration pressure builds
+      for d in 0..<dim {
+        sigma[d] = sigma[d] * 1.005
+        if sigma[d] > span * 0.3 {
+          sigma[d] = span * 0.3
+        }
+      }
+      stall = stall + 1
+      if stall >= 20 {
+        // persistent stagnation: re-anchor the Gaussians on the incumbent
+        // best with a fresh exploration spread (MGA-style mixed re-anchor)
+        for d in 0..<dim {
+          mu[d] = pc_clip(
+            best_pos[d] + (2.0 * RNG::next(current_rng) - 1.0) * span * 0.05,
+            bounds,
+          )
+          sigma[d] = span * 0.05
+        }
+        stall = 0
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== WMA: woodpecker mating algorithm (2023) =====
+
+///|
+pub struct WmaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_wma_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> WmaConfig {
+  WmaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn wma_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Woodpecker Mating Algorithm (WMA, 2023). Models the woodpecker life
+/// cycle with two mechanisms absent from the rest of the library:
+/// (1) **acoustic attenuation** — mating information travels as a drumming
+/// signal whose pull decays exponentially with the Euclidean distance to
+/// the drumming source (alpha = e^{-dist/λ}, λ = 0.6·span), so information
+/// sharing is *distance-gated* rather than uniform (PSO family) or
+/// role-migration (OSA): responders far from the drummer barely move while
+/// close ones snap in, and because λ is fixed the exploration→exploitation
+/// transition **emerges from population convergence itself** — early the
+/// flock is spread so alpha ≈ 0 and responders random-walk, late everyone
+/// is close so alpha → 1 and they march into the best; on top of that the
+/// sound pressure decays with the elapsed session (apf = e^{-t/1500})
+/// shrinking every stride, so the late game is a precision peck-down; (2) **per-individual tree switching** — each bird
+/// carries its own resource-exhaustion counter and re-settles on a random
+/// tree once it stalls 8 times, a *decentralised* diversity injection
+/// unlike the whole-flock restarts of MGA/CHC. Roles are fluid: every
+/// generation re-ranks the flock, the top half drums (fine local pecking
+/// around their own tree) and the bottom half responds to the drumming.
+/// Everything depends only on evaluations already spent, so a larger
+/// budget is a strict continuation and the historical best is monotone.
+/// population_size is accepted for a uniform config interface but not
+/// used (the flock is fixed at 25).
+pub fn woodpecker_mating_algorithm(
+  config : WmaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = 25
+  let drum_cnt = 12
+  let lambda = span * 0.6
+  let switch_stall = 8
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let stalls : Array[Int32] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _j in 0..<pop_size {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pop.push(ind)
+      fits.push(fv)
+      stalls.push(0)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pop.push(ind)
+      fits.push(1.0e300)
+      stalls.push(0)
+    }
+  }
+
+  while evaluations < max_evals {
+    // sound pressure decays as the drumming session wears on (energy
+    // budget dissipation); all strides shrink with it
+    let apf = @math.exp(-evaluations.to_double() / 1500.0)
+    // re-rank the flock every generation; roles are fluid
+    let order = sort_indices(fits)
+    // phase A: drummers (top half) peck — fine local drilling around
+    // their own tree
+    for k in 0..<drum_cnt {
+      if evaluations >= max_evals {
+        break
+      }
+      let i = order[k]
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let u1 = RNG::next(current_rng)
+        let u2 = RNG::next(current_rng)
+        let z = box_muller(u1, u2)
+        cand.push(wma_clip(pop[i][d] + z * span * 0.026 * apf, bounds))
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < fits[i] {
+        pop[i] = cand
+        fits[i] = fv
+        stalls[i] = 0
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(cand[d])
+          }
+        }
+      } else {
+        stalls[i] = stalls[i] + 1
+      }
+    }
+    // phase B: responders (bottom half) hear the drumming with acoustic
+    // attenuation — the pull toward the source scales with
+    // e^{-dist/λ} and the flock's own convergence provides the annealing
+    for k in drum_cnt..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let i = order[k]
+      let mut dist = 0.0
+      for d in 0..<dim {
+        let diff = pop[i][d] - best_pos[d]
+        dist = dist + diff * diff
+      }
+      let alpha = @math.exp(-dist.sqrt() / lambda)
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let u1 = RNG::next(current_rng)
+        let u2 = RNG::next(current_rng)
+        let z = box_muller(u1, u2)
+        cand.push(
+          wma_clip(
+            pop[i][d] +
+            alpha * (best_pos[d] - pop[i][d]) +
+            z * span * 0.04 * apf,
+            bounds,
+          ),
+        )
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < fits[i] {
+        pop[i] = cand
+        fits[i] = fv
+        stalls[i] = 0
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(cand[d])
+          }
+        }
+      } else {
+        stalls[i] = stalls[i] + 1
+      }
+    }
+    // phase C: tree switching — each stale bird re-settles on a random
+    // tree (decentralised diversity injection, one eval per switch)
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      if stalls[i] >= switch_stall {
+        let fresh : Array[Double] = []
+        for _d in 0..<dim {
+          fresh.push(bounds.min + RNG::next(current_rng) * span)
+        }
+        let fv = evaluate(f, fresh)
+        evaluations = evaluations + 1
+        pop[i] = fresh
+        fits[i] = fv
+        stalls[i] = 0
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(fresh[d])
+          }
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== BMDA: bivariate marginal distribution algorithm (1997) =====
+
+///|
+pub struct BmdaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bmda_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BmdaConfig {
+  BmdaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn bmda_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Bivariate Marginal Distribution Algorithm (BMDA, Pelikan 1997). An EDA
+/// family member with a **sparse pairwise dependency structure** absent from
+/// the rest of the library: the per-dimension Gaussian edges (mu_d, sigma_d)
+/// are re-estimated batch-wise from a rolling buffer of the 12 most recent
+/// *accepted* samples, and every coordinate pair's Pearson correlation is
+/// tracked with an exponential moving average (rho <- 0.7 rho + 0.3 rho_new)
+/// so dependency estimates **accumulate across generations** instead of being
+/// re-derived from a single small sample. Pairs whose smoothed |rho| exceeds
+/// 0.45 are treated as **coupled variables and sampled from their joint
+/// bivariate normal** (z_b = rho z_a + sqrt(1-rho^2) z_b'), each dimension
+/// coupling with at most one partner (greedy pairing), while the remaining
+/// dimensions are sampled independently — a *sparse* pairwise model sitting
+/// between UMDA/PBIL (pure per-dimension marginals) and EMNA (full dense
+/// covariance), and a *distribution-sampling* treatment of dependencies
+/// rather than GOMEA's gene-block transplantation (recombination) or PC's
+/// sequential single-sample updates. Improvements replace the incumbent
+/// (elitist), the spread re-estimates are smoothed (sigma <- 0.8 sigma +
+/// 0.2 sample_sd, floored at span*0.008) so a lucky window cannot collapse
+/// them, and 15 stagnant generations trigger a 50/50 re-anchor — either on
+/// the incumbent best's neighbourhood or a full-space uniform one — keeping
+/// large-range functions from freezing (MGA/CHC mixed-restart lesson).
+/// Everything depends only on evaluations already
+/// spent, so a larger budget is a strict continuation and the historical
+/// best is monotone. population_size is accepted for a uniform config
+/// interface but not used (the flock is fixed at 25).
+pub fn bivariate_marginal_distribution_algorithm(
+  config : BmdaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let buffer_cap = 12
+  let rho_thresh = 0.45
+  let sigma_floor = span * 0.008
+
+  // per-dimension Gaussian edges
+  let mu : Array[Double] = []
+  let sigma : Array[Double] = []
+  for _d in 0..<dim {
+    mu.push(bounds.min + RNG::next(current_rng) * span)
+    sigma.push(span * 0.15)
+  }
+  // smoothed pairwise correlation matrix (upper triangle used)
+  let rho : Array[Array[Double]] = []
+  for _i in 0..<dim {
+    let row : Array[Double] = []
+    for _j in 0..<dim {
+      row.push(0.0)
+    }
+    rho.push(row)
+  }
+
+  // rolling buffer of recently accepted samples driving the re-estimates
+  let recent : Array[Array[Double]] = []
+
+  let mut x : Array[Double] = []
+  for d in 0..<dim {
+    x.push(mu[d])
+  }
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut fx = evaluate(f, x)
+  evaluations = evaluations + 1
+  best_val = fx
+  for d in 0..<dim {
+    best_pos.push(x[d])
+  }
+  let mut stall = 0
+
+  while evaluations < max_evals {
+    // independent standard normals for every dimension
+    let z : Array[Double] = []
+    for _d in 0..<dim {
+      let u1 = RNG::next(current_rng)
+      let u2 = RNG::next(current_rng)
+      z.push(box_muller(u1, u2))
+    }
+    // greedy pairing: each dimension couples with at most one partner whose
+    // smoothed correlation is significant
+    let used : Array[Bool] = []
+    for _d in 0..<dim {
+      used.push(false)
+    }
+    for i in 0..<dim {
+      if used[i] {
+        // already coupled as the junior partner of an earlier dimension
+      } else {
+        let j0 = i + 1
+        let mut bj = -1
+        let mut brho = 0.0
+        for j in j0..<dim {
+          if used[j] {
+            // taken
+          } else {
+            let r = rho[i][j]
+            let ar = if r < 0.0 { -r } else { r }
+            if ar > brho {
+              brho = ar
+              bj = j
+            }
+          }
+        }
+        if bj >= 0 && brho > rho_thresh {
+          used[i] = true
+          used[bj] = true
+          // joint bivariate normal sampling for the coupled pair
+          let u1 = RNG::next(current_rng)
+          let u2 = RNG::next(current_rng)
+          let z2p = box_muller(u1, u2)
+          let rc = rho[i][bj]
+          z[bj] = rc * z[i] + (1.0 - rc * rc).sqrt() * z2p
+        }
+      }
+    }
+    let cand : Array[Double] = []
+    for d in 0..<dim {
+      cand.push(bmda_clip(mu[d] + sigma[d] * z[d], bounds))
+    }
+    let fv = evaluate(f, cand)
+    evaluations = evaluations + 1
+    if fv < fx {
+      x = cand
+      fx = fv
+      stall = 0
+      recent.push(cand)
+      if recent.length() >= buffer_cap {
+        // batch re-estimate the marginals and refresh the smoothed pairwise
+        // correlations from the rolling buffer of accepted samples
+        let n = recent.length()
+        let nd = n.to_double()
+        for d in 0..<dim {
+          let mut s = 0.0
+          for k in 0..<n {
+            s = s + recent[k][d]
+          }
+          mu[d] = s / nd
+          let mut sv = 0.0
+          for k in 0..<n {
+            let diff = recent[k][d] - mu[d]
+            sv = sv + diff * diff
+          }
+          let sd = (sv / (nd - 1.0)).sqrt()
+          // smooth the spread so a lucky 12-sample window cannot collapse it
+          let raw = 0.8 * sigma[d] + 0.2 * sd
+          sigma[d] = if raw < sigma_floor { sigma_floor } else { raw }
+        }
+        for i in 0..<dim {
+          let i1 = i + 1
+          for j in i1..<dim {
+            let mut mi = 0.0
+            let mut mj = 0.0
+            for k in 0..<n {
+              mi = mi + recent[k][i]
+              mj = mj + recent[k][j]
+            }
+            mi = mi / nd
+            mj = mj / nd
+            let mut cij = 0.0
+            let mut vi = 0.0
+            let mut vj = 0.0
+            for k in 0..<n {
+              let di = recent[k][i] - mi
+              let dj = recent[k][j] - mj
+              cij = cij + di * dj
+              vi = vi + di * di
+              vj = vj + dj * dj
+            }
+            let mut corr = 0.0
+            if vi > 1.0e-12 && vj > 1.0e-12 {
+              corr = cij / (vi * vj).sqrt()
+              if corr > 1.0 {
+                corr = 1.0
+              }
+              if corr < -1.0 {
+                corr = -1.0
+              }
+            }
+            rho[i][j] = 0.7 * rho[i][j] + 0.3 * corr
+          }
+        }
+        recent.clear()
+      }
+      if fx < best_val {
+        best_val = fx
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(cand[d])
+        }
+      }
+    } else {
+      stall = stall + 1
+      if stall >= 15 {
+        // persistent stagnation: re-anchor the marginals in one of two ways
+        // (50/50 event-level choice) — a best-neighbourhood re-anchor for
+        // exploitation or a full-space re-anchor for large-range exploration;
+        // the mixed restart differs from PC's purely best-neighbourhood
+        // re-anchor and keeps large-range functions from freezing
+        let pick = RNG::next(current_rng)
+        if pick < 0.5 {
+          for d in 0..<dim {
+            mu[d] = bmda_clip(
+              best_pos[d] + (2.0 * RNG::next(current_rng) - 1.0) * span * 0.10,
+              bounds,
+            )
+            sigma[d] = span * 0.06
+          }
+        } else {
+          for d in 0..<dim {
+            mu[d] = bounds.min + RNG::next(current_rng) * span
+            sigma[d] = span * 0.20
+          }
+        }
+        stall = 0
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== PGSA: plant growth simulation algorithm (2005) =====
+
+///|
+pub struct PgsaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_pgsa_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> PgsaConfig {
+  PgsaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn pgsa_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Plant Growth Simulation Algorithm (PGSA, Li Tong et al. 2005). Models
+/// the phototropic growth of a plant trunk: a **node pool** (capacity 40,
+/// 20 random trunk nodes seeded) grows one generation of buds at a time.
+/// Every node carries a **morphactin concentration** L = 1 / (1 + 10·
+/// (f − f_best)/(f_worst − f_best)) — the closer a node is to the optimum,
+/// the higher its concentration — and growth points are drawn from the pool
+/// by a concentration-weighted roulette. Each bud extends from its growth
+/// point with an independently sampled Gaussian step per dimension whose
+/// length decays linearly with the budget (span·0.12 → span·0.02). New buds
+/// join the pool **unconditionally** (growth, not replacement) and the pool
+/// is pruned back to capacity each generation by fitness (competitive
+/// exclusion). The combination of *probability-selected growth points*,
+/// *unconditional pool growth* and *capacity pruning* is absent from the
+/// rest of the library — PPA replaces parents with rank-scaled runners, NS
+/// replaces the worst live point only under a strict improvement threshold,
+/// and RRO's rank-weighted roulette merely picks a reference for an
+/// in-place move. The bud length depends only on evaluations already
+/// spent, so a larger budget is a strict continuation and the historical
+/// best is monotone. population_size is accepted for a uniform config
+/// interface but not used (the pool is fixed at 40).
+pub fn plant_growth_simulation(
+  config : PgsaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pool_cap = 40
+  let init_pool = 20
+  let buds_per_gen = 25
+
+  // node pool seeded with random trunk nodes
+  let pool : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _j in 0..<init_pool {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pool.push(ind)
+      fits.push(fv)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pool.push(ind)
+      fits.push(1.0e300)
+    }
+  }
+
+  while evaluations < max_evals {
+    // morphactin concentrations: the closer to the incumbent optimum, the
+    // higher the concentration (normalized by the pool's fitness range)
+    let mut f_worst = -1.0e300
+    for j in 0..<pool.length() {
+      if fits[j] > f_worst {
+        f_worst = fits[j]
+      }
+    }
+    let f_range = f_worst - best_val
+    let weights : Array[Double] = []
+    let mut w_total = 0.0
+    for j in 0..<pool.length() {
+      let frac = (fits[j] - best_val) / (f_range + 1.0e-9)
+      let conc = 1.0 / (1.0 + 10.0 * frac)
+      weights.push(conc)
+      w_total = w_total + conc
+    }
+    // bud length decays linearly with the spent budget
+    let progress = evaluations.to_double() / max_evals.to_double()
+    let branch = span * (0.12 - 0.10 * progress)
+
+    // one generation of buds, each drawn by concentration-weighted roulette
+    let mut buds = 0
+    while buds < buds_per_gen && evaluations < max_evals {
+      let u = RNG::next(current_rng) * w_total
+      let mut acc = 0.0
+      let mut pick = weights.length() - 1
+      let mut chosen = false
+      for j in 0..<weights.length() {
+        acc = acc + weights[j]
+        if chosen == false && acc >= u {
+          pick = j
+          chosen = true
+        }
+      }
+      let bud : Array[Double] = []
+      for d in 0..<dim {
+        let u1 = RNG::next(current_rng)
+        let u2 = RNG::next(current_rng)
+        let z = box_muller(u1, u2)
+        bud.push(pgsa_clip(pool[pick][d] + z * branch, bounds))
+      }
+      let fv = evaluate(f, bud)
+      evaluations = evaluations + 1
+      buds = buds + 1
+      pool.push(bud)
+      fits.push(fv)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(bud[d])
+        }
+      }
+    }
+    // competitive exclusion: prune the pool back to capacity by fitness
+    if pool.length() > pool_cap {
+      let order = sort_indices(fits)
+      let kept_pool : Array[Array[Double]] = []
+      let kept_fits : Array[Double] = []
+      for k in 0..<pool_cap {
+        let idx = order[k]
+        kept_pool.push(pool[idx])
+        kept_fits.push(fits[idx])
+      }
+      pool.clear()
+      fits.clear()
+      for k in 0..<pool_cap {
+        pool.push(kept_pool[k])
+        fits.push(kept_fits[k])
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== Crowd: crowding genetic algorithm (1975) =====
+
+///|
+pub struct CrowdConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_crowd_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> CrowdConfig {
+  CrowdConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn crowd_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Crowding Genetic Algorithm (De Jong 1975). The only algorithm in the
+/// library whose replacement decision is driven by **spatial similarity**
+/// instead of fitness: every offspring competes with the population member
+/// that is **nearest to it in Euclidean distance** and replaces it only if
+/// better (crowding selection). All other replacement mechanisms are
+/// fitness-driven — TGA replaces by rank group, NS evicts the worst point,
+/// OAIN re-seeds within a distance threshold, BRO respawns on accumulated
+/// damage, PGSA prunes by pool capacity — while here the *spatial niche*
+/// of the offspring decides its competitor. Because offspring are generated
+/// near their parents (50% Gaussian mutation with crf-decaying stride, 50%
+/// per-dimension BLX-style interpolation with a random mate), the victim is
+/// usually the parent itself, so subpopulations persist around separate
+/// basins and the population keeps covering multiple niches — the
+/// de-Jong-style niching property, maintained implicitly by the replacement
+/// rule with **no explicit diversity mechanism at all**. Faithful to the
+/// original: there is **no pull toward the global best**; convergence is
+/// driven purely by local competition (fitter subpopulations out-breed the
+/// weaker ones over time). Historical best tracked separately; crf =
+/// e^{-t/2500} decays the mutation stride. Everything depends only on
+/// evaluations already spent, so a larger budget is a strict continuation
+/// and the historical best is monotone. population_size is accepted for a
+/// uniform config interface but not used (the population is fixed at 25).
+pub fn crowding_genetic_algorithm(
+  config : CrowdConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = 25
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _j in 0..<pop_size {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pop.push(ind)
+      fits.push(fv)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pop.push(ind)
+      fits.push(1.0e300)
+    }
+  }
+
+  while evaluations < max_evals {
+    let crf = @math.exp(-evaluations.to_double() / 2500.0)
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.5 {
+        // mutation offspring: an independent Gaussian jitter per dimension
+        for d in 0..<dim {
+          let u1 = RNG::next(current_rng)
+          let u2 = RNG::next(current_rng)
+          let z = box_muller(u1, u2)
+          cand.push(crowd_clip(pop[i][d] + z * span * 0.11 * crf, bounds))
+        }
+      } else {
+        // crossover offspring: BLX-style interpolation with a random mate
+        // (w ~ U(-0.25, 1.25), mostly inside but occasionally extrapolating
+        // beyond the parents to keep exploration; j != i by the offset trick)
+        let j = (
+            (RNG::next(current_rng) * pop_size.to_double()).to_int() + i + 1
+          ) %
+          pop_size
+        for d in 0..<dim {
+          let w = RNG::next(current_rng) * 1.5 - 0.25
+          cand.push(crowd_clip(pop[i][d] + w * (pop[j][d] - pop[i][d]), bounds))
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      // crowding selection: the offspring's competitor is the population
+      // member nearest to it in Euclidean distance (spatial similarity)
+      let mut nn = 0
+      let mut nn_d2 = 1.0e300
+      for k in 0..<pop_size {
+        let mut dsq = 0.0
+        for d in 0..<dim {
+          let diff = cand[d] - pop[k][d]
+          dsq = dsq + diff * diff
+        }
+        if dsq < nn_d2 {
+          nn_d2 = dsq
+          nn = k
+        }
+      }
+      if fv < fits[nn] {
+        pop[nn] = cand
+        fits[nn] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(cand[d])
+          }
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== PBT: population-based training (2017) =====
+
+///|
+pub struct PbtConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_pbt_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> PbtConfig {
+  PbtConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn pbt_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Population-Based Training (PBT, Jaderberg et al. 2017, DeepMind). The
+/// only algorithm in the library whose **evolving objects are the
+/// algorithm's own parameters**: every individual carries a private
+/// hyperparameter pair (mutation stride `step_i` ∈ [0.02, 0.30]·span and
+/// pull toward the incumbent best `pull_i` ∈ [0.1, 1.5], seeded uniformly),
+/// and the search alternates between two loops — *regular steps* where each
+/// individual moves using **its own** hyperparameters (pull-weighted drift
+/// toward the incumbent best plus a stride-scaled Gaussian jitter,
+/// improvement-only replacement), and a **periodic exploit-then-explore
+/// cycle** on the hyperparameters alone (positions frozen): *exploit* —
+/// below-median individuals copy the hyperparameter pair of a random
+/// above-median individual (bad configurations die, good configurations
+/// spread), then *explore* — every pair is perturbed (stride in log-space
+/// ×exp(N(0,0.3)), pull additively ±0.1), clamped. Every other algorithm
+/// keeps its update rule fixed or adapts a scalar (1+1ES' 1/5 rule, jDE's
+/// per-individual F/CR, ALNS' operator weights, DEO's radius) — PBT makes
+/// the **configuration itself a chromosome**, so the update rule evolves
+/// with the population and good settings propagate without any hand-tuned
+/// schedule. The cycle runs every 8 generations; crf = e^{-t/2500} decays
+/// the global stride scale. Everything depends only on evaluations already
+/// spent, so a larger budget is a strict continuation and the historical
+/// best is monotone. population_size is accepted for a uniform config
+/// interface but not used (the population is fixed at 25).
+pub fn population_based_training(
+  config : PbtConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = 25
+  let exploit_every = 8
+
+  // population plus each individual's private, evolvable hyperparameters
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let step : Array[Double] = []
+  let pull : Array[Double] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  let mut gen = 0
+  for _j in 0..<pop_size {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    let st = 0.05 + RNG::next(current_rng) * 0.15
+    let pl = 0.2 + RNG::next(current_rng) * 1.0
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pop.push(ind)
+      fits.push(fv)
+      step.push(st)
+      pull.push(pl)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pop.push(ind)
+      fits.push(1.0e300)
+      step.push(st)
+      pull.push(pl)
+    }
+  }
+
+  while evaluations < max_evals {
+    gen = gen + 1
+    // regular steps: each individual moves with its own hyperparameters
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let crf = @math.exp(-evaluations.to_double() / 2500.0)
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let u1 = RNG::next(current_rng)
+        let u2 = RNG::next(current_rng)
+        let z = box_muller(u1, u2)
+        cand.push(
+          pbt_clip(
+            pop[i][d] +
+            pull[i] * (best_pos[d] - pop[i][d]) +
+            z * span * step[i] * crf,
+            bounds,
+          ),
+        )
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < fits[i] {
+        pop[i] = cand
+        fits[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(cand[d])
+          }
+        }
+      }
+    }
+    // periodic exploit-then-explore on the hyperparameters (positions
+    // stay frozen): below-median individuals adopt a random above-median
+    // individual's configuration, then every configuration is perturbed
+    if gen % exploit_every == 0 {
+      let order = sort_indices(fits)
+      let mid = pop_size / 2
+      for k in mid..<pop_size {
+        let i = order[k]
+        let wj = mid + (RNG::next(current_rng) * mid.to_double()).to_int()
+        let wi = if wj >= pop_size { pop_size - 1 } else { wj }
+        let w = order[wi]
+        step[i] = step[w]
+        pull[i] = pull[w]
+      }
+      for i in 0..<pop_size {
+        let u1 = RNG::next(current_rng)
+        let u2 = RNG::next(current_rng)
+        let z = box_muller(u1, u2)
+        let nstep = step[i] * @math.exp(z * 0.3)
+        step[i] = if nstep < 0.02 {
+          0.02
+        } else if nstep > 0.30 {
+          0.30
+        } else {
+          nstep
+        }
+        let u3 = RNG::next(current_rng)
+        let npull = pull[i] + (2.0 * u3 - 1.0) * 0.1
+        pull[i] = if npull < 0.1 {
+          0.1
+        } else if npull > 1.5 {
+          1.5
+        } else {
+          npull
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== FS: fitness sharing (1987) =====
+
+///|
+pub struct FsConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_fs_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> FsConfig {
+  FsConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn fs_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Fitness Sharing (Goldberg & Richardson 1987). The only algorithm in the
+/// library whose **decision key is a density-adjusted fitness**: every
+/// generation each individual's raw fitness is inflated by its **niche
+/// count** `nc_i = Σ_j sh(d_ij)` — a triangular sharing kernel
+/// `sh(d) = 1 − d/σ_share` over the continuous pairwise Euclidean
+/// distances (σ_share = 0.12·span) — and the resulting *effective fitness*
+/// `eff_i = f_i · nc_i` (crowded or weak individuals rank worst under
+/// minimisation) **replaces the raw fitness as the ranking key** for the
+/// generation's three density-aware bands: the best-eff third exploits
+/// freely toward the incumbent best (uncrowded-and-fit), the middle third
+/// runs plain mutation search, and the worst-eff third is **density-evicted
+///** — it either flees its nearest neighbour (70%) or migrates to a random
+/// region (30%). Every other algorithm ranks/groups by raw fitness (TGA/
+/// ChSO/OSA rank bands, SPSO species radius, GOMEA statistical linkage, CC
+/// random grouping); WL penalises discrete histogram-bin visits, OAIN
+/// evicts+re-seeds within a distance threshold, Crowd replaces via nearest-
+/// neighbour competition — all alter *positions or membership*; here the
+/// **selection pressure itself is density-damped** while membership is
+/// never revoked. Improvement-only replacement on raw fitness; the
+/// historical best is tracked separately; shf = e^{-t/2500} decays strides.
+/// Everything depends only on evaluations already spent, so a larger budget
+/// is a strict continuation and the historical best is monotone.
+/// population_size is accepted for a uniform config interface but not used
+/// (the population is fixed at 25).
+pub fn fitness_sharing(
+  config : FsConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = 25
+  let sigma_share = span * 0.12
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _j in 0..<pop_size {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pop.push(ind)
+      fits.push(fv)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pop.push(ind)
+      fits.push(1.0e300)
+    }
+  }
+
+  while evaluations < max_evals {
+    let shf = @math.exp(-evaluations.to_double() / 2500.0)
+    // niche counts: continuous kernel sharing over the current population;
+    // each individual's nearest neighbour is recorded for the eviction band
+    let nc : Array[Double] = []
+    let nn : Array[Int32] = []
+    for _i in 0..<pop_size {
+      nc.push(0.0)
+      nn.push(-1)
+    }
+    for i in 0..<pop_size {
+      let mut d_min = 1.0e300
+      for j in 0..<pop_size {
+        let mut dsq = 0.0
+        for d in 0..<dim {
+          let diff = pop[i][d] - pop[j][d]
+          dsq = dsq + diff * diff
+        }
+        let dist = dsq.sqrt()
+        if dist < sigma_share {
+          nc[i] = nc[i] + (1.0 - dist / sigma_share)
+        }
+        if j != i && dist < d_min {
+          d_min = dist
+          nn[i] = j
+        }
+      }
+    }
+    // effective fitness: raw fitness inflated by the niche count — the
+    // density-adjusted key replaces raw fitness as the ranking criterion
+    let eff : Array[Double] = []
+    for i in 0..<pop_size {
+      eff.push(fits[i] * nc[i])
+    }
+    let order = sort_indices(eff)
+    let third = pop_size / 3
+
+    // three density-aware bands over the effective ranking
+    for k in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let i = order[k]
+      let cand : Array[Double] = []
+      if k < third {
+        // elite band (uncrowded and fit): exploit freely toward the best
+        let p = (RNG::next(current_rng) * pop_size.to_double()).to_int()
+        let q = (
+            (RNG::next(current_rng) * pop_size.to_double()).to_int() + i + 1
+          ) %
+          pop_size
+        for d in 0..<dim {
+          let r2 = RNG::next(current_rng)
+          let u1 = RNG::next(current_rng)
+          let u2 = RNG::next(current_rng)
+          let z = box_muller(u1, u2)
+          cand.push(
+            fs_clip(
+              pop[i][d] +
+              r2 * 0.9 * (best_pos[d] - pop[i][d]) +
+              0.45 * (pop[p][d] - pop[q][d]) +
+              z * span * 0.08 * shf,
+              bounds,
+            ),
+          )
+        }
+      } else if k < third * 2 {
+        // shared band (moderate crowding): plain mutation search
+        for d in 0..<dim {
+          let u1 = RNG::next(current_rng)
+          let u2 = RNG::next(current_rng)
+          let z = box_muller(u1, u2)
+          cand.push(fs_clip(pop[i][d] + z * span * 0.10 * shf * shf, bounds))
+        }
+      } else {
+        // crowded band (worst effective fitness): density eviction
+        let r1 = RNG::next(current_rng)
+        if r1 < 0.3 {
+          // migrate to a random region
+          for d in 0..<dim {
+            let u1 = RNG::next(current_rng)
+            let u2 = RNG::next(current_rng)
+            let z = box_muller(u1, u2)
+            cand.push(fs_clip(pop[i][d] + z * span * 0.25 * shf, bounds))
+          }
+        } else {
+          // flee the nearest neighbour
+          let nni = nn[i]
+          for d in 0..<dim {
+            let r2 = RNG::next(current_rng)
+            let u1 = RNG::next(current_rng)
+            let u2 = RNG::next(current_rng)
+            let z = box_muller(u1, u2)
+            cand.push(
+              fs_clip(
+                pop[i][d] +
+                r2 * 0.8 * (pop[i][d] - pop[nni][d]) +
+                z * span * 0.10 * shf,
+                bounds,
+              ),
+            )
+          }
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < fits[i] {
+        pop[i] = cand
+        fits[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(cand[d])
+          }
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== Bandit: multi-armed bandit budget allocation =====
+
+///|
+pub struct BanditConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_bandit_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> BanditConfig {
+  BanditConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn bandit_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Multi-Armed Bandit Optimization (ε-greedy bandit budget allocation). The
+/// only algorithm in the library where **the evaluation budget itself is a
+/// competitively allocated resource**: the search space is sliced into
+/// independent starting points (6 arms here; population_size accepted but
+/// unused per the single-point registration convention), and evaluation
+/// blocks (100 evals each) are handed out by **ε-greedy arm selection** —
+/// 70% of blocks go to the arm whose current best value is best among the
+/// arms (exploit), 30% are given to a uniformly random arm (explore). Every
+/// other restart / multi-start method spends its budget on fixed, equal
+/// segments (BFGS/CG/DAnl constant-size restarts, MLSL's per-start
+/// allowance, PA's uniform population copy) — here **weak arms starve and
+/// promising arms feast**, so total budget concentrates on the best basins
+/// without any hand-tuned schedule. Inside its block an arm runs a
+/// single-point pattern descent: per-dimension Gaussian stride (adaptive —
+/// each success expands the arm's stride ×1.2 up to span·0.5, each failure
+/// contracts ×0.5 down to span·1e-4, mirroring MADS mesh growth/decay) plus
+/// a mild 0.25 pull toward the global best. crf = e^{-t/2500} decays the
+/// global stride scale; the historical best is tracked across all arms.
+/// Everything depends only on evaluations already spent (block boundaries
+/// are evaluation-counted, never max_evals-relative), so a larger budget is
+/// a strict continuation and the historical best is monotone.
+pub fn bandit_allocation_algorithm(
+  config : BanditConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let arms = 6
+  let block = 100
+  let eps = 0.3
+
+  // arm table: independent starting points competing for budget blocks
+  let pos : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let step : Array[Double] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _j in 0..<arms {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pos.push(ind)
+      fits.push(fv)
+      step.push(span * 0.15)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pos.push(ind)
+      fits.push(1.0e300)
+      step.push(span * 0.15)
+    }
+  }
+
+  while evaluations < max_evals {
+    let crf = @math.exp(-evaluations.to_double() / 2500.0)
+    // ε-greedy arm selection: exploit the current best arm most of the
+    // time, explore a uniformly random arm with probability ε
+    let mut best_a = 0
+    let mut bv = 1.0e300
+    for j in 0..<arms {
+      if fits[j] < bv {
+        bv = fits[j]
+        best_a = j
+      }
+    }
+    let u = RNG::next(current_rng)
+    let ra = (RNG::next(current_rng) * arms.to_double()).to_int()
+    let a = if u < eps { ra } else { best_a }
+    // spend one full block on the chosen arm: single-point pattern descent
+    let blk_end = evaluations + block
+    while evaluations < blk_end && evaluations < max_evals {
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        let u1 = RNG::next(current_rng)
+        let u2 = RNG::next(current_rng)
+        let z = box_muller(u1, u2)
+        cand.push(
+          bandit_clip(
+            pos[a][d] +
+            0.25 * (best_pos[d] - pos[a][d]) +
+            z * span * step[a] * crf,
+            bounds,
+          ),
+        )
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      if fv < fits[a] {
+        pos[a] = cand
+        fits[a] = fv
+        // success expands the arm's stride (pattern-search growth)
+        let ns = step[a] * 1.2
+        step[a] = if ns > span * 0.5 { span * 0.5 } else { ns }
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(cand[d])
+          }
+        }
+      } else {
+        // failure contracts the arm's stride (pattern-search decay)
+        let ns = step[a] * 0.5
+        step[a] = if ns < span * 1.0e-4 { span * 1.0e-4 } else { ns }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== LA: learning automata optimization =====
+
+///|
+pub struct LaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_la_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> LaConfig {
+  LaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn la_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Learning Automata Optimization (LA, Thathachar & Sastry, 1970s~2004).
+/// The only algorithm in the library whose per-individual state is an
+/// **action-probability vector reinforced by environmental feedback** —
+/// three discrete actions per dimension (step −, hold still, step +) with
+/// *learned* probabilities instead of continuous Gaussian sampling. Every
+/// individual carries two probability tables: `pp[i][d]` (probability of
+/// stepping positive along dimension d, seeded 0.5) and `pz[i][d]`
+/// (probability of holding dimension d still, seeded 0.2 — the remainder is
+/// the negative-step probability). Each automaton move samples one of the
+/// three actions per dimension independently, then applies the **linear
+/// reward-penalty scheme**: the sampled action's probability moves a small
+/// step lr=0.08 toward 1 when the overall move improved the mover and
+/// toward 0 when it failed — so "which dimensions are worth moving" is a
+/// *learned* per-individual selective state, unlike Starfish's random
+/// dimension choice, PC's continuous Gaussian (μ/σ), cGA's single global
+/// probability vector, PBT's replicated hyperparameters, and SEOA's scalar
+/// emotion. Two additional behaviors share the budget: fine jitter
+/// (span·0.05·laf², diversity — the MKE lesson) and contraction toward the
+/// incumbent best (0.4 pull + jitter). Improvement-only replacement on raw
+/// fitness; the historical best is tracked separately; laf = e^{-t/2500}
+/// decays strides. Everything depends only on evaluations already spent, so
+/// a larger budget is a strict continuation and the historical best is
+/// monotone. population_size is accepted for a uniform config interface but
+/// not used (the population is fixed at 25).
+pub fn learning_automata_algorithm(
+  config : LaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = 25
+  let lr = 0.08
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let pp : Array[Array[Double]] = []
+  let pz : Array[Array[Double]] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _j in 0..<pop_size {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    let a_pp : Array[Double] = []
+    let a_pz : Array[Double] = []
+    for _d in 0..<dim {
+      a_pp.push(0.5)
+      a_pz.push(0.2)
+    }
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pop.push(ind)
+      fits.push(fv)
+      pp.push(a_pp)
+      pz.push(a_pz)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pop.push(ind)
+      fits.push(1.0e300)
+      pp.push(a_pp)
+      pz.push(a_pz)
+    }
+  }
+
+  while evaluations < max_evals {
+    let laf = @math.exp(-evaluations.to_double() / 2500.0)
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.55 {
+        // automaton move: sample the three-action distribution per
+        // dimension independently, remember the sampled actions
+        let dirs : Array[Int32] = []
+        for d in 0..<dim {
+          let u = RNG::next(current_rng)
+          let dir = if u < pz[i][d] {
+            0
+          } else if u < pz[i][d] + pp[i][d] {
+            1
+          } else {
+            -1
+          }
+          dirs.push(dir)
+          cand.push(
+            la_clip(pop[i][d] + dir.to_double() * span * 0.10 * laf, bounds),
+          )
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        if fv < fits[i] {
+          pop[i] = cand
+          fits[i] = fv
+          if fv < best_val {
+            best_val = fv
+            best_pos = []
+            for d in 0..<dim {
+              best_pos.push(cand[d])
+            }
+          }
+        }
+        // linear reward-penalty on the actually sampled actions
+        let reward = if fv < fits[i] { 1.0 } else { 0.0 }
+        for d in 0..<dim {
+          let dir = dirs[d]
+          if dir == 1 {
+            let np = pp[i][d] + lr * (reward - pp[i][d])
+            pp[i][d] = if np < 0.05 {
+              0.05
+            } else if np > 0.90 {
+              0.90
+            } else {
+              np
+            }
+          } else if dir == 0 {
+            let np = pz[i][d] + lr * (reward - pz[i][d])
+            pz[i][d] = if np < 0.02 {
+              0.02
+            } else if np > 0.30 {
+              0.30
+            } else {
+              np
+            }
+          } else {
+            let np = pp[i][d] -
+              lr * reward * pp[i][d] * 0.5 +
+              lr * (1.0 - reward) * (1.0 - pp[i][d]) * 0.25
+            pp[i][d] = if np < 0.05 {
+              0.05
+            } else if np > 0.90 {
+              0.90
+            } else {
+              np
+            }
+          }
+        }
+      } else if r1 < 0.80 {
+        // fine jitter: plain diversity maintenance
+        for d in 0..<dim {
+          let u1 = RNG::next(current_rng)
+          let u2 = RNG::next(current_rng)
+          let z = box_muller(u1, u2)
+          cand.push(la_clip(pop[i][d] + z * span * 0.05 * laf * laf, bounds))
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        if fv < fits[i] {
+          pop[i] = cand
+          fits[i] = fv
+          if fv < best_val {
+            best_val = fv
+            best_pos = []
+            for d in 0..<dim {
+              best_pos.push(cand[d])
+            }
+          }
+        }
+      } else {
+        // contract toward the incumbent best
+        for d in 0..<dim {
+          let u1 = RNG::next(current_rng)
+          let u2 = RNG::next(current_rng)
+          let z = box_muller(u1, u2)
+          cand.push(
+            la_clip(
+              pop[i][d] +
+              0.4 * (best_pos[d] - pop[i][d]) +
+              z * span * 0.06 * laf,
+              bounds,
+            ),
+          )
+        }
+        let fv = evaluate(f, cand)
+        evaluations = evaluations + 1
+        if fv < fits[i] {
+          pop[i] = cand
+          fits[i] = fv
+          if fv < best_val {
+            best_val = fv
+            best_pos = []
+            for d in 0..<dim {
+              best_pos.push(cand[d])
+            }
+          }
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== RBR: rank-based replacement optimization =====
+
+///|
+pub struct RbrConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_rbr_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> RbrConfig {
+  RbrConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn rbr_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Rank-Based Replacement Optimization. The only algorithm in the library
+/// whose **write-back target is decided by the ranking chain**: every
+/// offspring (whether better or *worse* than its generator) is inserted at
+/// its rank position by displacing the **best of the individuals it
+/// outranks** (`fits[j] > fv` with minimal `fits[j]`), keeping the ranking
+/// chain ordered after every insertion — and the victim is **restricted to
+/// the weaker half of the population** (rank ≥ 13), so a downgraded
+/// offspring can never overwrite a strong front-runner. This grants a
+/// **downgraded migration** freedom no greedy-acceptance algorithm has: an
+/// offspring
+/// worse than its own generator is not discarded — it relocates to the
+/// worst end of the population it still beats, which unsticks greedy
+/// lock-in on large-range multimodal landscapes (Schwefel's cosine valleys
+/// reject every cross-valley step under greedy acceptance). Every other
+/// write-back rule fixes its victim differently: NS always evicts the
+/// single worst live point under a threshold, ExtO cascades through the
+/// three worst, TGA grafts the worst tenth, Crowd competes by *spatial*
+/// nearest-neighbour, PGSA prunes by pool capacity — here the victim is the
+/// *rank-adjacent inferior*, and the offspring never needs to beat its own
+/// generator. Three standard behaviors generate the offspring: differential
+/// exploration toward a tournament winner (42%, kick 0.45 + jitter
+/// span·0.11·rbf), fine jitter (30%, span·0.05·rbf² — the MKE diversity
+/// lesson), and segment-sampled contraction toward the incumbent best
+/// (28%, `best + r2·(x − best)` — relocation semantics, the Trust-round
+/// lesson). Offspring worse than every member are discarded. rbf =
+/// e^{-t/2500} decays strides. Everything depends only on evaluations
+/// already spent, so a larger budget is a strict continuation and the
+/// historical best is monotone. population_size is accepted for a uniform
+/// config interface but not used (the population is fixed at 25).
+pub fn rank_based_replacement_algorithm(
+  config : RbrConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = 25
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut evaluations = 0
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _j in 0..<pop_size {
+    let ind : Array[Double] = []
+    for _d in 0..<dim {
+      ind.push(bounds.min + RNG::next(current_rng) * span)
+    }
+    if evaluations < max_evals {
+      let fv = evaluate(f, ind)
+      evaluations = evaluations + 1
+      pop.push(ind)
+      fits.push(fv)
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(ind[d])
+        }
+      }
+    } else {
+      pop.push(ind)
+      fits.push(1.0e300)
+    }
+  }
+
+  while evaluations < max_evals {
+    let rbf = @math.exp(-evaluations.to_double() / 2500.0)
+    // generation-start ranking snapshot: only the weaker half of the
+    // population may be displaced by a rank-preserving insertion, so a
+    // downgraded offspring can never overwrite a strong front-runner
+    let order = sort_indices(fits)
+    let rank : Array[Int32] = []
+    for _j in 0..<pop_size {
+      rank.push(0)
+    }
+    for k in 0..<pop_size {
+      rank[order[k]] = k
+    }
+    for i in 0..<pop_size {
+      if evaluations >= max_evals {
+        break
+      }
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      if r1 < 0.42 {
+        // differential exploration: tournament winner + kick + jitter
+        let j = (
+            (RNG::next(current_rng) * pop_size.to_double()).to_int() + i + 1
+          ) %
+          pop_size
+        let p = (RNG::next(current_rng) * pop_size.to_double()).to_int()
+        let q = (
+            (RNG::next(current_rng) * pop_size.to_double()).to_int() + i + 1
+          ) %
+          pop_size
+        let ref_idx = if fits[j] < fits[p] { j } else { p }
+        for d in 0..<dim {
+          let r2 = RNG::next(current_rng)
+          let u1 = RNG::next(current_rng)
+          let u2 = RNG::next(current_rng)
+          let z = box_muller(u1, u2)
+          cand.push(
+            rbr_clip(
+              pop[i][d] +
+              1.2 * r2 * rbf * (pop[ref_idx][d] - pop[i][d]) +
+              1.0 * (pop[p][d] - pop[q][d]) +
+              z * span * 0.11 * rbf,
+              bounds,
+            ),
+          )
+        }
+      } else if r1 < 0.72 {
+        // fine jitter: plain diversity maintenance
+        for d in 0..<dim {
+          let u1 = RNG::next(current_rng)
+          let u2 = RNG::next(current_rng)
+          let z = box_muller(u1, u2)
+          cand.push(rbr_clip(pop[i][d] + z * span * 0.05 * rbf * rbf, bounds))
+        }
+      } else {
+        // segment-sampled contraction toward the incumbent best
+        for d in 0..<dim {
+          let r2 = RNG::next(current_rng)
+          let u1 = RNG::next(current_rng)
+          let u2 = RNG::next(current_rng)
+          let z = box_muller(u1, u2)
+          cand.push(
+            rbr_clip(
+              best_pos[d] +
+              r2 * (pop[i][d] - best_pos[d]) +
+              z * span * 0.06 * rbf,
+              bounds,
+            ),
+          )
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      // rank-preserving replacement: displace the best of the individuals
+      // the offspring outranks (an offspring worse than every member is
+      // discarded; the generator itself may be the displaced one) —
+      // restricted to the weaker half (rank >= 13) so downgraded offspring
+      // only ever fill the back of the ranking chain
+      let mut best_los = -1
+      let mut best_los_fit = 1.0e300
+      for j in 0..<pop_size {
+        if fits[j] > fv && fits[j] < best_los_fit && rank[j] >= 13 {
+          best_los_fit = fits[j]
+          best_los = j
+        }
+      }
+      if best_los >= 0 {
+        pop[best_los] = cand
+        fits[best_los] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(cand[d])
+          }
+        }
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== OGA: orthogonal genetic algorithm (2001) =====
+
+///|
+pub struct OgaConfig {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_oga_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> OgaConfig {
+  OgaConfig::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+/// Sylvester construction of the L16(2^15) orthogonal array: the 16x16
+/// Hadamard matrix (entry i,j = (-1)^(popcount(i & j))) with the all-ones
+/// first column dropped. Every pair of columns is balanced and independent,
+/// so across the 16 rows each two-factor combination (1,1),(1,2),(2,1),(2,2)
+/// occurs exactly 4 times.
+fn oga_l16_rows() -> Array[Array[Int32]] {
+  let rows : Array[Array[Int32]] = []
+  for i in 0..<16 {
+    let row : Array[Int32] = []
+    for j in 1..<16 {
+      let mut bits = i & j
+      let mut par = 0
+      while bits > 0 {
+        par = par + bits % 2
+        bits = bits / 2
+      }
+      row.push(if par % 2 == 0 { 1 } else { 2 })
+    }
+    rows.push(row)
+  }
+  rows
+}
+
+///|
+fn oga_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Orthogonal Genetic Algorithm (Leung & Wang 2001), continuous variant.
+/// Both pillars of the original method are kept. (1) **Factor-level
+/// quantization**: the initial population is not random — every dimension is
+/// discretised into N evenly spaced levels and individual i takes level
+/// (i + d) mod N in dimension d, a latin-square cover that places every
+/// level of every factor exactly once. (2) **Orthogonal crossover**: each
+/// generation, pop_size/2 tournament parent pairs are recombined with the
+/// L16(2^15) array — in every dimension the child inherits parent 1 or
+/// parent 2 as dictated by the array row, so 16 carefully chosen factor
+/// combinations stand in for the 2^dim full factorial while balancing every
+/// two-factor interaction; the best of the 16 children survives. Children
+/// receive a small per-dimension Gaussian jitter (15% of dimensions, span *
+/// 0.10 * e^{-t/2500}) so the discrete recombination lattice cannot stall
+/// once the population collapses onto shared factor values. The pool is
+/// rebuilt each generation from the elite of old ∪ children. All randomness
+/// depends only on evaluations already spent, so a larger budget is a strict
+/// continuation and the historical best is monotone.
+pub fn orthogonal_genetic_algorithm(
+  config : OgaConfig,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = if config.population_size < 8 {
+    8
+  } else {
+    config.population_size
+  }
+  let l16 = oga_l16_rows()
+  let mut evaluations = 0
+
+  // factor-level quantized initialization: latin-square level cover
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for i in 0..<pop_size {
+    let x : Array[Double] = []
+    for d in 0..<dim {
+      let lvl = (i + d) % pop_size
+      let v = bounds.min + span * lvl.to_double() / (pop_size - 1).to_double()
+      x.push(oga_clip(v, bounds))
+    }
+    let fv = evaluate(f, x)
+    evaluations = evaluations + 1
+    pop.push(x)
+    fits.push(fv)
+    if fv < best_val {
+      best_val = fv
+      best_pos = []
+      for d in 0..<dim {
+        best_pos.push(x[d])
+      }
+    }
+  }
+
+  while evaluations < max_evals {
+    // a full orthogonal crossover costs 16 evaluations; if the budget cannot
+    // afford another pair, stop — otherwise the merge below would run with
+    // no children and evaluations would never advance (infinite loop)
+    if evaluations + 16 > max_evals {
+      break
+    }
+    let npairs = pop_size / 2
+    let children : Array[Array[Double]] = []
+    let child_fits : Array[Double] = []
+    for _p in 0..<npairs {
+      if evaluations + 16 > max_evals {
+        break
+      }
+      let i1 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let i2 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let i3 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let i4 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+        pop_size
+      let p1 = if fits[i1] <= fits[i2] { pop[i1] } else { pop[i2] }
+      let p2 = if fits[i3] <= fits[i4] { pop[i3] } else { pop[i4] }
+      let sigma = span * 0.10 * @math.exp(-evaluations.to_double() / 2500.0)
+      let mut cbest_val = 1.0e300
+      let mut cbest : Array[Double] = []
+      for r in 0..<16 {
+        let row = l16[r]
+        let x : Array[Double] = []
+        for d in 0..<dim {
+          let mut src = row[d]
+          if d >= 15 {
+            src = if RNG::next(current_rng) < 0.5 { 1 } else { 2 }
+          }
+          let base = if src == 1 { p1[d] } else { p2[d] }
+          let mut v = base
+          if RNG::next(current_rng) < 0.15 {
+            let u1 = RNG::next(current_rng)
+            let u2 = RNG::next(current_rng)
+            let z = box_muller(u1, u2)
+            v = base + z * sigma
+          }
+          x.push(oga_clip(v, bounds))
+        }
+        let fv = evaluate(f, x)
+        evaluations = evaluations + 1
+        if fv < cbest_val {
+          cbest_val = fv
+          cbest = []
+          for d in 0..<dim {
+            cbest.push(x[d])
+          }
+        }
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(x[d])
+          }
+        }
+      }
+      children.push(cbest)
+      child_fits.push(cbest_val)
+    }
+    // rebuild the pool from the elite of old ∪ children
+    let total = pop.length() + children.length()
+    let all_fits : Array[Double] = []
+    for i in 0..<pop.length() {
+      all_fits.push(fits[i])
+    }
+    for i in 0..<children.length() {
+      all_fits.push(child_fits[i])
+    }
+    let order : Array[Int32] = []
+    for i in 0..<total {
+      order.push(i)
+    }
+    for a in 1..<total {
+      let key = order[a]
+      let kf = all_fits[key]
+      let mut b = a - 1
+      while b >= 0 && all_fits[order[b]] > kf {
+        order[b + 1] = order[b]
+        b = b - 1
+      }
+      order[b + 1] = key
+    }
+    let np : Array[Array[Double]] = []
+    let nf : Array[Double] = []
+    for i in 0..<pop_size {
+      let idx = order[i]
+      if idx < pop.length() {
+        np.push(pop[idx])
+      } else {
+        np.push(children[idx - pop.length()])
+      }
+      nf.push(all_fits[idx])
+    }
+    pop.clear()
+    fits.clear()
+    for i in 0..<pop_size {
+      pop.push(np[i])
+      fits.push(nf[i])
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== G3: generalized generation gap with parent-centric crossover (2003) =====
+
+///|
+pub struct G3Config {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_g3_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> G3Config {
+  G3Config::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn g3_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Generalized Generation Gap with Parent-Centric Crossover (G3-PCX, Deb,
+/// Anand & Joshi 2003). Each generation the main parent is chosen elitist or
+/// random (50/50) and two distinct reference members provide a mean; two
+/// children are
+/// generated *around the main parent* along the direction from that mean
+/// (sigma_xi = 0.1 of |D|) with per-dimension Gaussian noise scaled by |D|
+/// (sigma_eta = 0.1) — a *parent-centric* operator: offspring explore the
+/// vicinity of the elite parent along the parent configuration rather than
+/// mating-centre interpolation (SBX/BLX), block transplant (GOMEA) or line
+/// extrapolation (CHC), a crossover family no other algorithm in the library
+/// uses. A child replaces the worst member only when it beats it (generation
+/// gap with competition — inferior children are discarded). The direction
+/// term self-scales as the population converges
+/// (|D| shrinks with it), so late-stage refinement needs no step schedule; a
+/// span * 0.007 noise floor guards against a fully collapsed population (the
+/// MKE diversity lesson). All randomness depends only on evaluations already
+/// spent, so a larger budget is a strict continuation and the historical
+/// best is monotone.
+pub fn generalized_generation_gap_pcx(
+  config : G3Config,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = if config.population_size < 8 {
+    8
+  } else {
+    config.population_size
+  }
+  let mut evaluations = 0
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _i in 0..<pop_size {
+    let x = random_solution(dim, bounds, current_rng)
+    let fv = evaluate(f, x)
+    evaluations = evaluations + 1
+    pop.push(x)
+    fits.push(fv)
+    if fv < best_val {
+      best_val = fv
+      best_pos = []
+      for d in 0..<dim {
+        best_pos.push(x[d])
+      }
+    }
+  }
+
+  while evaluations < max_evals {
+    if evaluations + 2 > max_evals {
+      break
+    }
+    // main parent: elitist half the time, random otherwise (exploration /
+    // development balance, the MKE diversity lesson); the two references are
+    // the other distinct members of {elite, r1, r2}
+    let mut elite = 0
+    for i in 1..<pop_size {
+      if fits[i] < fits[elite] {
+        elite = i
+      }
+    }
+    let r1 = (RNG::next(current_rng) * pop_size.to_double()).to_int() % pop_size
+    let mut r2 = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+      pop_size
+    if r2 == r1 {
+      r2 = (r2 + 1) % pop_size
+    }
+    let main = if RNG::next(current_rng) < 0.66 { elite } else { r1 }
+    let refs : Array[Int32] = []
+    if elite != main {
+      refs.push(elite)
+    }
+    if r1 != main && r1 != elite {
+      refs.push(r1)
+    }
+    if r2 != main && r2 != elite && r2 != r1 {
+      refs.push(r2)
+    }
+    let mua = if refs.length() >= 1 { refs[0] } else { main }
+    let mub = if refs.length() >= 2 { refs[1] } else { mua }
+    let dir : Array[Double] = []
+    let mut dnorm = 0.0
+    for d in 0..<dim {
+      let mu = (pop[mua][d] + pop[mub][d]) * 0.5
+      let v = pop[main][d] - mu
+      dir.push(v)
+      dnorm = dnorm + v * v
+    }
+    dnorm = dnorm.sqrt()
+    // noise scale: sigma_eta * |D| with a floor to keep exploration alive
+    let ns = if 0.1 * dnorm > span * 0.007 { 0.1 * dnorm } else { span * 0.007 }
+    for _c in 0..<2 {
+      if evaluations + 1 > max_evals {
+        break
+      }
+      let child : Array[Double] = []
+      for d in 0..<dim {
+        let u1 = RNG::next(current_rng)
+        let u2 = RNG::next(current_rng)
+        let z = box_muller(u1, u2)
+        let v = pop[main][d] + 0.1 * dir[d] + z * ns
+        child.push(g3_clip(v, bounds))
+      }
+      let fv = evaluate(f, child)
+      evaluations = evaluations + 1
+      if fv < best_val {
+        best_val = fv
+        best_pos = []
+        for d in 0..<dim {
+          best_pos.push(child[d])
+        }
+      }
+      // generation gap with competition: replace the worst member only when
+      // the child beats it (inferior children are discarded so they cannot
+      // pollute the pool)
+      let mut worst = 0
+      for i in 1..<pop_size {
+        if fits[i] > fits[worst] {
+          worst = i
+        }
+      }
+      if fv < fits[worst] {
+        pop[worst] = child
+        fits[worst] = fv
+      }
+    }
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}
+
+// ===== DG2: differential grouping decomposition (2014) =====
+
+///|
+pub struct Dg2Config {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_dg2_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> Dg2Config {
+  Dg2Config::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn dg2_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Differential Grouping decomposition (Omidvar, Li, Yang & Yao 2014, IEEE
+/// TEVC; the automatic linkage-detection foundation of CC-based optimizers).
+/// Instead of the random permutation regrouping of CC, variable interactions
+/// are **detected by differential perturbation**: for a sampled coordinate
+/// pair (i, j) the change of f under perturbing j alone is compared against
+/// the change under perturbing i then j — a discrepancy beyond a relative
+/// tolerance marks the pair as non-separable and a union-find merges them
+/// into a linkage group (12 pairs probed every 15 generations, 3 evaluations
+/// each, around the incumbent best). The population then exploits the
+/// learned structure: group-wise moves apply a differential step, a pull to
+/// the global best and jitter **restricted to the group's dimensions**
+/// (other coordinates untouched — independent subspaces evolve separately),
+/// plus single-dimension refinement for independent coordinates and a
+/// global contraction. dgf = e^{-t/2500} scales the strides. All randomness
+/// depends only on evaluations already spent, so a larger budget is a strict
+/// continuation and the historical best is monotone.
+pub fn differential_grouping_decomposition(
+  config : Dg2Config,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = if config.population_size < 8 {
+    8
+  } else {
+    config.population_size
+  }
+  let delta = span * 0.01
+  let mut evaluations = 0
+
+  // union-find over dimensions (inline find, GOMEA-round pattern)
+  let parent : Array[Int32] = []
+  for i in 0..<dim {
+    parent.push(i)
+  }
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _i in 0..<pop_size {
+    let x = random_solution(dim, bounds, current_rng)
+    let fv = evaluate(f, x)
+    evaluations = evaluations + 1
+    pop.push(x)
+    fits.push(fv)
+    if fv < best_val {
+      best_val = fv
+      best_pos = []
+      for d in 0..<dim {
+        best_pos.push(x[d])
+      }
+    }
+  }
+
+  let mut next_detect = 15 * pop_size
+  let mut consumed_total = 1
+  while evaluations < max_evals {
+    if consumed_total == 0 {
+      break
+    }
+    let mut consumed = 0
+    // detection batch: probe 12 random pairs around the incumbent best
+    if evaluations >= next_detect {
+      next_detect = next_detect + 15 * pop_size
+      for _k in 0..<12 {
+        if evaluations + 3 > max_evals {
+          break
+        }
+        let i = (RNG::next(current_rng) * dim.to_double()).to_int() % dim
+        let mut j = (RNG::next(current_rng) * dim.to_double()).to_int() % dim
+        if j == i {
+          j = (j + 1) % dim
+        }
+        let pij : Array[Double] = []
+        let pj : Array[Double] = []
+        for d in 0..<dim {
+          let vij = if d == i || d == j {
+            best_pos[d] + delta
+          } else {
+            best_pos[d]
+          }
+          pij.push(dg2_clip(vij, bounds))
+          let vj = if d == j { best_pos[d] + delta } else { best_pos[d] }
+          pj.push(dg2_clip(vj, bounds))
+        }
+        let fij = evaluate(f, pij)
+        let fj = evaluate(f, pj)
+        evaluations = evaluations + 2
+        consumed = consumed + 2
+        // non-separability: the effect of perturbing j must differ once i
+        // has been perturbed
+        let dja = fij - best_val
+        let djb = fj - best_val
+        let diff = dja - djb
+        let adiff = if diff < 0.0 { 0.0 - diff } else { diff }
+        let sa = if dja < 0.0 { 0.0 - dja } else { dja }
+        let sb = if djb < 0.0 { 0.0 - djb } else { djb }
+        if adiff > 1.0e-8 * (sa + sb + 1.0) {
+          // union(i, j)
+          let mut ra = i
+          while parent[ra] != ra {
+            ra = parent[ra]
+          }
+          let mut rb = j
+          while parent[rb] != rb {
+            rb = parent[rb]
+          }
+          if ra != rb {
+            parent[ra] = rb
+          }
+        }
+      }
+    }
+    // population update: group-wise / single-dimension / contraction moves
+    let dgf = @math.exp(0.0 - evaluations.to_double() / 2500.0)
+    for i in 0..<pop_size {
+      if evaluations + 1 > max_evals {
+        break
+      }
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        cand.push(pop[i][d])
+      }
+      if r1 < 0.75 {
+        // group-wise move: differential + best-pull + jitter restricted to
+        // one detected linkage group
+        let i0 = (RNG::next(current_rng) * dim.to_double()).to_int() % dim
+        let mut root = i0
+        while parent[root] != root {
+          root = parent[root]
+        }
+        let xa = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let mut xb = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        if xb == xa {
+          xb = (xb + 1) % pop_size
+        }
+        for d in 0..<dim {
+          let mut rd = d
+          while parent[rd] != rd {
+            rd = parent[rd]
+          }
+          if rd == root {
+            let base = pop[i][d] +
+              0.65 * (pop[xa][d] - pop[xb][d]) +
+              0.5 * dgf * (best_pos[d] - pop[i][d])
+            let u1 = RNG::next(current_rng)
+            let u2 = RNG::next(current_rng)
+            let z = box_muller(u1, u2)
+            cand[d] = dg2_clip(base + z * span * 0.08 * dgf, bounds)
+          }
+        }
+      } else if r1 < 0.85 {
+        // single-dimension refinement for an independent coordinate
+        let d0 = (RNG::next(current_rng) * dim.to_double()).to_int() % dim
+        let u1 = RNG::next(current_rng)
+        let u2 = RNG::next(current_rng)
+        let z = box_muller(u1, u2)
+        cand[d0] = dg2_clip(pop[i][d0] + z * span * 0.10 * dgf * dgf, bounds)
+      } else {
+        // global contraction with jitter
+        for d in 0..<dim {
+          let u1 = RNG::next(current_rng)
+          let u2 = RNG::next(current_rng)
+          let z = box_muller(u1, u2)
+          let v = best_pos[d] +
+            0.55 * dgf * (pop[i][d] - best_pos[d]) +
+            z * span * 0.05 * dgf
+          cand[d] = dg2_clip(v, bounds)
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      consumed = consumed + 1
+      if fv < fits[i] {
+        pop[i] = cand
+        fits[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(cand[d])
+          }
+        }
+      }
+    }
+    consumed_total = consumed
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

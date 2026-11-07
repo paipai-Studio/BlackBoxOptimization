@@ -2314,6 +2314,142 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       multi_directional_search(make_mds_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "CC",
+    run: (e, d, b, r, f) => {
+      cooperative_coevolution(make_cc_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "MGA",
+    run: (e, d, b, r, f) => {
+      micro_genetic_algorithm(make_mga_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "CellGA",
+    run: (e, d, b, r, f) => {
+      cellular_genetic_algorithm(make_cellga_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "GOMEA",
+    run: (e, d, b, r, f) => {
+      gene_pool_optimal_mixing(make_gomea_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "SPSO",
+    run: (e, d, b, r, f) => species_pso(make_spso_config(e, d, b, 25), f, r),
+  })
+  entries.push(AlgoEntry::{
+    name: "OSA",
+    run: (e, d, b, r, f) => {
+      ostrich_optimization(make_osa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "BB",
+    run: (e, d, b, r, f) => barzilai_borwein(make_bb_config(e, d, b, 25), f, r),
+  })
+  entries.push(AlgoEntry::{
+    name: "Anderson",
+    run: (e, d, b, r, f) => {
+      anderson_acceleration(make_anderson_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "GWSO",
+    run: (e, d, b, r, f) => {
+      great_white_shark_optimizer(make_gwso_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "RSM",
+    run: (e, d, b, r, f) => {
+      response_surface_methodology(make_rsm_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "PC",
+    run: (e, d, b, r, f) => {
+      probability_collectives(make_pc_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "WMA",
+    run: (e, d, b, r, f) => {
+      woodpecker_mating_algorithm(make_wma_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "BMDA",
+    run: (e, d, b, r, f) => {
+      bivariate_marginal_distribution_algorithm(
+        make_bmda_config(e, d, b, 25),
+        f,
+        r,
+      )
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "PGSA",
+    run: (e, d, b, r, f) => {
+      plant_growth_simulation(make_pgsa_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "Crowd",
+    run: (e, d, b, r, f) => {
+      crowding_genetic_algorithm(make_crowd_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "PBT",
+    run: (e, d, b, r, f) => {
+      population_based_training(make_pbt_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "FS",
+    run: (e, d, b, r, f) => fitness_sharing(make_fs_config(e, d, b, 25), f, r),
+  })
+  entries.push(AlgoEntry::{
+    name: "Bandit",
+    run: (e, d, b, r, f) => {
+      bandit_allocation_algorithm(make_bandit_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "LA",
+    run: (e, d, b, r, f) => {
+      learning_automata_algorithm(make_la_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "RBR",
+    run: (e, d, b, r, f) => {
+      rank_based_replacement_algorithm(make_rbr_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "OGA",
+    run: (e, d, b, r, f) => {
+      orthogonal_genetic_algorithm(make_oga_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "G3",
+    run: (e, d, b, r, f) => {
+      generalized_generation_gap_pcx(make_g3_config(e, d, b, 25), f, r)
+    },
+  })
+  entries.push(AlgoEntry::{
+    name: "DG2",
+    run: (e, d, b, r, f) => {
+      differential_grouping_decomposition(make_dg2_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

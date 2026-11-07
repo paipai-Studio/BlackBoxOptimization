@@ -2291,14 +2291,29 @@ test "WSO produces valid result" {
 }
 
 ///|
-test "WSO improves with more evaluations" {
-  let config1 = @lib.make_wso_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
-  let rng1 = @lib.make_rng(42.0)
-  let result1 = @lib.white_shark_optimizer(config1, @lib.sphere_function, rng1)
+test "RSM finds good solution on sphere" {
+  let config = @lib.make_rsm_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.response_surface_methodology(
+    config, @lib.sphere_function, rng,
+  )
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
 
-  let config2 = @lib.make_wso_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+///|
+test "RSM improves with more evaluations" {
+  let config1 = @lib.make_rsm_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.response_surface_methodology(
+    config1, @lib.sphere_function, rng1,
+  )
+
+  let config2 = @lib.make_rsm_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng2 = @lib.make_rng(42.0)
-  let result2 = @lib.white_shark_optimizer(config2, @lib.sphere_function, rng2)
+  let result2 = @lib.response_surface_methodology(
+    config2, @lib.sphere_function, rng2,
+  )
 
   assert_true(result2.best_value <= result1.best_value)
 }
@@ -9170,6 +9185,605 @@ test "MDS improves with more evaluations" {
   let config2 = @lib.make_mds_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
   let rng2 = @lib.make_rng(42.0)
   let result2 = @lib.multi_directional_search(
+    config2, @lib.sphere_function, rng2,
+  )
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+///|
+test "CC finds good solution on sphere" {
+  let config = @lib.make_cc_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.cooperative_coevolution(config, @lib.sphere_function, rng)
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "CC improves with more evaluations" {
+  let config1 = @lib.make_cc_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.cooperative_coevolution(
+    config1, @lib.sphere_function, rng1,
+  )
+
+  let config2 = @lib.make_cc_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.cooperative_coevolution(
+    config2, @lib.sphere_function, rng2,
+  )
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+///|
+test "MGA finds good solution on sphere" {
+  let config = @lib.make_mga_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.micro_genetic_algorithm(config, @lib.sphere_function, rng)
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "MGA improves with more evaluations" {
+  let config1 = @lib.make_mga_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.micro_genetic_algorithm(
+    config1, @lib.sphere_function, rng1,
+  )
+
+  let config2 = @lib.make_mga_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.micro_genetic_algorithm(
+    config2, @lib.sphere_function, rng2,
+  )
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+///|
+test "CellGA finds good solution on sphere" {
+  let config = @lib.make_cellga_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.cellular_genetic_algorithm(
+    config, @lib.sphere_function, rng,
+  )
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "CellGA improves with more evaluations" {
+  let config1 = @lib.make_cellga_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.cellular_genetic_algorithm(
+    config1, @lib.sphere_function, rng1,
+  )
+
+  let config2 = @lib.make_cellga_config(
+    5000,
+    3,
+    @lib.make_bounds(-5.0, 5.0),
+    25,
+  )
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.cellular_genetic_algorithm(
+    config2, @lib.sphere_function, rng2,
+  )
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+///|
+test "GOMEA finds good solution on sphere" {
+  let config = @lib.make_gomea_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.gene_pool_optimal_mixing(config, @lib.sphere_function, rng)
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "GOMEA improves with more evaluations" {
+  let config1 = @lib.make_gomea_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.gene_pool_optimal_mixing(
+    config1, @lib.sphere_function, rng1,
+  )
+
+  let config2 = @lib.make_gomea_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.gene_pool_optimal_mixing(
+    config2, @lib.sphere_function, rng2,
+  )
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+///|
+test "SPSO finds good solution on sphere" {
+  let config = @lib.make_spso_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.species_pso(config, @lib.sphere_function, rng)
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "SPSO improves with more evaluations" {
+  let config1 = @lib.make_spso_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.species_pso(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_spso_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.species_pso(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+///|
+test "OSA finds good solution on sphere" {
+  let config = @lib.make_osa_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.ostrich_optimization(config, @lib.sphere_function, rng)
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "OSA improves with more evaluations" {
+  let config1 = @lib.make_osa_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.ostrich_optimization(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_osa_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.ostrich_optimization(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+///|
+test "BB finds good solution on sphere" {
+  let config = @lib.make_bb_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.barzilai_borwein(config, @lib.sphere_function, rng)
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "BB improves with more evaluations" {
+  let config1 = @lib.make_bb_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.barzilai_borwein(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_bb_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.barzilai_borwein(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+///|
+test "Anderson finds good solution on sphere" {
+  let config = @lib.make_anderson_config(
+    500,
+    3,
+    @lib.make_bounds(-5.0, 5.0),
+    25,
+  )
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.anderson_acceleration(config, @lib.sphere_function, rng)
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "Anderson improves with more evaluations" {
+  let config1 = @lib.make_anderson_config(
+    100,
+    3,
+    @lib.make_bounds(-5.0, 5.0),
+    25,
+  )
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.anderson_acceleration(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_anderson_config(
+    5000,
+    3,
+    @lib.make_bounds(-5.0, 5.0),
+    25,
+  )
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.anderson_acceleration(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+///|
+test "GWSO finds good solution on sphere" {
+  let config = @lib.make_gwso_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.great_white_shark_optimizer(
+    config, @lib.sphere_function, rng,
+  )
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "GWSO improves with more evaluations" {
+  let config1 = @lib.make_gwso_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.great_white_shark_optimizer(
+    config1, @lib.sphere_function, rng1,
+  )
+
+  let config2 = @lib.make_gwso_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.great_white_shark_optimizer(
+    config2, @lib.sphere_function, rng2,
+  )
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+///|
+test "PC finds good solution on sphere" {
+  let config = @lib.make_pc_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.probability_collectives(config, @lib.sphere_function, rng)
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "PC improves with more evaluations" {
+  let config1 = @lib.make_pc_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.probability_collectives(
+    config1, @lib.sphere_function, rng1,
+  )
+
+  let config2 = @lib.make_pc_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.probability_collectives(
+    config2, @lib.sphere_function, rng2,
+  )
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+///|
+test "WMA finds good solution on sphere" {
+  let config = @lib.make_wma_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.woodpecker_mating_algorithm(
+    config, @lib.sphere_function, rng,
+  )
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "WMA improves with more evaluations" {
+  let config1 = @lib.make_wma_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.woodpecker_mating_algorithm(
+    config1, @lib.sphere_function, rng1,
+  )
+
+  let config2 = @lib.make_wma_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.woodpecker_mating_algorithm(
+    config2, @lib.sphere_function, rng2,
+  )
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+///|
+test "BMDA finds good solution on sphere" {
+  let config = @lib.make_bmda_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.bivariate_marginal_distribution_algorithm(
+    config, @lib.sphere_function, rng,
+  )
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "BMDA improves with more evaluations" {
+  let config1 = @lib.make_bmda_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.bivariate_marginal_distribution_algorithm(
+    config1, @lib.sphere_function, rng1,
+  )
+
+  let config2 = @lib.make_bmda_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.bivariate_marginal_distribution_algorithm(
+    config2, @lib.sphere_function, rng2,
+  )
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+///|
+test "PGSA finds good solution on sphere" {
+  let config = @lib.make_pgsa_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.plant_growth_simulation(config, @lib.sphere_function, rng)
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "PGSA improves with more evaluations" {
+  let config1 = @lib.make_pgsa_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.plant_growth_simulation(
+    config1, @lib.sphere_function, rng1,
+  )
+
+  let config2 = @lib.make_pgsa_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.plant_growth_simulation(
+    config2, @lib.sphere_function, rng2,
+  )
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+///|
+test "Crowd finds good solution on sphere" {
+  let config = @lib.make_crowd_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.crowding_genetic_algorithm(
+    config, @lib.sphere_function, rng,
+  )
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "Crowd improves with more evaluations" {
+  let config1 = @lib.make_crowd_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.crowding_genetic_algorithm(
+    config1, @lib.sphere_function, rng1,
+  )
+
+  let config2 = @lib.make_crowd_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.crowding_genetic_algorithm(
+    config2, @lib.sphere_function, rng2,
+  )
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+///|
+test "PBT finds good solution on sphere" {
+  let config = @lib.make_pbt_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.population_based_training(config, @lib.sphere_function, rng)
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "PBT improves with more evaluations" {
+  let config1 = @lib.make_pbt_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.population_based_training(
+    config1, @lib.sphere_function, rng1,
+  )
+
+  let config2 = @lib.make_pbt_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.population_based_training(
+    config2, @lib.sphere_function, rng2,
+  )
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+///|
+test "FS finds good solution on sphere" {
+  let config = @lib.make_fs_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.fitness_sharing(config, @lib.sphere_function, rng)
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "FS improves with more evaluations" {
+  let config1 = @lib.make_fs_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.fitness_sharing(config1, @lib.sphere_function, rng1)
+
+  let config2 = @lib.make_fs_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.fitness_sharing(config2, @lib.sphere_function, rng2)
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+///|
+test "Bandit finds good solution on sphere" {
+  let config = @lib.make_bandit_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.bandit_allocation_algorithm(
+    config, @lib.sphere_function, rng,
+  )
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "Bandit improves with more evaluations" {
+  let config1 = @lib.make_bandit_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.bandit_allocation_algorithm(
+    config1, @lib.sphere_function, rng1,
+  )
+
+  let config2 = @lib.make_bandit_config(
+    5000,
+    3,
+    @lib.make_bounds(-5.0, 5.0),
+    25,
+  )
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.bandit_allocation_algorithm(
+    config2, @lib.sphere_function, rng2,
+  )
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+///|
+test "LA finds good solution on sphere" {
+  let config = @lib.make_la_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.learning_automata_algorithm(
+    config, @lib.sphere_function, rng,
+  )
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "LA improves with more evaluations" {
+  let config1 = @lib.make_la_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.learning_automata_algorithm(
+    config1, @lib.sphere_function, rng1,
+  )
+
+  let config2 = @lib.make_la_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.learning_automata_algorithm(
+    config2, @lib.sphere_function, rng2,
+  )
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+///|
+test "RBR finds good solution on sphere" {
+  let config = @lib.make_rbr_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.rank_based_replacement_algorithm(
+    config, @lib.sphere_function, rng,
+  )
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "RBR improves with more evaluations" {
+  let config1 = @lib.make_rbr_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.rank_based_replacement_algorithm(
+    config1, @lib.sphere_function, rng1,
+  )
+
+  let config2 = @lib.make_rbr_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.rank_based_replacement_algorithm(
+    config2, @lib.sphere_function, rng2,
+  )
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+///|
+test "OGA finds good solution on sphere" {
+  let config = @lib.make_oga_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.orthogonal_genetic_algorithm(
+    config, @lib.sphere_function, rng,
+  )
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "OGA improves with more evaluations" {
+  let config1 = @lib.make_oga_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.orthogonal_genetic_algorithm(
+    config1, @lib.sphere_function, rng1,
+  )
+
+  let config2 = @lib.make_oga_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.orthogonal_genetic_algorithm(
+    config2, @lib.sphere_function, rng2,
+  )
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+///|
+test "G3 finds good solution on sphere" {
+  let config = @lib.make_g3_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.generalized_generation_gap_pcx(
+    config, @lib.sphere_function, rng,
+  )
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "G3 improves with more evaluations" {
+  let config1 = @lib.make_g3_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.generalized_generation_gap_pcx(
+    config1, @lib.sphere_function, rng1,
+  )
+
+  let config2 = @lib.make_g3_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.generalized_generation_gap_pcx(
+    config2, @lib.sphere_function, rng2,
+  )
+
+  assert_true(result2.best_value <= result1.best_value)
+}
+
+///|
+test "DG2 finds good solution on sphere" {
+  let config = @lib.make_dg2_config(500, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng = @lib.make_rng(42.0)
+  let result = @lib.differential_grouping_decomposition(
+    config, @lib.sphere_function, rng,
+  )
+  assert_true(result.evaluations > 0)
+  assert_true(result.best_value >= 0.0)
+}
+
+///|
+test "DG2 improves with more evaluations" {
+  let config1 = @lib.make_dg2_config(100, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng1 = @lib.make_rng(42.0)
+  let result1 = @lib.differential_grouping_decomposition(
+    config1, @lib.sphere_function, rng1,
+  )
+
+  let config2 = @lib.make_dg2_config(5000, 3, @lib.make_bounds(-5.0, 5.0), 25)
+  let rng2 = @lib.make_rng(42.0)
+  let result2 = @lib.differential_grouping_decomposition(
     config2, @lib.sphere_function, rng2,
   )
 
