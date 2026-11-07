@@ -2444,6 +2444,12 @@ pub fn default_algorithms() -> Array[AlgoEntry] {
       generalized_generation_gap_pcx(make_g3_config(e, d, b, 25), f, r)
     },
   })
+  entries.push(AlgoEntry::{
+    name: "DG2",
+    run: (e, d, b, r, f) => {
+      differential_grouping_decomposition(make_dg2_config(e, d, b, 25), f, r)
+    },
+  })
   entries
 }
 

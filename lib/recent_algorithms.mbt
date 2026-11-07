@@ -46419,3 +46419,242 @@ pub fn generalized_generation_gap_pcx(
     evaluations,
   }
 }
+
+// ===== DG2: differential grouping decomposition (2014) =====
+
+///|
+pub struct Dg2Config {
+  max_evaluations : Int32
+  dimension : Int32
+  bounds : Bounds
+  population_size : Int32
+}
+
+///|
+pub fn make_dg2_config(
+  max_evals : Int32,
+  dim : Int32,
+  b : Bounds,
+  pop_sz : Int32,
+) -> Dg2Config {
+  Dg2Config::{
+    max_evaluations: max_evals,
+    dimension: dim,
+    bounds: b,
+    population_size: pop_sz,
+  }
+}
+
+///|
+fn dg2_clip(v : Double, b : Bounds) -> Double {
+  let lo = if v < b.min { b.min } else { v }
+  if lo > b.max {
+    b.max
+  } else {
+    lo
+  }
+}
+
+///|
+/// Differential Grouping decomposition (Omidvar, Li, Yang & Yao 2014, IEEE
+/// TEVC; the automatic linkage-detection foundation of CC-based optimizers).
+/// Instead of the random permutation regrouping of CC, variable interactions
+/// are **detected by differential perturbation**: for a sampled coordinate
+/// pair (i, j) the change of f under perturbing j alone is compared against
+/// the change under perturbing i then j — a discrepancy beyond a relative
+/// tolerance marks the pair as non-separable and a union-find merges them
+/// into a linkage group (12 pairs probed every 15 generations, 3 evaluations
+/// each, around the incumbent best). The population then exploits the
+/// learned structure: group-wise moves apply a differential step, a pull to
+/// the global best and jitter **restricted to the group's dimensions**
+/// (other coordinates untouched — independent subspaces evolve separately),
+/// plus single-dimension refinement for independent coordinates and a
+/// global contraction. dgf = e^{-t/2500} scales the strides. All randomness
+/// depends only on evaluations already spent, so a larger budget is a strict
+/// continuation and the historical best is monotone.
+pub fn differential_grouping_decomposition(
+  config : Dg2Config,
+  f : (Array[Double]) -> Double,
+  rng : RNG,
+) -> OptimizationResult {
+  let dim = config.dimension
+  let bounds = config.bounds
+  let max_evals = config.max_evaluations
+  let current_rng = rng
+  let span = bounds.max - bounds.min
+  let pop_size = if config.population_size < 8 {
+    8
+  } else {
+    config.population_size
+  }
+  let delta = span * 0.01
+  let mut evaluations = 0
+
+  // union-find over dimensions (inline find, GOMEA-round pattern)
+  let parent : Array[Int32] = []
+  for i in 0..<dim {
+    parent.push(i)
+  }
+
+  let pop : Array[Array[Double]] = []
+  let fits : Array[Double] = []
+  let mut best_pos : Array[Double] = []
+  let mut best_val = 1.0e300
+  for _i in 0..<pop_size {
+    let x = random_solution(dim, bounds, current_rng)
+    let fv = evaluate(f, x)
+    evaluations = evaluations + 1
+    pop.push(x)
+    fits.push(fv)
+    if fv < best_val {
+      best_val = fv
+      best_pos = []
+      for d in 0..<dim {
+        best_pos.push(x[d])
+      }
+    }
+  }
+
+  let mut next_detect = 15 * pop_size
+  let mut consumed_total = 1
+  while evaluations < max_evals {
+    if consumed_total == 0 {
+      break
+    }
+    let mut consumed = 0
+    // detection batch: probe 12 random pairs around the incumbent best
+    if evaluations >= next_detect {
+      next_detect = next_detect + 15 * pop_size
+      for _k in 0..<12 {
+        if evaluations + 3 > max_evals {
+          break
+        }
+        let i = (RNG::next(current_rng) * dim.to_double()).to_int() % dim
+        let mut j = (RNG::next(current_rng) * dim.to_double()).to_int() % dim
+        if j == i {
+          j = (j + 1) % dim
+        }
+        let pij : Array[Double] = []
+        let pj : Array[Double] = []
+        for d in 0..<dim {
+          let vij = if d == i || d == j {
+            best_pos[d] + delta
+          } else {
+            best_pos[d]
+          }
+          pij.push(dg2_clip(vij, bounds))
+          let vj = if d == j { best_pos[d] + delta } else { best_pos[d] }
+          pj.push(dg2_clip(vj, bounds))
+        }
+        let fij = evaluate(f, pij)
+        let fj = evaluate(f, pj)
+        evaluations = evaluations + 2
+        consumed = consumed + 2
+        // non-separability: the effect of perturbing j must differ once i
+        // has been perturbed
+        let dja = fij - best_val
+        let djb = fj - best_val
+        let diff = dja - djb
+        let adiff = if diff < 0.0 { 0.0 - diff } else { diff }
+        let sa = if dja < 0.0 { 0.0 - dja } else { dja }
+        let sb = if djb < 0.0 { 0.0 - djb } else { djb }
+        if adiff > 1.0e-8 * (sa + sb + 1.0) {
+          // union(i, j)
+          let mut ra = i
+          while parent[ra] != ra {
+            ra = parent[ra]
+          }
+          let mut rb = j
+          while parent[rb] != rb {
+            rb = parent[rb]
+          }
+          if ra != rb {
+            parent[ra] = rb
+          }
+        }
+      }
+    }
+    // population update: group-wise / single-dimension / contraction moves
+    let dgf = @math.exp(0.0 - evaluations.to_double() / 2500.0)
+    for i in 0..<pop_size {
+      if evaluations + 1 > max_evals {
+        break
+      }
+      let r1 = RNG::next(current_rng)
+      let cand : Array[Double] = []
+      for d in 0..<dim {
+        cand.push(pop[i][d])
+      }
+      if r1 < 0.75 {
+        // group-wise move: differential + best-pull + jitter restricted to
+        // one detected linkage group
+        let i0 = (RNG::next(current_rng) * dim.to_double()).to_int() % dim
+        let mut root = i0
+        while parent[root] != root {
+          root = parent[root]
+        }
+        let xa = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        let mut xb = (RNG::next(current_rng) * pop_size.to_double()).to_int() %
+          pop_size
+        if xb == xa {
+          xb = (xb + 1) % pop_size
+        }
+        for d in 0..<dim {
+          let mut rd = d
+          while parent[rd] != rd {
+            rd = parent[rd]
+          }
+          if rd == root {
+            let base = pop[i][d] +
+              0.65 * (pop[xa][d] - pop[xb][d]) +
+              0.5 * dgf * (best_pos[d] - pop[i][d])
+            let u1 = RNG::next(current_rng)
+            let u2 = RNG::next(current_rng)
+            let z = box_muller(u1, u2)
+            cand[d] = dg2_clip(base + z * span * 0.08 * dgf, bounds)
+          }
+        }
+      } else if r1 < 0.85 {
+        // single-dimension refinement for an independent coordinate
+        let d0 = (RNG::next(current_rng) * dim.to_double()).to_int() % dim
+        let u1 = RNG::next(current_rng)
+        let u2 = RNG::next(current_rng)
+        let z = box_muller(u1, u2)
+        cand[d0] = dg2_clip(pop[i][d0] + z * span * 0.10 * dgf * dgf, bounds)
+      } else {
+        // global contraction with jitter
+        for d in 0..<dim {
+          let u1 = RNG::next(current_rng)
+          let u2 = RNG::next(current_rng)
+          let z = box_muller(u1, u2)
+          let v = best_pos[d] +
+            0.55 * dgf * (pop[i][d] - best_pos[d]) +
+            z * span * 0.05 * dgf
+          cand[d] = dg2_clip(v, bounds)
+        }
+      }
+      let fv = evaluate(f, cand)
+      evaluations = evaluations + 1
+      consumed = consumed + 1
+      if fv < fits[i] {
+        pop[i] = cand
+        fits[i] = fv
+        if fv < best_val {
+          best_val = fv
+          best_pos = []
+          for d in 0..<dim {
+            best_pos.push(cand[d])
+          }
+        }
+      }
+    }
+    consumed_total = consumed
+  }
+
+  OptimizationResult::{
+    best_solution: best_pos,
+    best_value: best_val,
+    evaluations,
+  }
+}

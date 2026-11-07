@@ -1,10 +1,10 @@
 # BlackBoxOptimization
 
-基于 MoonBit 实现的黑盒优化算法框架，支持 366 种经典优化算法，提供统一的接口和基准测试框架。
+基于 MoonBit 实现的黑盒优化算法框架，支持 367 种经典优化算法，提供统一的接口和基准测试框架。
 
 ## 算法分类
 
-本框架实现了 **366 种**黑盒优化算法，按设计灵感和机制分为以下类别：
+本框架实现了 **367 种**黑盒优化算法，按设计灵感和机制分为以下类别：
 
 ### 🔍 单点搜索算法
 最简单的优化策略，从单个初始解出发，通过迭代改进逐步逼近最优值。
@@ -91,6 +91,7 @@
 | 保序替换优化算法 | RBR | **排名链保序插入替换**（库内唯一写入目标由排名链决定）——子代（无论优于或劣于生成者）按排名位次插入，替换「被它压过的最优更差者」（fit > fv 中 fit 最小者、且**仅限排名后半个体**），排名链每次插入后保持有序；**降级迁移语义**：劣于生成者的子代不被贪心拒绝而是迁移到它仍能胜过的种群最差端，解开大值域多峰地形上贪心接受跨波谷必被拒的锁死（Schwefel 余弦谷教训）；区别于 NS 的固定淘汰全局最差、ExtO 的最差三名连带雪崩、TGA 的最差十分之一嫁接、Crowd 的空间最近邻竞争、PGSA 的池容量淘汰——被压者是**排名相邻的劣者**且生成者自身也可能被压；三行为为锦标赛优者差分探索（42%，随机拉力 1.2·r2·rbf + 差分踢 1.0 + 抖动 span·0.11·rbf）/ 精细抖动（30%，span·0.05·rbf²）/ 最优-自身线段采样收缩（28%，位置级传送语义） (1975) |
 | 正交遗传算法 | OGA | **正交阵列驱动的系统组合交叉**（库内唯一试验设计算子）——初始种群由**因子等级量化**生成（每维均匀离散为 N 级、个体 i 在维 d 取等级 (i+d) mod N 的拉丁方覆盖，每因子每等级恰好放置一次），交叉用 **L16(2^15) 正交阵列**（Sylvester Hadamard 构造，任意两列组合 (1,1)/(1,2)/(2,1)/(2,2) 各出现 4 次）驱动双亲逐维继承：16 次评价代表 2^dim 全因子组合并平衡全部两因子交互、取最优子代存活——区别于全部算术交叉（RGA 的 SBX、CHC 的连线外推、GOMEA 的基因块移植、MGA 的 BLX）与随机均匀交叉；子代 15% 维度附加高斯抖动防离散重组格点塌缩停滞（σ=span·0.10·e^{-t/2500}），每代 old ∪ children 合并精英重建种群 (2001) |
 | 代间隙父中心遗传算法 | G3 | **父中心交叉（PCX）**（库内唯一 parent-centric 算子）——每代主亲代按 66% 精英 / 34% 随机选择，两个互异参考成员提供均值，两个子代沿「主亲代 − 参考均值」方向**围绕主亲代**生成（σ_ξ=0.1·|D| 方向项 + 逐维高斯 σ_η=0.1·|D| 噪声、span·0.007 噪声地板防全群塌缩）——子代探索精英亲代的邻域而非配对中心内插（SBX/BLX）、基因块移植（GOMEA）或连线外推（CHC），交叉家族与库内全部算术/离散交叉正交；子代仅当优于最差成员才替换（代间隙竞争语义，劣子代不污染种群）；方向项随种群收敛自适应缩放无需步长调度 (2003) |
+| 差分分组分解 | DG2 | **差分扰动自动检测变量耦合**（CC 分治框架的检测升级：随机置换分组 → 因果扰动实验分组）——每 15 代采样 12 个坐标对，比较「单独扰动 j 的 f 变化」与「先扰动 i 再扰动 j 的 f 变化」，差异超相对容差判非可分、并查集聚合成链接组；**组内联合移动**（75%：差分 + 最优拉力 + 抖动**仅限组的维度**、其余坐标不动——独立子空间各自进化）+ 10% 单维精修 + 15% 全局收缩——区别于 CC 的随机分组每 8 轮重排与 GOMEA 的 Pearson 统计相关分组，耦合判据来自**因果扰动实验**而非统计相关或随机置换 (2014) |
 | 藤壶交配优化 | BMO | soft 双亲重组 / hard 与 best 交配 (2018) |
 | 模因算法 | Memetic | SBX-GA 主体 + Lamarckian 局部精修 (1989) |
 | 自适应差分进化 JADE | JADE | current-to-pbest + 外部档案 + Lehmer 自适应 (2009) |
@@ -106,7 +107,7 @@
 | ICA | `population_size`, `imperialist_count`, `assimilation_rate`, `revolution_rate` | 25, 3, 0.3, 0.3 |
 | BBO | `population_size`, `mutation_rate` | 25, 0.01 |
 | BSA | `population_size` | 25 |
-| CLONALG / OAIN / CA / CHIO / SaDE / CoDE / ODE / JADE / RGA / Memetic / MFA / BMO / CHC / CC / MGA / CellGA / GOMEA / SPSO / OSA / WMA / Crowd / PBT / FS / LA / RBR / OGA / G3 | 仅需 `population_size` | 25 |
+| CLONALG / OAIN / CA / CHIO / SaDE / CoDE / ODE / JADE / RGA / Memetic / MFA / BMO / CHC / CC / MGA / CellGA / GOMEA / SPSO / OSA / WMA / Crowd / PBT / FS / LA / RBR / OGA / G3 / DG2 | 仅需 `population_size` | 25 |
 
 ### 🐝 群体智能算法
 本框架最大的算法类别，模拟自然界生物群体行为进行协同搜索。
@@ -599,7 +600,7 @@ moon run main
 ### 运行测试
 
 ```bash
-# 运行所有测试（753 个测试用例）
+# 运行所有测试（755 个测试用例）
 moon test
 
 # 代码检查
@@ -1058,7 +1059,7 @@ let results = @lib.run_benchmark_at_evals(f, "Sphere", dim, bounds, 0.0, 5000, r
 |------|----------|------|
 | **🔍 单点搜索** | 随机搜索、爬山法、模拟退火、SPSA、盆地跳跃、BAS、PTO、DAnl、SQA、PA、Demon、WL、ASA、MLSL | 简单、易于实现，适合低维问题 |
 | **🔧 局部搜索** | 禁忌搜索、引导局部搜索、大洪水、变邻域、阈值接受 | 强化局部开发，避免陷入局部最优 |
-| **🧬 进化算法** | DE、GA、jDE、SHADE、LSHADE、JADE、SaDE、Memetic、CLONALG、OAIN、ICA、BBO、BSA、CHC、CC、MGA、CellGA、GOMEA、SPSO、OSA、WMA、Crowd、PBT、FS、LA、RBR、OGA、G3 | 基于种群进化，鲁棒性好 |
+| **🧬 进化算法** | DE、GA、jDE、SHADE、LSHADE、JADE、SaDE、Memetic、CLONALG、OAIN、ICA、BBO、BSA、CHC、CC、MGA、CellGA、GOMEA、SPSO、OSA、WMA、Crowd、PBT、FS、LA、RBR、OGA、G3、DG2 | 基于种群进化，鲁棒性好 |
 | **🐝 群体智能** | PSO、萤火虫、蚁群、蜂群、灰狼、鲸群、蝙蝠、和声、麻雀搜索、哈里斯鹰、GOA、SOA、CSO、GTO、SMA、AO、ChOA、DO、ZOA、CPSO、LPSO、QPSO、UPSO、ACOR、COOT、DOA、STOA、GKSO、FLA、HO、NMRA、FFO、EPO、CPO、MTBO、CryStAl、NOA、ESOA、MOA、AOS、MA、SSO、SLnO、FOA、SFO、NNA、PBO、FSS、CFO、CGO、CDO、ILS、SCE、GRASP、BO、FSA、SMO、HLO、FDA、CRO、AAA、VSA、VPL、WEO、SNS、TCO、RO、GbSA、BA、CO、CSS、MBA、PCA、IMO、EMA、WCO、AEFA、OIO、LAPO、FGBO、EA、LAHC、HuS、RRT、NRO、HTS、PGO、IWD、RFD、LSA、SS、OBA、APO、HBO、SAO、BRO、EFO、GBMO、DSA、GSK、ALNS、SGO、ASO、BCMO、MKE、RFO、SAR、ChSA、RDA、SqSA、Puma、StMO、SFOA、ABO、Gannet、Narwhal、Serval、ChSO、PR、CrSO、JS、WSA、SeHO、WBO、OWL、RRO、SaFO、GPC、SSD、FDO、CFA、OPA、APuf、WPA、Racc、Monkey、BSwA、TGA、PPA、HBMO、Crayfish、QSA、Starfish、TBO、Lyrebird、SEOA、GFO、DEO、ManSA、EWA、GrSA、FrOA、ChRO、SPBO、CLPSO、ExtO、SOMA、SDS、DHO、GWSO、PGSA 等 | 基于群体行为，全局搜索能力强 |
 | **📐 确定性直接搜索** | Nelder-Mead、Hooke-Jeeves、Powell、Rosenbrock、CRS、DIRECT、BFGS、COBYLA、MADS、NEWUOA、MCS、PRAXIS、BOBYQA、GSS、Subplex、LBB、MTS、IFilt、CG、MDS、BB、Anderson、RSM、Bandit | 无需梯度（或数值梯度近似），适合不可导函数 |
 | **🧮 进化策略** | CMA-ES、ES、xNES、1+1ES、sepCMA | 协方差/步长自适应，适合病态问题 |
