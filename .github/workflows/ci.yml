@@ -2,14 +2,18 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, dev*]
   pull_request:
     branches: [main, master]
 
 jobs:
   check-build-test:
-    name: Check, Build & Test
+    name: Check, Build & Test (${{ matrix.target }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [wasm-gc, wasm, js, native]
     steps:
       - uses: actions/checkout@v5
 
@@ -26,11 +30,11 @@ jobs:
       - name: Check formatting
         run: moon fmt --check
 
-      - name: Moon check
-        run: moon check
+      - name: Moon check (${{ matrix.target }})
+        run: moon check --target ${{ matrix.target }}
 
-      - name: Moon build
-        run: moon build
+      - name: Moon build (${{ matrix.target }})
+        run: moon build --target ${{ matrix.target }}
 
-      - name: Moon test
-        run: moon test
+      - name: Moon test (${{ matrix.target }})
+        run: moon test --target ${{ matrix.target }}
