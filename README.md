@@ -577,7 +577,7 @@ BlackBoxOptimization/
 
 ### 环境要求
 
-- [MoonBit](https://moonbitlang.com/) 0.14.0+
+- [MoonBit](https://moonbitlang.com/) v0.10.0+（推荐最新工具链）
 
 ### 安装
 
@@ -611,9 +611,21 @@ moon check
 
 ### 基本用法
 
-```moonbit
-import lib
+完整示例包含两个文件，可直接运行：
 
+**moon.pkg**（声明依赖）:
+
+```moonbit
+import {
+  "IvanAXu/BlackBoxOptimization/lib",
+}
+
+pkgtype(kind: "executable")
+```
+
+**main.mbt**（主程序）:
+
+```moonbit
 fn main {
   // 1. 定义问题
   let dim = 3
@@ -640,6 +652,8 @@ fn main {
   println("评估次数: \{result.evaluations}")
 }
 ```
+
+运行方式：`moon run .`
 
 ### 使用不同算法
 
